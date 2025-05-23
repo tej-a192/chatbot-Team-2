@@ -1,0 +1,610 @@
+{
+  "edges": [
+    {
+      "from": "CUDA_Toolkit_Installation",
+      "relationship": "subtopic",
+      "to": "cuDNN_Download_and_Install"
+    },
+    {
+      "from": "Neural_Networks",
+      "relationship": "subtopic",
+      "to": "Layers"
+    },
+    {
+      "from": "Data Transformations",
+      "relationship": "subtopic",
+      "to": "shuffle()"
+    },
+    {
+      "from": "MLP",
+      "relationship": "depends_on",
+      "to": "Activation_Functions"
+    },
+    {
+      "from": "Machine Learning Basics",
+      "relationship": "related_to",
+      "to": "TensorFlow Overview"
+    },
+    {
+      "from": "Dataset",
+      "relationship": "subtopic",
+      "to": "Titanic_Dataset"
+    },
+    {
+      "from": "Neural Networks and Deep Learning",
+      "relationship": "related_to",
+      "to": "Deep Learning Libraries"
+    },
+    {
+      "from": "cuDNN_Download_and_Install",
+      "relationship": "subtopic",
+      "to": "Environment_Variables_Configuration"
+    },
+    {
+      "from": "Layers",
+      "relationship": "subtopic",
+      "to": "Input_Layer"
+    },
+    {
+      "from": "Machine Learning Environment Setup",
+      "relationship": "has_subtopic",
+      "to": "TensorFlow Testing"
+    },
+    {
+      "from": "TensorFlow Installation",
+      "relationship": "depends_on",
+      "to": "PyCharm Configuration"
+    },
+    {
+      "from": "MLP",
+      "relationship": "subtopic",
+      "to": "Neural_Networks"
+    },
+    {
+      "from": "TensorFlow Data API",
+      "relationship": "related_to",
+      "to": "tf.data.Dataset"
+    },
+    {
+      "from": "Neural Networks and Deep Learning",
+      "relationship": "contains",
+      "to": "Artificial Neural Networks"
+    },
+    {
+      "from": "Neural Networks and Deep Learning",
+      "relationship": "contains",
+      "to": "Keras"
+    },
+    {
+      "from": "TensorFlow Data API",
+      "relationship": "has_subtopic",
+      "to": "Data Transformations"
+    },
+    {
+      "from": "Activation_Functions",
+      "relationship": "related_to",
+      "to": "Multi-Class_Classification"
+    },
+    {
+      "from": "TensorFlow",
+      "relationship": "subtopic",
+      "to": "Introduction_to_TensorFlow"
+    },
+    {
+      "from": "MNIST Dataset Training",
+      "relationship": "has_subtopic",
+      "to": "Environment Configuration"
+    },
+    {
+      "from": "Machine_Learning_Setup",
+      "relationship": "subtopic",
+      "to": "Tensorflow_Installation"
+    },
+    {
+      "from": "Layers",
+      "relationship": "subtopic",
+      "to": "Hidden_Layers"
+    },
+    {
+      "from": "MNIST Dataset Training",
+      "relationship": "has_subtopic",
+      "to": "Code Implementation"
+    },
+    {
+      "from": "PyCharm Configuration",
+      "relationship": "leads_to",
+      "to": "TensorFlow Testing"
+    },
+    {
+      "from": "Transformations",
+      "relationship": "subtopic",
+      "to": "Chaining_Transformations"
+    },
+    {
+      "from": "Data Transformations",
+      "relationship": "subtopic",
+      "to": "filter()"
+    },
+    {
+      "from": "Machine Learning Environment Setup",
+      "relationship": "has_subtopic",
+      "to": "TensorFlow Installation"
+    },
+    {
+      "from": "Transformations",
+      "relationship": "subtopic",
+      "to": "shuffle_method"
+    },
+    {
+      "from": "Data_API",
+      "relationship": "depends_on",
+      "to": "Dataset_Concept"
+    },
+    {
+      "from": "Model Construction",
+      "relationship": "subtopic",
+      "to": "Training Process"
+    },
+    {
+      "from": "TensorFlow",
+      "relationship": "subtopic",
+      "to": "Data_Visualization"
+    },
+    {
+      "from": "MLPs with Keras",
+      "relationship": "uses",
+      "to": "Backpropagation"
+    },
+    {
+      "from": "Transformations",
+      "relationship": "subtopic",
+      "to": "map_method"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "depends_on",
+      "to": "MLP"
+    },
+    {
+      "from": "Data Preparation",
+      "relationship": "depends_on",
+      "to": "Model Construction"
+    },
+    {
+      "from": "Data_API",
+      "relationship": "subtopic",
+      "to": "from_tensor_slices"
+    },
+    {
+      "from": "Layers",
+      "relationship": "subtopic",
+      "to": "Output_Layer"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "depends_on",
+      "to": "Dataset"
+    },
+    {
+      "from": "Data Transformations",
+      "relationship": "subtopic",
+      "to": "map()"
+    },
+    {
+      "from": "Transformations",
+      "relationship": "subtopic",
+      "to": "filter_method"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "TensorFlow"
+    },
+    {
+      "from": "Visual_Studio_Installation",
+      "relationship": "depends_on",
+      "to": "CUDA_Toolkit_Installation"
+    },
+    {
+      "from": "Keras",
+      "relationship": "depends_on",
+      "to": "MLPs with Keras"
+    },
+    {
+      "from": "Machine Learning Environment Setup",
+      "relationship": "has_subtopic",
+      "to": "PyCharm Configuration"
+    },
+    {
+      "from": "Machine Learning Basics",
+      "relationship": "depends_on",
+      "to": "Data Loading and Preprocessing"
+    },
+    {
+      "from": "Activation_Functions",
+      "relationship": "related_to",
+      "to": "Regression_Problem"
+    },
+    {
+      "from": "Activation_Functions",
+      "relationship": "related_to",
+      "to": "Binary_Classification"
+    },
+    {
+      "from": "TensorFlow",
+      "relationship": "subtopic",
+      "to": "TensorFlow_Features"
+    },
+    {
+      "from": "Data Loading and Preprocessing",
+      "relationship": "subtopic",
+      "to": "TensorFlow Data API"
+    },
+    {
+      "from": "MLPs with Keras",
+      "relationship": "contains",
+      "to": "Multi-Layer Perceptron (MLP)"
+    },
+    {
+      "from": "TensorFlow",
+      "relationship": "subtopic",
+      "to": "Installing_TensorFlow_2"
+    }
+  ],
+  "nodes": [
+    {
+      "description": "Overview of artificial neural networks and deep learning concepts",
+      "id": "Neural Networks and Deep Learning",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Information processing paradigm inspired by biological nervous systems",
+      "id": "Artificial Neural Networks",
+      "parent": "Neural Networks and Deep Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Python library for creating deep learning models built on TensorFlow, Theano, etc.",
+      "id": "Keras",
+      "parent": "Neural Networks and Deep Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Libraries like Theano, TensorFlow, Caffe, Mxnet supporting deep learning",
+      "id": "Deep Learning Libraries",
+      "parent": "Neural Networks and Deep Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Implementation of multi-layer perceptrons using the Keras library",
+      "id": "MLPs with Keras",
+      "parent": "Keras",
+      "type": "subnode"
+    },
+    {
+      "description": "Basic type of deep learning algorithm used for regression and classification problems",
+      "id": "Multi-Layer Perceptron (MLP)",
+      "parent": "MLPs with Keras",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning technique utilized by MLPs to train neural networks",
+      "id": "Backpropagation",
+      "parent": "MLPs with Keras",
+      "type": "subnode"
+    },
+    {
+      "description": "Field of study that uses algorithms to make predictions or decisions based on data.",
+      "id": "Machine_Learning",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Multi-layer Perceptron used for regression and classification problems.",
+      "id": "MLP",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Network of neurons arranged in layers to process data.",
+      "id": "Neural_Networks",
+      "parent": "MLP",
+      "type": "subnode"
+    },
+    {
+      "description": "Components of a neural network including input, hidden, and output layers.",
+      "id": "Layers",
+      "parent": "Neural_Networks",
+      "type": "subnode"
+    },
+    {
+      "description": "Layer that receives data from the dataset as inputs.",
+      "id": "Input_Layer",
+      "parent": "Layers",
+      "type": "subnode"
+    },
+    {
+      "description": "Intermediate layers between input and output, not directly exposed to input.",
+      "id": "Hidden_Layers",
+      "parent": "Layers",
+      "type": "subnode"
+    },
+    {
+      "description": "Final layer responsible for the outcome of predictions.",
+      "id": "Output_Layer",
+      "parent": "Layers",
+      "type": "subnode"
+    },
+    {
+      "description": "Functions used in neurons to introduce non-linearity and determine output values.",
+      "id": "Activation_Functions",
+      "parent": "MLP",
+      "type": "subnode"
+    },
+    {
+      "description": "Predicting continuous outcomes using a single output neuron without activation function.",
+      "id": "Regression_Problem",
+      "parent": "Activation_Functions",
+      "type": "subnode"
+    },
+    {
+      "description": "Classifying data into two categories using sigmoid activation for output neurons.",
+      "id": "Binary_Classification",
+      "parent": "Activation_Functions",
+      "type": "subnode"
+    },
+    {
+      "description": "Predicting multiple classes with softmax function in the output layer.",
+      "id": "Multi-Class_Classification",
+      "parent": "Activation_Functions",
+      "type": "subnode"
+    },
+    {
+      "description": "Collection of data used for training and testing machine learning models.",
+      "id": "Dataset",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Contains 891 samples with five variables including survival status, passenger class, age, and fare.",
+      "id": "Titanic_Dataset",
+      "parent": "Dataset",
+      "type": "subnode"
+    },
+    {
+      "description": "Introduction to fundamental concepts and techniques in machine learning",
+      "id": "Machine Learning Basics",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Process of preparing data for model training including splitting into inputs and outputs",
+      "id": "Data Preparation",
+      "parent": "Machine Learning Basics",
+      "type": "subnode"
+    },
+    {
+      "description": "Building a neural network model with layers such as dense and dropout",
+      "id": "Model Construction",
+      "parent": "Machine Learning Basics",
+      "type": "subnode"
+    },
+    {
+      "description": "Steps involved in training the machine learning model including compilation and evaluation",
+      "id": "Training Process",
+      "parent": "Machine Learning Basics",
+      "type": "subnode"
+    },
+    {
+      "description": "Introduction to TensorFlow, an open-source library for machine learning",
+      "id": "TensorFlow Overview",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Open-source library for machine learning and AI development by Google",
+      "id": "TensorFlow",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Overview of TensorFlow's purpose, features, and applications",
+      "id": "Introduction_to_TensorFlow",
+      "parent": "TensorFlow",
+      "type": "subnode"
+    },
+    {
+      "description": "Automatic differentiation, CNN, RNN, support for multiple machines and GPUs",
+      "id": "TensorFlow_Features",
+      "parent": "TensorFlow",
+      "type": "subnode"
+    },
+    {
+      "description": "Steps to install TensorFlow 2 on Windows including prerequisites and tools needed",
+      "id": "Installing_TensorFlow_2",
+      "parent": "TensorFlow",
+      "type": "subnode"
+    },
+    {
+      "description": "Support for data visualization using matplotlib",
+      "id": "Data_Visualization",
+      "parent": "TensorFlow",
+      "type": "subnode"
+    },
+    {
+      "description": "Setup process for machine learning environment",
+      "id": "Machine_Learning_Setup",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Instructions to download and install Microsoft Visual Studio",
+      "id": "Visual_Studio_Installation",
+      "parent": "Machine_Learning_Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Steps to install NVIDIA CUDA Toolkit including version check and downloading the correct version",
+      "id": "CUDA_Toolkit_Installation",
+      "parent": "Machine_Learning_Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Process of downloading, extracting, and installing cuDNN with specific folder replacement steps",
+      "id": "cuDNN_Download_and_Install",
+      "parent": "Machine_Learning_Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Configuration of environment variables for CUDA including adding bin path to PATH variable",
+      "id": "Environment_Variables_Configuration",
+      "parent": "cuDNN_Download_and_Install",
+      "type": "subnode"
+    },
+    {
+      "description": "Instructions on installing TensorFlow using Anaconda Prompt",
+      "id": "Tensorflow_Installation",
+      "parent": "Machine_Learning_Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Setting up the machine learning environment including TensorFlow and PyCharm.",
+      "id": "Machine Learning Environment Setup",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Installing TensorFlow with GPU support using Anaconda.",
+      "id": "TensorFlow Installation",
+      "parent": "Machine Learning Environment Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Configuring PyCharm for machine learning tasks.",
+      "id": "PyCharm Configuration",
+      "parent": "Machine Learning Environment Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Testing TensorFlow installation with GPU support in PyCharm.",
+      "id": "TensorFlow Testing",
+      "parent": "Machine Learning Environment Setup",
+      "type": "subnode"
+    },
+    {
+      "description": "Training a neural network on the MNIST dataset using PyTorch.",
+      "id": "MNIST Dataset Training",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Configuring the environment for training with PyTorch and CUDA.",
+      "id": "Environment Configuration",
+      "parent": "MNIST Dataset Training",
+      "type": "subnode"
+    },
+    {
+      "description": "Implementing code to train a neural network on MNIST dataset.",
+      "id": "Code Implementation",
+      "parent": "MNIST Dataset Training",
+      "type": "subnode"
+    },
+    {
+      "description": "Techniques for loading and preprocessing data in TensorFlow.",
+      "id": "Data Loading and Preprocessing",
+      "parent": "Machine Learning Basics",
+      "type": "subnode"
+    },
+    {
+      "description": "API for handling large datasets efficiently with TensorFlow.",
+      "id": "TensorFlow Data API",
+      "parent": "Data Loading and Preprocessing",
+      "type": "subnode"
+    },
+    {
+      "description": "Class representing a sequence of elements and allows for transformations.",
+      "id": "tf.data.Dataset",
+      "parent": "TensorFlow Data API",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to create dataset from tensor slices.",
+      "id": "from_tensor_slices()",
+      "parent": "tf.data.Dataset",
+      "type": "subnode"
+    },
+    {
+      "description": "Various methods for transforming data within a dataset.",
+      "id": "Data Transformations",
+      "parent": "TensorFlow Data API",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to apply mapping function on elements of the dataset.",
+      "id": "map()",
+      "parent": "Data Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to filter elements based on a predicate function.",
+      "id": "filter()",
+      "parent": "Data Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to shuffle the dataset with specified buffer size and seed.",
+      "id": "shuffle()",
+      "parent": "Data Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "API for handling data in TensorFlow",
+      "id": "Data_API",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Represents a sequence of data items",
+      "id": "Dataset_Concept",
+      "parent": "Data_API",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to create tf.data.Dataset from tensor slices",
+      "id": "from_tensor_slices",
+      "parent": "Data_API",
+      "type": "subnode"
+    },
+    {
+      "description": "Operations that can be applied on datasets",
+      "id": "Transformations",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Applying multiple transformations in sequence",
+      "id": "Chaining_Transformations",
+      "parent": "Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to transform dataset items",
+      "id": "map_method",
+      "parent": "Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "Method to filter dataset items based on conditions",
+      "id": "filter_method",
+      "parent": "Transformations",
+      "type": "subnode"
+    },
+    {
+      "description": "Shuffles the elements of a dataset",
+      "id": "shuffle_method",
+      "parent": "Transformations",
+      "type": "subnode"
+    }
+  ]
+}
