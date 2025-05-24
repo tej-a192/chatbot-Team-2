@@ -12,3 +12,19 @@ ollama # Keep if using Ollama embeddings
 python-pptx # Added for PPTX parsing
 uuid
 langchain-community
+pdfplumber
+fitz # PyMuPDF for PDF parsing
+pytesseract
+nltk
+spacy
+spacy-layout
+pandas
+numpy
+re
+typing
+PIL # For image processing
+pytesseract # OCR
+pillow
+
+
+

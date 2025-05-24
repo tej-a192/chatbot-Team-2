@@ -13,6 +13,7 @@ sys.path.insert(0, server_dir) # Ensure rag_service can be imported
 from rag_service import config
 import rag_service.file_parser as file_parser
 import rag_service.faiss_handler as faiss_handler
+from rag_service import ai_core
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s')
@@ -116,36 +117,72 @@ def add_document():
         return create_error_response(f"File not found at path: {file_path}", 404)
 
     try:
-        # 1. Parse File
-        text_content = file_parser.parse_file(file_path)
-        if text_content is None:
-            logger.warning(f"Skipping embedding for {original_name}: File type not supported or parsing failed.")
-            return jsonify({"message": f"File type of '{original_name}' not supported for RAG or parsing failed.", "filename": original_name, "status": "skipped"}), 200
+        logger.info(f"Initialising [ process_pdf_for_embeddings ] for : {original_name} for user: {user_id}")
 
-        if not text_content.strip():
-            logger.warning(f"Skipping embedding for {original_name}: No text content found after parsing.")
-            return jsonify({"message": f"No text content extracted from '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
+        final_chunks_with_embeddings = ai_core.process_document_for_embeddings(file_path, original_name, user_id)
 
-        # 2. Chunk Text
-        documents = file_parser.chunk_text(text_content, original_name, user_id)
-        if not documents:
-            logger.warning(f"No chunks created for {original_name}. Skipping add.")
-            return jsonify({"message": f"No text chunks generated for '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
-
-        # 3. Add to Index (faiss_handler now handles dimension checks/recreation)
-        faiss_handler.add_documents_to_index(user_id, documents)
-
-        logger.info(f"Successfully processed and added document: {original_name} for user: {user_id}")
-        return jsonify({
-            "message": f"Document '{original_name}' processed and added to index.",
-            "filename": original_name,
-            "chunks_added": len(documents),
-            "status": "added"
-        }), 200
+        if final_chunks_with_embeddings:
+            # Here you would typically do something with the chunks,
+            # like adding them to a vector store.
+            # For now, let's just return a success message.
+            # In a real application, you might return the number of chunks, or IDs, etc.
+            return jsonify({
+                "message": f"Successfully processed '{original_name}' and generated {len(final_chunks_with_embeddings)} chunks.",
+                "num_chunks": len(final_chunks_with_embeddings),
+                # "first_chunk_id": final_chunks_with_embeddings[0]['id'] if final_chunks_with_embeddings else None
+            }), 200 # HTTP 200 OK
+        else:
+            # This case might occur if ai_core returns an empty list (e.g., no text found)
+            return jsonify({
+                "message": f"Processed '{original_name}' but no chunks were generated (e.g., empty document or no text found).",
+                "num_chunks": 0
+            }), 200 # Still a successful processing, but no chunks
+            
+    except FileNotFoundError as e:
+        logger.error(f"--- Add Document Error for file '{original_name}' --- FileNotFoundError: {e}")
+        return jsonify({"error": f"File not found: {str(e)}"}), 404 # HTTP 404 Not Found
+    except pytesseract.TesseractNotFoundError: # If ai_core re-raises this
+        logger.critical(f"--- Add Document Error for file '{original_name}' --- Tesseract not found.")
+        return jsonify({"error": "OCR engine (Tesseract) not found on the server. Processing aborted."}), 500 # HTTP 500 Internal Server Error
     except Exception as e:
+        logger.error(f"--- Add Document Error for file '{original_name}' --- Exception: {e}", exc_info=True) # Log the full traceback
+        # The error message "name 'PDFPLUMBER_AVAILABLE' is not defined" from your log suggests this might be where it previously ended up.
+        # Now that ai_core is fixed, this generic catch might handle other issues.
+        return jsonify({"error": f"Failed to process document '{original_name}': {str(e)}"}), 500 # HTTP 500 Internal Server Error
+
+    # try:
+    #     # 1. Parse File
+    #     username = "abcd"
+    #     text_content = process_uploaded_document(file_path, username=username)
+    #     if text_content is None:
+    #         logger.warning(f"Skipping embedding for {original_name}: File type not supported or parsing failed.")
+    #         return jsonify({"message": f"File type of '{original_name}' not supported for RAG or parsing failed.", "filename": original_name, "status": "skipped"}), 200
+
+    #     logger.info("Text_Content : {text_content}")
+    #     # if not text_content.strip():
+    #     #     logger.warning(f"Skipping embedding for {original_name}: No text content found after parsing.")
+    #     #     return jsonify({"message": f"No text content extracted from '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
+
+    #     # # 2. Chunk Text
+    #     # documents = file_parser.chunk_text(text_content, original_name, user_id)
+    #     # if not documents:
+    #     #     logger.warning(f"No chunks created for {original_name}. Skipping add.")
+    #     #     return jsonify({"message": f"No text chunks generated for '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
+
+    #     # # 3. Add to Index (faiss_handler now handles dimension checks/recreation)
+    #     # faiss_handler.add_documents_to_index(user_id, documents)
+
+    #     # logger.info(f"Successfully processed and added document: {original_name} for user: {user_id}")
+    #     # return jsonify({
+    #     #     "message": f"Document '{original_name}' processed and added to index.",
+    #     #     "filename": original_name,
+    #     #     "chunks_added": len(documents),
+    #     #     "status": "added"
+    #     # }), 200
+    # except Exception as e:
         # Log the specific error from faiss_handler if it raised one
-        logger.error(f"--- Add Document Error for file '{original_name}' ---", exc_info=True)
-        return create_error_response(f"Failed to process document '{original_name}': {str(e)}", 500)
+        # logger.error(f"--- Add Document Error for file '{original_name}' ---", exc_info=True)
+        # return create_error_response(f"Failed to process document '{original_name}': {str(e)}", 500)
 
 
 @app.route('/query', methods=['POST'])

@@ -27,6 +27,7 @@ DEFAULT_INDEX_USER_ID = '__DEFAULT__'
 CHUNK_SIZE = 512#1000
 CHUNK_OVERLAP = 100#150
 
+SPACY_MODEL_NAME = 'en_core_web_sm'
 # --- API Configuration ---
 RAG_SERVICE_PORT = int(os.getenv('RAG_SERVICE_PORT', 5002))
 
