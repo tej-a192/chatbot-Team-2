@@ -1,41 +1,74 @@
-# server/rag_service/config.py
+# server/config.py
 import os
-import sys
 
-# --- Determine Server Directory ---
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..')) # Path to the 'server' directory
-print(f"[rag_service/config.py] Determined SERVER_DIR: {SERVER_DIR}")
+# === Base Directory ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+print(f"[Config] Base Directory: {BASE_DIR}")
 
-# --- Embedding Model Configuration ---
-# Switch to Sentence Transformer
-EMBEDDING_TYPE = 'sentence-transformer'
-# Specify the model name (make sure you have internet access for download on first run)
-# Or choose another model compatible with sentence-transformers library
-# EMBEDDING_MODEL_NAME_ST = os.getenv('SENTENCE_TRANSFORMER_MODEL', 'BAAI/bge-large-en-v1.5')
-EMBEDDING_MODEL_NAME_ST = os.getenv('SENTENCE_TRANSFORMER_MODEL', 'mixedbread-ai/mxbai-embed-large-v1')
-# EMBEDDING_MODEL_NAME_ST = os.getenv('SENTENCE_TRANSFORMER_MODEL', 'e5-large-v2')
-EMBEDDING_MODEL_NAME = EMBEDDING_MODEL_NAME_ST
-print(f"Using Sentence Transformer model: {EMBEDDING_MODEL_NAME}")
+# === Embedding Model Configuration ===
+DEFAULT_DOC_EMBED_MODEL = 'mixedbread-ai/mxbai-embed-large-v1'
+DOCUMENT_EMBEDDING_MODEL_NAME = os.getenv('DOCUMENT_EMBEDDING_MODEL_NAME', DEFAULT_DOC_EMBED_MODEL)
+print(f"[Config] Document Embedding Model: {DOCUMENT_EMBEDDING_MODEL_NAME}")
 
-# --- FAISS Configuration ---
-FAISS_INDEX_DIR = os.path.join(SERVER_DIR, 'faiss_indices')
-DEFAULT_ASSETS_DIR = os.path.join(SERVER_DIR, 'default_assets', 'engineering')
-DEFAULT_INDEX_USER_ID = '__DEFAULT__'
+# Model dimension mapping
+_MODEL_TO_DIM_MAPPING = {
+    'mixedbread-ai/mxbai-embed-large-v1': 1024,
+    'BAAI/bge-large-en-v1.5': 1024,
+    'all-MiniLM-L6-v2': 384,
+    'sentence-transformers/all-mpnet-base-v2': 768,
+}
+_FALLBACK_DIM = 768
 
-# --- Text Splitting Configuration ---
-CHUNK_SIZE = 512#1000
-CHUNK_OVERLAP = 100#150
+DOCUMENT_VECTOR_DIMENSION = int(os.getenv(
+    "DOCUMENT_VECTOR_DIMENSION",
+    _MODEL_TO_DIM_MAPPING.get(DOCUMENT_EMBEDDING_MODEL_NAME, _FALLBACK_DIM)
+))
+print(f"[Config] Document Vector Dimension: {DOCUMENT_VECTOR_DIMENSION}")
 
-SPACY_MODEL_NAME = 'en_core_web_sm'
-# --- API Configuration ---
-RAG_SERVICE_PORT = int(os.getenv('RAG_SERVICE_PORT', 5002))
+# === AI Core Chunking Config ===
+AI_CORE_CHUNK_SIZE = int(os.getenv("AI_CORE_CHUNK_SIZE", 512))
+AI_CORE_CHUNK_OVERLAP = int(os.getenv("AI_CORE_CHUNK_OVERLAP", 100))
+print(f"[Config] Chunk Size: {AI_CORE_CHUNK_SIZE}, Overlap: {AI_CORE_CHUNK_OVERLAP}")
 
-# --- Print effective configuration ---
-print(f"FAISS Index Directory: {FAISS_INDEX_DIR}")
-print(f"Default Assets Directory (for default.py): {DEFAULT_ASSETS_DIR}")
-print(f"RAG Service Port: {RAG_SERVICE_PORT}")
-print(f"Default Index User ID: {DEFAULT_INDEX_USER_ID}")
-print(f"Chunk Size: {CHUNK_SIZE}, Chunk Overlap: {CHUNK_OVERLAP}")
+# === SpaCy Configuration ===
+SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
+print(f"[Config] SpaCy Model: {SPACY_MODEL_NAME}")
 
+# === Qdrant Configuration ===
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "my_qdrant_rag_collection")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
+QDRANT_URL = os.getenv("QDRANT_URL", None)
 
+QDRANT_COLLECTION_VECTOR_DIM = DOCUMENT_VECTOR_DIMENSION
+print(f"[Config] Qdrant Vector Dimension: {QDRANT_COLLECTION_VECTOR_DIM}")
+
+# === Query Embedding Configuration ===
+QUERY_EMBEDDING_MODEL_NAME = os.getenv("QUERY_EMBEDDING_MODEL_NAME", DOCUMENT_EMBEDDING_MODEL_NAME)
+QUERY_VECTOR_DIMENSION = int(os.getenv(
+    "QUERY_VECTOR_DIMENSION",
+    _MODEL_TO_DIM_MAPPING.get(QUERY_EMBEDDING_MODEL_NAME, _FALLBACK_DIM)
+))
+
+if QUERY_VECTOR_DIMENSION != QDRANT_COLLECTION_VECTOR_DIM:
+    print(f"[⚠️ Config Warning] Query vector dim ({QUERY_VECTOR_DIMENSION}) != Qdrant dim ({QDRANT_COLLECTION_VECTOR_DIM})")
+    # Optionally enforce consistency
+    # raise ValueError("Query and Document vector dimensions do not match!")
+else:
+    print(f"[Config] Query Model: {QUERY_EMBEDDING_MODEL_NAME}")
+    print(f"[Config] Query Vector Dimension: {QUERY_VECTOR_DIMENSION}")
+
+QDRANT_DEFAULT_SEARCH_K = int(os.getenv("QDRANT_DEFAULT_SEARCH_K", 5))
+QDRANT_SEARCH_MIN_RELEVANCE_SCORE = float(os.getenv("QDRANT_SEARCH_MIN_RELEVANCE_SCORE", 0.1))
+
+# === API Port Configuration ===
+API_PORT = int(os.getenv('API_PORT', 5000))
+print(f"[Config] API Running Port: {API_PORT}")
+
+# === Optional: Tesseract OCR Path (uncomment if used) ===
+# TESSERACT_CMD = os.getenv('TESSERACT_CMD')
+# if TESSERACT_CMD:
+#     import pytesseract
+#     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+#     print(f"[Config] Tesseract Path: {TESSERACT_CMD}")

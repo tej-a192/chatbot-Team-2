@@ -25,6 +25,7 @@ typing
 PIL # For image processing
 pytesseract # OCR
 pillow
+qdrant-client
 
 
 

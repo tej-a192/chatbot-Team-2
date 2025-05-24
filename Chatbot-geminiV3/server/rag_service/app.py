@@ -1,266 +1,252 @@
-# server/rag_service/app.py
+# server/main_qdrant_app.py
 
 import os
 import sys
-from flask import Flask, request, jsonify
-
-# Add server directory to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-server_dir = os.path.dirname(current_dir)
-sys.path.insert(0, server_dir) # Ensure rag_service can be imported
-
-# Now import local modules AFTER adjusting sys.path
-from rag_service import config
-import rag_service.file_parser as file_parser
-import rag_service.faiss_handler as faiss_handler
-from rag_service import ai_core
 import logging
+import traceback # For detailed error logging
+from flask import Flask, request, jsonify, current_app
 
+# --- Add server directory to sys.path ---
+# This allows us to import modules from the 'server' directory and sub-packages like 'rag_service'
+# Assumes this file (main_qdrant_app.py) is in the 'server/' directory.
+SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+if SERVER_DIR not in sys.path:
+    sys.path.insert(0, SERVER_DIR)
+
+# --- Import configurations and services ---
+try:
+    import config # Should pick up server/config.py
+    from vector_db_service import VectorDBService # From server/vector_db_service.py
+    import ai_core # From server/rag_service/ai_core.py
+    # If ai_core depends on pytesseract, ensure it's importable or handle its absence
+    try:
+        import pytesseract
+    except ImportError:
+        pytesseract = None # Allows checking if pytesseract.TesseractNotFoundError can be caught
+except ImportError as e:
+    print(f"CRITICAL IMPORT ERROR: {e}. Ensure all modules are correctly placed and server directory is in PYTHONPATH.")
+    print("PYTHONPATH:", sys.path)
+    sys.exit(1)
+
+# --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Use Flask's logger via current_app.logger in routes
 
 app = Flask(__name__)
 
+# --- Initialize VectorDBService ---
+vector_service = None
+try:
+    logger.info("Initializing VectorDBService for Qdrant...")
+    vector_service = VectorDBService()
+    vector_service.setup_collection() # Create/validate Qdrant collection on startup
+    logger.info("VectorDBService initialized and collection setup successfully.")
+except Exception as e:
+    logger.critical(f"Failed to initialize VectorDBService or setup Qdrant collection: {e}", exc_info=True)
+    # Application might be non-functional, consider exiting or running in a degraded state
+    # For now, vector_service will be None, and endpoints will fail gracefully.
+
+# --- Helper for Error Responses ---
 def create_error_response(message, status_code=500):
-    logger.error(f"API Error Response ({status_code}): {message}")
+    current_app.logger.error(f"API Error ({status_code}): {message}")
     return jsonify({"error": message}), status_code
+
+# === API Endpoints ===
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    logger.info("\n--- Received request at /health ---")
+    current_app.logger.info("--- Health Check Request ---")
     status_details = {
         "status": "error",
-        "embedding_model_type": config.EMBEDDING_TYPE,
-        "embedding_model_name": config.EMBEDDING_MODEL_NAME,
-        "embedding_dimension": None,
-        "sentence_transformer_load": None,
-        "default_index_loaded": False,
-        "default_index_vectors": 0,
-        "default_index_dim": None,
-        "message": ""
+        "qdrant_service": "not_initialized",
+        "qdrant_collection_name": config.QDRANT_COLLECTION_NAME,
+        "qdrant_collection_status": "unknown",
+        "document_embedding_model": config.DOCUMENT_EMBEDDING_MODEL_NAME,
+        "query_embedding_model": config.QUERY_EMBEDDING_MODEL_NAME,
+        "expected_vector_dimension": config.QDRANT_COLLECTION_VECTOR_DIM,
     }
     http_status_code = 503
 
+    if not vector_service:
+        status_details["qdrant_service"] = "failed_to_initialize"
+        return jsonify(status_details), http_status_code
+
+    status_details["qdrant_service"] = "initialized"
     try:
-        # Check Embedding Model
-        model = faiss_handler.embedding_model
-        if model is None:
-            status_details["message"] = "Embedding model could not be initialized during startup."
-            status_details["sentence_transformer_load"] = "Failed"
-            raise RuntimeError(status_details["message"])
+        collection_info = vector_service.client.get_collection(collection_name=vector_service.collection_name)
+        status_details["qdrant_collection_status"] = "exists"
+        if hasattr(collection_info.config.params.vectors, 'size'): # Simple vector config
+             actual_dim = collection_info.config.params.vectors.size
+        elif isinstance(collection_info.config.params.vectors, dict): # Named vectors
+            default_vector_conf = collection_info.config.params.vectors.get('')
+            actual_dim = default_vector_conf.size if default_vector_conf else "multiple_named_not_checked"
         else:
-            status_details["sentence_transformer_load"] = "OK"
-            try:
-                 status_details["embedding_dimension"] = faiss_handler.get_embedding_dimension(model)
-            except Exception as dim_err:
-                 status_details["embedding_dimension"] = f"Error: {dim_err}"
+            actual_dim = "unknown_format"
 
-
-        # Check Default Index
-        if config.DEFAULT_INDEX_USER_ID in faiss_handler.loaded_indices:
-            status_details["default_index_loaded"] = True
-            default_index = faiss_handler.loaded_indices[config.DEFAULT_INDEX_USER_ID]
-            if hasattr(default_index, 'index') and default_index.index:
-                status_details["default_index_vectors"] = default_index.index.ntotal
-                status_details["default_index_dim"] = default_index.index.d
-            logger.info("Default index found in cache.")
+        status_details["actual_vector_dimension"] = actual_dim
+        if actual_dim == config.QDRANT_COLLECTION_VECTOR_DIM:
+            status_details["status"] = "ok"
+            http_status_code = 200
+            current_app.logger.info("Health check successful.")
         else:
-            logger.info("Attempting to load default index for health check...")
-            try:
-                default_index = faiss_handler.load_or_create_index(config.DEFAULT_INDEX_USER_ID)
-                status_details["default_index_loaded"] = True
-                if hasattr(default_index, 'index') and default_index.index:
-                    status_details["default_index_vectors"] = default_index.index.ntotal
-                    status_details["default_index_dim"] = default_index.index.d
-                logger.info("Default index loaded successfully during health check.")
-            except Exception as index_load_err:
-                logger.error(f"Health check failed to load default index: {index_load_err}", exc_info=True)
-                status_details["message"] = f"Failed to load default index: {index_load_err}"
-                status_details["default_index_loaded"] = False
-                raise # Re-raise to indicate failure
-
-        # Final Status
-        status_details["status"] = "ok"
-        status_details["message"] = "RAG service is running, embedding model accessible, default index loaded."
-        http_status_code = 200
-        logger.info("Health check successful.")
+            status_details["qdrant_collection_status"] = f"exists_with_dimension_mismatch (Expected {config.QDRANT_COLLECTION_VECTOR_DIM}, Got {actual_dim})"
+            current_app.logger.warning(f"Health check: Qdrant dimension mismatch.")
 
     except Exception as e:
-        logger.error(f"--- Health Check Error ---", exc_info=True)
-        if not status_details["message"]: # Avoid overwriting specific error messages
-            status_details["message"] = f"Health check failed: {str(e)}"
-        # Ensure status is error if exception occurred
-        status_details["status"] = "error"
-        http_status_code = 503 # Service unavailable if health check fails critically
+        status_details["qdrant_collection_status"] = f"error_accessing_collection: {str(e)}"
+        current_app.logger.error(f"Health check: Error accessing Qdrant collection: {e}", exc_info=True)
 
     return jsonify(status_details), http_status_code
 
 
 @app.route('/add_document', methods=['POST'])
-def add_document():
-    logger.info("\n--- Received request at /add_document ---")
+def add_document_qdrant():
+    current_app.logger.info("--- /add_document Request (Qdrant) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
+
     data = request.get_json()
     user_id = data.get('user_id')
+    # file_path is path ON THE SERVER where Flask can access it.
+    # In a real system, this often comes from a file upload process that saves the file first.
     file_path = data.get('file_path')
-    original_name = data.get('original_name')
+    original_name = data.get('original_name') # Original filename from client
 
     if not all([user_id, file_path, original_name]):
         return create_error_response("Missing required fields: user_id, file_path, original_name", 400)
 
-    logger.info(f"Processing file: {original_name} for user: {user_id}")
-    logger.info(f"File path: {file_path}")
+    current_app.logger.info(f"Processing file: '{original_name}' (Path: '{file_path}') for user: '{user_id}'")
 
     if not os.path.exists(file_path):
-        return create_error_response(f"File not found at path: {file_path}", 404)
+        current_app.logger.error(f"File not found at server path: {file_path}")
+        return create_error_response(f"File not found at server path: {file_path}", 404)
 
     try:
-        logger.info(f"Initialising [ process_pdf_for_embeddings ] for : {original_name} for user: {user_id}")
+        current_app.logger.info(f"Calling ai_core.process_document_for_embeddings for: '{original_name}'")
+        # ai_core.py from rag_service package processes the file and returns chunks with embeddings
+        processed_chunks_with_embeddings = ai_core.process_document_for_embeddings(
+            file_path=file_path,
+            original_name=original_name, # Passed to ai_core for metadata
+            user_id=user_id             # Passed to ai_core for metadata
+        )
 
-        final_chunks_with_embeddings = ai_core.process_document_for_embeddings(file_path, original_name, user_id)
+        if not processed_chunks_with_embeddings:
+            current_app.logger.info(f"ai_core produced no chunks for '{original_name}'.")
+            return jsonify({
+                "message": f"Processed '{original_name}' but no processable content or chunks were generated.",
+                "filename": original_name,
+                "user_id": user_id,
+                "num_chunks_generated_by_ai_core": 0,
+                "num_chunks_added_to_qdrant": 0
+            }), 200
 
-        if final_chunks_with_embeddings:
-            # Here you would typically do something with the chunks,
-            # like adding them to a vector store.
-            # For now, let's just return a success message.
-            # In a real application, you might return the number of chunks, or IDs, etc.
-            return jsonify({
-                "message": f"Successfully processed '{original_name}' and generated {len(final_chunks_with_embeddings)} chunks.",
-                "num_chunks": len(final_chunks_with_embeddings),
-                # "first_chunk_id": final_chunks_with_embeddings[0]['id'] if final_chunks_with_embeddings else None
-            }), 200 # HTTP 200 OK
-        else:
-            # This case might occur if ai_core returns an empty list (e.g., no text found)
-            return jsonify({
-                "message": f"Processed '{original_name}' but no chunks were generated (e.g., empty document or no text found).",
-                "num_chunks": 0
-            }), 200 # Still a successful processing, but no chunks
-            
-    except FileNotFoundError as e:
-        logger.error(f"--- Add Document Error for file '{original_name}' --- FileNotFoundError: {e}")
-        return jsonify({"error": f"File not found: {str(e)}"}), 404 # HTTP 404 Not Found
-    except pytesseract.TesseractNotFoundError: # If ai_core re-raises this
-        logger.critical(f"--- Add Document Error for file '{original_name}' --- Tesseract not found.")
-        return jsonify({"error": "OCR engine (Tesseract) not found on the server. Processing aborted."}), 500 # HTTP 500 Internal Server Error
+        current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} chunks for '{original_name}'. Adding to Qdrant via VectorDBService.")
+        
+        num_chunks_added = vector_service.add_processed_chunks(processed_chunks_with_embeddings)
+        
+        current_app.logger.info(f"Successfully added {num_chunks_added} chunks from '{original_name}' to Qdrant.")
+        return jsonify({
+            "message": f"Successfully processed '{original_name}' and added chunks to Qdrant.",
+            "filename": original_name,
+            "user_id": user_id,
+            "num_chunks_generated_by_ai_core": len(processed_chunks_with_embeddings),
+            "num_chunks_added_to_qdrant": num_chunks_added
+        }), 201
+
+    except FileNotFoundError as e: # Should be caught by os.path.exists, but as fallback
+        current_app.logger.error(f"Add Document Error for '{original_name}' - FileNotFoundError: {e}", exc_info=True)
+        return create_error_response(f"File not found during processing: {str(e)}", 404)
+    except pytesseract and pytesseract.TesseractNotFoundError: # Catch only if pytesseract is available
+        current_app.logger.critical(f"Add Document Error for '{original_name}' - Tesseract (OCR) not found.")
+        return create_error_response("OCR engine (Tesseract) not found or not configured correctly on the server.", 500)
+    except ValueError as e: # e.g., vector dimension mismatch from add_processed_chunks
+        current_app.logger.error(f"Add Document Error for '{original_name}' - ValueError: {e}", exc_info=True)
+        return create_error_response(f"Configuration or data error: {str(e)}", 400)
     except Exception as e:
-        logger.error(f"--- Add Document Error for file '{original_name}' --- Exception: {e}", exc_info=True) # Log the full traceback
-        # The error message "name 'PDFPLUMBER_AVAILABLE' is not defined" from your log suggests this might be where it previously ended up.
-        # Now that ai_core is fixed, this generic catch might handle other issues.
-        return jsonify({"error": f"Failed to process document '{original_name}': {str(e)}"}), 500 # HTTP 500 Internal Server Error
-
-    # try:
-    #     # 1. Parse File
-    #     username = "abcd"
-    #     text_content = process_uploaded_document(file_path, username=username)
-    #     if text_content is None:
-    #         logger.warning(f"Skipping embedding for {original_name}: File type not supported or parsing failed.")
-    #         return jsonify({"message": f"File type of '{original_name}' not supported for RAG or parsing failed.", "filename": original_name, "status": "skipped"}), 200
-
-    #     logger.info("Text_Content : {text_content}")
-    #     # if not text_content.strip():
-    #     #     logger.warning(f"Skipping embedding for {original_name}: No text content found after parsing.")
-    #     #     return jsonify({"message": f"No text content extracted from '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
-
-    #     # # 2. Chunk Text
-    #     # documents = file_parser.chunk_text(text_content, original_name, user_id)
-    #     # if not documents:
-    #     #     logger.warning(f"No chunks created for {original_name}. Skipping add.")
-    #     #     return jsonify({"message": f"No text chunks generated for '{original_name}'.", "filename": original_name, "status": "skipped"}), 200
-
-    #     # # 3. Add to Index (faiss_handler now handles dimension checks/recreation)
-    #     # faiss_handler.add_documents_to_index(user_id, documents)
-
-    #     # logger.info(f"Successfully processed and added document: {original_name} for user: {user_id}")
-    #     # return jsonify({
-    #     #     "message": f"Document '{original_name}' processed and added to index.",
-    #     #     "filename": original_name,
-    #     #     "chunks_added": len(documents),
-    #     #     "status": "added"
-    #     # }), 200
-    # except Exception as e:
-        # Log the specific error from faiss_handler if it raised one
-        # logger.error(f"--- Add Document Error for file '{original_name}' ---", exc_info=True)
-        # return create_error_response(f"Failed to process document '{original_name}': {str(e)}", 500)
+        current_app.logger.error(f"Add Document Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}")
+        return create_error_response(f"Failed to process document '{original_name}' due to an internal error.", 500)
 
 
-@app.route('/query', methods=['POST'])
-def query_index_route():
-    print("Called")
-    logger.info("\n--- Received request at /query ---")
+@app.route('/search', methods=['POST']) # Changed from /query to /search for Qdrant context
+def search_qdrant_documents():
+    current_app.logger.info("--- /search Request (Qdrant) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
+
     data = request.get_json()
-    user_id = data.get('user_id')
-    query = data.get('query')
-    k = data.get('k', 5) # Default to k=5 now
+    query_text = data.get('query')
+    k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K) # Use default from config
+    
+    # Optional: Allow passing filter conditions in the request body
+    # Example filter: {"user_id": "some_user", "original_name": "some_doc.pdf"}
+    filter_payload = data.get('filter') 
+    qdrant_filters = None
 
-    if not user_id or not query:
-        return create_error_response("Missing required fields: user_id, query", 400)
+    if filter_payload and isinstance(filter_payload, dict):
+        from qdrant_client import models as qdrant_models # Import here to keep it local
+        conditions = []
+        for key, value in filter_payload.items():
+            # Ensure key is a valid payload key you store (e.g., user_id, original_name, page_number)
+            # This simple example assumes exact match for string values.
+            # For numerical ranges or other conditions, qdrant_models.Range, etc. would be used.
+            conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
+        
+        if conditions:
+            qdrant_filters = qdrant_models.Filter(must=conditions)
+            current_app.logger.info(f"Applying Qdrant filter: {filter_payload}")
 
-    logger.info(f"Querying for user: {user_id} with k={k}")
-    # Avoid logging potentially sensitive query text in production
-    logger.debug(f"Query text: '{query[:100]}...'")
+
+    if not query_text:
+        return create_error_response("Missing 'query' field in request body", 400)
 
     try:
-        results = faiss_handler.query_index(user_id, query, k=k)
+        k = int(k)
+    except ValueError:
+        return create_error_response("'k' must be an integer", 400)
 
-        formatted_results = []
-        for doc, score in results:
-            # --- SEND FULL CONTENT ---
-            content = doc.page_content
-            # --- (No snippet generation needed) ---
+    current_app.logger.info(f"Performing Qdrant search for query (first 100 chars): '{query_text[:100]}...' with k={k}")
 
-            formatted_results.append({
-                "documentName": doc.metadata.get("documentName", "Unknown"),
-                "score": float(score),
-                "content": content, # Send the full content
-                # Removed "content_snippet"
-            })
+    try:
+        # `search_documents` returns: docs_list, formatted_context_string, context_map
+        docs, formatted_context, docs_map = vector_service.search_documents(
+            query=query_text,
+            k=k,
+            filter_conditions=qdrant_filters
+        )
 
-        logger.info(f"Query successful for user {user_id}. Returning {len(formatted_results)} results.")
-        return jsonify({"relevantDocs": formatted_results}), 200
+        # The response from your original /query endpoint was `{"relevantDocs": [...]}`
+        # Let's adapt to return something similar, but with more Qdrant-style info.
+        # `docs` is a list of `Document` objects from `vector_db_service`.
+        
+        response_payload = {
+            "query": query_text,
+            "k_requested": k,
+            "filter_applied": filter_payload, # Show what filter was used
+            "results_count": len(docs),
+            "formatted_context_snippet": formatted_context, # The RAG-style formatted string
+            "retrieved_documents_map": docs_map, # The map with citation index as key
+            "retrieved_documents_list": [doc.to_dict() for doc in docs] # List of Document objects as dicts
+        }
+        current_app.logger.info(f"Qdrant search successful. Returning {len(docs)} results.")
+        return jsonify(response_payload), 200
+
     except Exception as e:
-        logger.error(f"--- Query Error ---", exc_info=True)
-        return create_error_response(f"Failed to query index: {str(e)}", 500)
+        current_app.logger.error(f"Qdrant search failed: {e}\n{traceback.format_exc()}")
+        return create_error_response(f"Error during Qdrant search: {str(e)}", 500)
+
 
 if __name__ == '__main__':
-    # Ensure base FAISS directory exists on startup
-    try:
-        faiss_handler.ensure_faiss_dir()
-    except Exception as e:
-        logger.critical(f"CRITICAL: Could not create FAISS base directory '{config.FAISS_INDEX_DIR}'. Exiting. Error: {e}", exc_info=True)
-        sys.exit(1) # Exit if base dir cannot be created
-
-    # Attempt to initialize embedding model on startup
-    try:
-        faiss_handler.get_embedding_model() # This also determines the dimension
-        logger.info("Embedding model initialized successfully on startup.")
-    except Exception as e:
-        logger.error(f"CRITICAL: Embedding model failed to initialize on startup: {e}", exc_info=True)
-        logger.error("Endpoints requiring embeddings (/add_document, /query) will fail.")
-        # Decide if you want to exit or run in a degraded state
-        sys.exit(1) # Exit if embedding model fails - essential service
-
-    # Attempt to load/check the default index on startup
-    try:
-        faiss_handler.load_or_create_index(config.DEFAULT_INDEX_USER_ID) # This checks/creates/validates dimension
-        logger.info(f"Default index '{config.DEFAULT_INDEX_USER_ID}' loaded/checked/created on startup.")
-    except Exception as e:
-        logger.warning(f"Warning: Could not load/create default index '{config.DEFAULT_INDEX_USER_ID}' on startup: {e}", exc_info=True)
-        # Don't necessarily exit, but log clearly. Queries might only use user indices.
-
-    # Start Flask App
-    port = config.RAG_SERVICE_PORT
-    logger.info(f"--- Starting RAG service ---")
-    logger.info(f"Listening on: http://0.0.0.0:{port}")
-    logger.info(f"Using Embedding: {config.EMBEDDING_TYPE} ({config.EMBEDDING_MODEL_NAME})")
-    try:
-        logger.info(f"Embedding Dimension: {faiss_handler.get_embedding_dimension(faiss_handler.embedding_model)}")
-    except: pass # Dimension already logged or failed earlier
-    logger.info(f"FAISS Index Path: {config.FAISS_INDEX_DIR}")
-    logger.info("-----------------------------")
-    # Use waitress or gunicorn for production instead of Flask's development server
-    app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_DEBUG') == '1')
+    logger.info(f"--- Starting Qdrant RAG API Service on port {config.API_PORT} ---")
+    logger.info(f"Document Embedding Model (ai_core): {config.DOCUMENT_EMBEDDING_MODEL_NAME} (Dim: {config.DOCUMENT_VECTOR_DIMENSION})")
+    logger.info(f"Query Embedding Model (vector_db_service): {config.QUERY_EMBEDDING_MODEL_NAME} (Dim: {config.QUERY_VECTOR_DIMENSION})")
+    logger.info(f"Qdrant Collection: {config.QDRANT_COLLECTION_NAME} (Expected Dim: {config.QDRANT_COLLECTION_VECTOR_DIM})")
+    
+    # For production, use a proper WSGI server like gunicorn or waitress
+    # Example: gunicorn --workers 4 --bind 0.0.0.0:5000 main_qdrant_app:app
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=True) # debug=True for development

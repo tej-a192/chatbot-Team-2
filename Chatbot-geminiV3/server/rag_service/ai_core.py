@@ -19,7 +19,7 @@ from typing import Optional, List, Dict, Any, Callable # 'callable' used for typ
 # - SPACY_MODEL_NAME (e.g., 'en_core_web_sm') for SpaCy initialization
 # - Optionally: MAX_TEXT_LENGTH_FOR_NER (defaults to 500000 in metadata extraction if not set)
 try:
-    from rag_service import config
+    import config
 except ImportError as e:
     # If this happens, the script will likely fail when 'config.XXX' is accessed.
     # Ensure 'rag_service' is in PYTHONPATH or structured correctly.
@@ -925,20 +925,23 @@ def chunk_document_into_segments(
 # --- Stage 7: Embedding Generation ---
 def generate_segment_embeddings(
     document_chunks: List[Dict[str, Any]] # List of chunk dicts from Stage 6
-) -> List[Dict[str, Any]]: # List of chunk dicts, now with 'embedding_vector'
+) -> List[Dict[str, Any]]: # List of chunk dicts, now with 'embedding'
     """
     Generates vector embeddings for the 'text_content' of each chunk
-    using the globally loaded 'document_embedding_model' (from config.py).
-    Adds 'embedding_vector' (as a list of floats) to each chunk dictionary.
+    using the globally loaded 'document_embedding_model'.
+    Adds 'embedding' (as a list of floats) to each chunk dictionary.
     """
     if not document_chunks:
         logger.info("Embedding: No document chunks provided for embedding generation.")
         return []
 
-    # The document_embedding_model is already loaded globally in ai_core.py
-    # using config.EMBEDDING_MODEL_NAME
+    # The document_embedding_model is loaded globally in ai_core.py
+    # using config.DOCUMENT_EMBEDDING_MODEL_NAME
+    # Ensure this name is correctly mapped in your main server/config.py
+    model_name_for_logging = config.DOCUMENT_EMBEDDING_MODEL_NAME # Get from the correct config
+    
     logger.info(f"Embedding: Starting embedding generation for {len(document_chunks)} chunks "
-                f"using model: {config.EMBEDDING_MODEL_NAME}.") # Log which model is being used
+                f"using model: {model_name_for_logging}.")
     
     texts_to_embed: List[str] = []
     indices_of_chunks_with_text: List[int] = []
@@ -949,49 +952,66 @@ def generate_segment_embeddings(
             texts_to_embed.append(text_content)
             indices_of_chunks_with_text.append(i)
         else:
-            # Handle chunks with no text_content: assign None or empty list to 'embedding_vector'
-            chunk_dict['embedding_vector'] = None 
+            # Handle chunks with no text_content: assign None or empty list to 'embedding'
+            chunk_dict['embedding'] = None # MODIFIED KEY HERE
             logger.debug(f"Embedding: Chunk {chunk_dict.get('id', i)} has no text content, skipping embedding for it.")
 
     if not texts_to_embed:
         logger.warning("Embedding: No actual text content found in any provided chunks to generate embeddings.")
-        return document_chunks # All relevant chunks would have 'embedding_vector': None
+        # Ensure all chunks have the 'embedding' key, even if None
+        for chunk_dict in document_chunks:
+            if 'embedding' not in chunk_dict:
+                 chunk_dict['embedding'] = None
+        return document_chunks
 
     try:
         # Generate embeddings in batch for all valid text segments
         logger.info(f"Embedding: Generating embeddings for {len(texts_to_embed)} non-empty text segments...")
         
         # Using the globally loaded model: document_embedding_model
-        # This model was initialized with SentenceTransformer(config.EMBEDDING_MODEL_NAME)
+        # This model was initialized with SentenceTransformer(config.DOCUMENT_EMBEDDING_MODEL_NAME)
+        # Ensure 'document_embedding_model' is correctly initialized and available in this scope.
+        # Example:
+        # global document_embedding_model # if it's a global var in this file
+        if document_embedding_model is None: # Add a check if it might not be loaded
+            logger.error("Embedding: document_embedding_model is not loaded! Cannot generate embeddings.")
+            # Mark all relevant chunks as having no embedding
+            for original_chunk_index in indices_of_chunks_with_text:
+                document_chunks[original_chunk_index]['embedding'] = None # MODIFIED KEY HERE
+            return document_chunks # Or raise an error
+
         embeddings_np_array = document_embedding_model.encode(
             texts_to_embed,
             show_progress_bar=False, # Good for server logs
-            # normalize_embeddings=True # Often recommended for cosine similarity.
-                                       # Set this based on how your chosen model (e.g., mixedbread) expects to be used
-                                       # or if your downstream vector DB benefits from normalized embeddings.
-                                       # mixedbread-ai/mxbai-embed-large-v1 typically benefits from normalization.
+            # normalize_embeddings=True # Consider based on your model (e.g., mixedbread benefits from this)
         )
         
         # Assign embeddings back to the corresponding original chunks
         for i, original_chunk_index in enumerate(indices_of_chunks_with_text):
             if i < len(embeddings_np_array):
                 # Convert numpy array to list of floats for JSON serialization
-                document_chunks[original_chunk_index]['embedding_vector'] = embeddings_np_array[i].tolist()
+                document_chunks[original_chunk_index]['embedding'] = embeddings_np_array[i].tolist() # MODIFIED KEY HERE
             else:
                 logger.error(f"Embedding: Mismatch in embedding count for chunk at original index {original_chunk_index}. Assigning None.")
-                document_chunks[original_chunk_index]['embedding_vector'] = None
+                document_chunks[original_chunk_index]['embedding'] = None # MODIFIED KEY HERE
         
         logger.info(f"Embedding: Embeddings generated and assigned to {len(indices_of_chunks_with_text)} chunks.")
         
     except Exception as e:
-        logger.error(f"Embedding: Error during embedding generation with model {config.EMBEDDING_MODEL_NAME}: {e}", exc_info=True)
+        logger.error(f"Embedding: Error during embedding generation with model {model_name_for_logging}: {e}", exc_info=True)
         # If embedding fails globally, mark all relevant chunks as having no embedding
         for original_chunk_index in indices_of_chunks_with_text:
-            document_chunks[original_chunk_index]['embedding_vector'] = None
+            document_chunks[original_chunk_index]['embedding'] = None # MODIFIED KEY HERE
         # Depending on how critical embeddings are, you might re-raise
         # raise
         
+    # Ensure all chunks have the 'embedding' key, even if processing failed for some.
+    for chunk_dict in document_chunks:
+        if 'embedding' not in chunk_dict:
+             chunk_dict['embedding'] = None
+
     return document_chunks
+
 
 
 
