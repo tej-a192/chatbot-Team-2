@@ -170,7 +170,7 @@ def add_document_qdrant():
         return create_error_response(f"Failed to process document '{original_name}' due to an internal error.", 500)
 
 
-@app.route('/search', methods=['POST']) # Changed from /query to /search for Qdrant context
+@app.route('/query', methods=['POST']) # Changed from /query to /search for Qdrant context
 def search_qdrant_documents():
     current_app.logger.info("--- /search Request (Qdrant) ---")
     if not request.is_json:
