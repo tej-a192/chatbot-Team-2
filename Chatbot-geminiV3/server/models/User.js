@@ -14,6 +14,31 @@ const UserSchema = new mongoose.Schema({
     minlength: 6,
     select: false, // Explicitly prevent password from being returned by default
   },
+  uploadedDocuments: [
+    {
+      filename: {
+        type: String,
+      },
+      text: {
+        type: String,
+        default: "",
+      },
+      analysis: {
+        faq: {
+          type: String,
+          default: "",
+        },
+        topics: {
+          type: String,
+          default: "",
+        },
+        mindmap: {
+          type: String,
+          default: "",
+        },
+      },
+    },
+  ],
   createdAt: {
     type: Date,
     default: Date.now,

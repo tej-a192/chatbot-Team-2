@@ -2,9 +2,9 @@
 
 import os
 import sys
-import logging
 import traceback # For detailed error logging
 from flask import Flask, request, jsonify, current_app
+import logging
 
 # --- Add server directory to sys.path ---
 # This allows us to import modules from the 'server' directory and sub-packages like 'rag_service'
@@ -13,25 +13,20 @@ SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
+import config # Should pick up server/config.py
+config.setup_logging()
+
+
 # --- Import configurations and services ---
 try:
-    import config # Should pick up server/config.py
     from vector_db_service import VectorDBService # From server/vector_db_service.py
     import ai_core # From server/rag_service/ai_core.py
-    # If ai_core depends on pytesseract, ensure it's importable or handle its absence
-    try:
-        import pytesseract
-    except ImportError:
-        pytesseract = None # Allows checking if pytesseract.TesseractNotFoundError can be caught
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}. Ensure all modules are correctly placed and server directory is in PYTHONPATH.")
     print("PYTHONPATH:", sys.path)
     sys.exit(1)
 
-# --- Setup Logging ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s')
-logger = logging.getLogger(__name__) # Use Flask's logger via current_app.logger in routes
-
+logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # --- Initialize VectorDBService ---
@@ -125,48 +120,68 @@ def add_document_qdrant():
         return create_error_response(f"File not found at server path: {file_path}", 404)
 
     try:
-        current_app.logger.info(f"Calling ai_core.process_document_for_embeddings for: '{original_name}'")
-        # ai_core.py from rag_service package processes the file and returns chunks with embeddings
-        processed_chunks_with_embeddings = ai_core.process_document_for_embeddings(
+        # Assuming ai_core.process_document_for_embeddings is updated to return two values,
+        # or you have a new function like ai_core.process_document_for_qdrant
+        current_app.logger.info(f"Calling ai_core to process document: '{original_name}'")
+        processed_chunks_with_embeddings, raw_text_for_node_analysis = ai_core.process_document_for_qdrant(
             file_path=file_path,
-            original_name=original_name, # Passed to ai_core for metadata
-            user_id=user_id             # Passed to ai_core for metadata
+            original_name=original_name,
+            user_id=user_id
         )
+        # If you kept the old function name and just changed its return:
+        # processed_chunks_with_embeddings, raw_text_for_node_analysis = ai_core.process_document_for_embeddings(...)
 
-        if not processed_chunks_with_embeddings:
-            current_app.logger.info(f"ai_core produced no chunks for '{original_name}'.")
+        num_chunks_added_to_qdrant = 0
+        processing_status = "processed_no_content"
+
+        # Check if chunks were generated before trying to add them
+        if processed_chunks_with_embeddings:
+            current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} chunks for '{original_name}'. Adding to Qdrant.")
+            # Ensure vector_service is used correctly here
+            num_chunks_added_to_qdrant = current_app.vector_service.add_processed_chunks(processed_chunks_with_embeddings)
+            if num_chunks_added_to_qdrant > 0:
+                processing_status = "added"
+                current_app.logger.info(f"Successfully added {num_chunks_added_to_qdrant} chunks from '{original_name}' to Qdrant.")
+            else:
+                processing_status = "processed_chunks_not_added"
+        elif raw_text_for_node_analysis: # If no chunks, but raw text was extracted
+            current_app.logger.info(f"ai_core produced no processable RAG chunks for '{original_name}', but raw text was extracted.")
+            processing_status = "processed_for_analysis_only" # No RAG chunks, but text for analysis
+        else: # No chunks and no raw text (e.g., empty or unparseable file)
+            current_app.logger.warning(f"ai_core produced no RAG chunks and no raw text for '{original_name}'.")
+            # Return a specific response indicating nothing useful was extracted
             return jsonify({
-                "message": f"Processed '{original_name}' but no processable content or chunks were generated.",
+                "message": f"Processed '{original_name}' but no content was extracted for RAG or analysis.",
+                "status": "no_content_extracted",
                 "filename": original_name,
                 "user_id": user_id,
-                "num_chunks_generated_by_ai_core": 0,
-                "num_chunks_added_to_qdrant": 0
-            }), 200
+                "num_chunks_added_to_qdrant": 0,
+                "raw_text_for_analysis": "" # Empty string
+            }), 200 # 200 OK as the processing attempt itself didn't fail
 
-        current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} chunks for '{original_name}'. Adding to Qdrant via VectorDBService.")
-        
-        num_chunks_added = vector_service.add_processed_chunks(processed_chunks_with_embeddings)
-        
-        current_app.logger.info(f"Successfully added {num_chunks_added} chunks from '{original_name}' to Qdrant.")
-        return jsonify({
-            "message": f"Successfully processed '{original_name}' and added chunks to Qdrant.",
+        # Construct the success response for Node.js
+        response_payload = {
+            "message": f"Successfully processed '{original_name}'. Embeddings operation completed.",
+            "status": processing_status,
             "filename": original_name,
             "user_id": user_id,
-            "num_chunks_generated_by_ai_core": len(processed_chunks_with_embeddings),
-            "num_chunks_added_to_qdrant": num_chunks_added
-        }), 201
+            "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
+            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "" # Ensure it's always a string
+        }
+        current_app.logger.info(f"Successfully processed '{original_name}'. Returning raw text and Qdrant status.")
+        return jsonify(response_payload), 201 # 201 Created if resources (chunks) were made
 
-    except FileNotFoundError as e: # Should be caught by os.path.exists, but as fallback
+    except FileNotFoundError as e:
         current_app.logger.error(f"Add Document Error for '{original_name}' - FileNotFoundError: {e}", exc_info=True)
         return create_error_response(f"File not found during processing: {str(e)}", 404)
-    except pytesseract and pytesseract.TesseractNotFoundError: # Catch only if pytesseract is available
+    except config.TESSERACT_ERROR: # Make sure config is imported and TESSERACT_ERROR is defined
         current_app.logger.critical(f"Add Document Error for '{original_name}' - Tesseract (OCR) not found.")
         return create_error_response("OCR engine (Tesseract) not found or not configured correctly on the server.", 500)
     except ValueError as e: # e.g., vector dimension mismatch from add_processed_chunks
         current_app.logger.error(f"Add Document Error for '{original_name}' - ValueError: {e}", exc_info=True)
         return create_error_response(f"Configuration or data error: {str(e)}", 400)
     except Exception as e:
-        current_app.logger.error(f"Add Document Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}")
+        current_app.logger.error(f"Add Document Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}", exc_info=True) # Ensure traceback is imported
         return create_error_response(f"Failed to process document '{original_name}' due to an internal error.", 500)
 
 

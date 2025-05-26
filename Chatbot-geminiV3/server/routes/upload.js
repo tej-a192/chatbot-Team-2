@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const { tempAuth } = require('../middleware/authMiddleware');
+const axios = require('axios');
+const User = require('../models/User'); // Import the User model
 
 const router = express.Router();
 
@@ -146,6 +148,54 @@ async function triggerPythonRagProcessing(userId, filePath, originalName) {
         }, { timeout: 300000 }); // 5 minute timeout for processing
 
         console.log(`Python RAG service response for ${originalName}:`, response.data);
+
+        const text = response.data?.raw_text_for_analysis || "";
+
+        // --- DATABASE UPDATE | Filename & text ---
+        if (response.data?.status === "added" && originalName && userId) {
+            try {
+                const newDocumentEntry = {
+                    filename: originalName,
+                    text: text,
+                };
+
+                const updatedUser = await User.findByIdAndUpdate(
+                    userId,
+                    { $push: { uploadedDocuments: newDocumentEntry } },
+                    { new: true, runValidators: true }
+                );
+
+                if (!updatedUser) {
+                    console.error(`Failed to find user with ID ${userId} to save document info for ${originalName}.`);
+                    return {
+                        success: false,
+                        message: `User not found for saving document metadata. Status: ${response.data?.status}`,
+                        Text: text, 
+                        Status: response.data?.status
+                    };
+                }
+                console.log(`Successfully saved document info ('${originalName}') and raw text to user ${userId}.`);
+
+            } catch (dbError) {
+                console.error(`Database error saving document info for ${originalName} (User: ${userId}):`, dbError);
+                return {
+                    success: false,
+                    message: `DB error saving document metadata: ${dbError.message}. Python processing status: ${response.data?.status}`,
+                    Text: text, // Still return text if Python provided it
+                    Status: response.data?.status
+                };
+            }
+        } 
+        else if (originalName && userId) { // If not saving, log why
+            console.warn(`Skipping DB update for ${originalName} (User: ${userId}). HTTP Status: ${response.status}, Python Custom Status: ${response.data?.status}.`);
+        } 
+        else {
+            console.warn(`Skipping DB update due to missing originalName or userId. Python Custom Status: ${response.data?.status}`);
+        }
+
+        // --- END DATABASE UPDATE ---
+
+
         // Check response.data.status ('added' or 'skipped')
         if (response.data?.status === 'skipped') {
              console.warn(`Python RAG service skipped processing ${originalName}: ${response.data.message}`);

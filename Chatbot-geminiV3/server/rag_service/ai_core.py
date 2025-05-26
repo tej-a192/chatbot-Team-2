@@ -1,15 +1,17 @@
 # ./ai_core.py
 
 # Standard Library Imports
+import logging
 import os
 import io
 import re
-import logging
-import copy # Used in chunk_document_into_segments
-import uuid # For Qdrant Point IDs
+import copy
+import uuid
+from typing import Any, Callable, Dict, List, Optional
 
-# Typing Imports
-from typing import Optional, List, Dict, Any, Callable
+
+# --- Global Initializations ---
+logger = logging.getLogger(__name__)
 
 # --- Configuration Import ---
 # Assumes 'server/config.py' is the actual config file.
@@ -17,174 +19,46 @@ from typing import Optional, List, Dict, Any, Callable
 try:
     import config # This should import server/config.py
 except ImportError as e:
-    logging.basicConfig(level=logging.CRITICAL) 
-    logging.getLogger(__name__).critical(
-        f"CRITICAL: Failed to import 'config' (expected server/config.py): {e}. "
-        "Application will use dummy defaults and likely not function as intended."
-    )
-    class DummyConfig: # Fallback with CORRECTED attribute names
-        DOCUMENT_EMBEDDING_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2' # Default model
-        AI_CORE_CHUNK_SIZE = 512           # Corrected
-        AI_CORE_CHUNK_OVERLAP = 100        # Corrected
-        SPACY_MODEL_NAME = 'en_core_web_sm' # Default SpaCy
-        MAX_TEXT_LENGTH_FOR_NER = 500000
-    config = DummyConfig()
+    logger.info(f"CRITICAL: Failed to import 'config' (expected server/config.py): {e}. ")
 
-# --- Global Initializations ---
 
-# 1. Logger Setup
-logger = logging.getLogger(__name__)
-if not logger.hasHandlers():
-    _handler = logging.StreamHandler()
-    _formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    _handler.setFormatter(_formatter)
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
 
-# 2. Optional Library Imports and Availability Flags / Placeholders
-_AI_CORE_PYPDF_PDFREADERROR = None
-try:
-    import pypdf
-    _AI_CORE_PYPDF_PDFREADERROR = pypdf.errors.PdfReadError
-    PYPDF_AVAILABLE = True
-except ImportError:
-    pypdf = None
-    _AI_CORE_PYPDF_PDFREADERROR = type('PdfReadErrorDummy', (Exception,), {})
-    PYPDF_AVAILABLE = False
-    logger.info("pypdf library not found. PDF parsing with pypdf unavailable.")
+# Local aliases for config flags, models, constants, and classes
 
-try:
-    from docx import Document as DocxDocument
-    DOCX_AVAILABLE = True
-except ImportError:
-    DocxDocument = None
-    DOCX_AVAILABLE = False
-    logger.info("python-docx library not found. DOCX parsing unavailable.")
+# Availability Flags
+PYPDF_AVAILABLE = config.PYPDF_AVAILABLE
+PDFPLUMBER_AVAILABLE = config.PDFPLUMBER_AVAILABLE
+PANDAS_AVAILABLE = config.PANDAS_AVAILABLE
+DOCX_AVAILABLE = config.DOCX_AVAILABLE
+PIL_AVAILABLE = config.PIL_AVAILABLE
+FITZ_AVAILABLE = config.FITZ_AVAILABLE
+PYTESSERACT_AVAILABLE = config.PYTESSERACT_AVAILABLE
+SPACY_MODEL_LOADED = config.SPACY_MODEL_LOADED
+PYPDF2_AVAILABLE = config.PYPDF2_AVAILABLE
+EMBEDDING_MODEL_LOADED = config.EMBEDDING_MODEL_LOADED
+MAX_TEXT_LENGTH_FOR_NER  = config.MAX_TEXT_LENGTH_FOR_NER
 
-try:
-    from pptx import Presentation
-    PPTX_AVAILABLE = True
-except ImportError:
-    Presentation = None
-    PPTX_AVAILABLE = False
-    logger.info("python-pptx library not found. PPTX parsing unavailable.")
+# Error Strings
+PYPDF_PDFREADERROR = config.PYPDF_PDFREADERROR
+TESSERACT_ERROR = config.TESSERACT_ERROR
 
-try:
-    import pdfplumber
-    PDFPLUMBER_AVAILABLE = True
-except ImportError:
-    pdfplumber = None
-    PDFPLUMBER_AVAILABLE = False
-    logger.info("pdfplumber library not found. Rich PDF extraction unavailable.")
+# Libraries and Models
+pypdf = config.pypdf
+PyPDF2 = config.PyPDF2
+pd = config.pd
+DocxDocument = config.DocxDocument
+Image = config.Image
+fitz = config.fitz
+pytesseract = config.pytesseract
+nlp_spacy_core = config.nlp_spacy_core
+document_embedding_model = config.document_embedding_model
+RecursiveCharacterTextSplitter = config.RecursiveCharacterTextSplitter
 
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    pd = None
-    PANDAS_AVAILABLE = False
-    logger.warning("pandas library not found. Table processing might be impacted.")
+# Constants
+AI_CORE_CHUNK_SIZE = config.AI_CORE_CHUNK_SIZE
+AI_CORE_CHUNK_OVERLAP = config.AI_CORE_CHUNK_OVERLAP
+DOCUMENT_EMBEDDING_MODEL_NAME = config.DOCUMENT_EMBEDDING_MODEL_NAME
 
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    Image = None
-    PIL_AVAILABLE = False
-    logger.info("Pillow (PIL) library not found. Image processing unavailable.")
-
-try:
-    import fitz  # PyMuPDF
-    FITZ_AVAILABLE = True
-except ImportError:
-    fitz = None
-    FITZ_AVAILABLE = False
-    logger.info("PyMuPDF (fitz) library not found. PDF image extraction via fitz unavailable.")
-
-_AI_CORE_TESSERACT_NOT_FOUND_ERROR = None 
-try:
-    import pytesseract
-    PYTESSERACT_AVAILABLE = True
-    _AI_CORE_TESSERACT_NOT_FOUND_ERROR = pytesseract.TesseractNotFoundError
-except ImportError:
-    pytesseract = None
-    PYTESSERACT_AVAILABLE = False
-    logger.info("pytesseract library not found. OCR functionality unavailable.")
-
-try:
-    import PyPDF2 
-    PYPDF2_AVAILABLE = True
-except ImportError:
-    PyPDF2 = None
-    PYPDF2_AVAILABLE = False
-    logger.info("PyPDF2 library not found (used for some PDF metadata).")
-
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    LANGCHAIN_SPLITTER_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain.text_splitter import RecursiveCharacterTextSplitter # Fallback
-        LANGCHAIN_SPLITTER_AVAILABLE = True
-        logger.debug("Using RecursiveCharacterTextSplitter from langchain.text_splitter.")
-    except ImportError:
-        RecursiveCharacterTextSplitter = None
-        LANGCHAIN_SPLITTER_AVAILABLE = False
-        logger.critical("Langchain text splitter not found. Text chunking will fail.")
-
-# 3. NLP Model Initializations
-nlp_spacy_core = None
-SPACY_MODEL_LOADED = False
-try:
-    import spacy
-    SPACY_LIB_AVAILABLE = True
-except ImportError:
-    SPACY_LIB_AVAILABLE = False
-    logger.warning("spacy library not found. SpaCy model cannot be loaded.")
-
-if SPACY_LIB_AVAILABLE:
-    spacy_model_name_from_config = getattr(config, 'SPACY_MODEL_NAME', None)
-    if spacy_model_name_from_config:
-        try:
-            nlp_spacy_core = spacy.load(spacy_model_name_from_config)
-            SPACY_MODEL_LOADED = True
-            logger.info(f"SpaCy model '{spacy_model_name_from_config}' loaded successfully.")
-        except OSError:
-            logger.error(
-                f"SpaCy model '{spacy_model_name_from_config}' not found. "
-                f"Download with: 'python -m spacy download {spacy_model_name_from_config}'. "
-                "NER/lemmatization impacted."
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error loading SpaCy model '{spacy_model_name_from_config}': {e}")
-    else:
-        logger.warning("config.SPACY_MODEL_NAME not defined. SpaCy model not loaded.")
-
-document_embedding_model = None
-EMBEDDING_MODEL_LOADED = False
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_LIB_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_LIB_AVAILABLE = False
-    logger.critical("sentence-transformers library not found. Embedding generation will fail.")
-
-if SENTENCE_TRANSFORMERS_LIB_AVAILABLE:
-    # CORRECTED: Use DOCUMENT_EMBEDDING_MODEL_NAME from server/config.py
-    embedding_model_name_from_config = getattr(config, 'DOCUMENT_EMBEDDING_MODEL_NAME', None) 
-    if embedding_model_name_from_config:
-        try:
-            document_embedding_model = SentenceTransformer(embedding_model_name_from_config)
-            EMBEDDING_MODEL_LOADED = True
-            logger.info(f"Sentence Transformer embedding model '{embedding_model_name_from_config}' loaded successfully.")
-        except Exception as e:
-            logger.error(f"Error loading Sentence Transformer model '{embedding_model_name_from_config}': {e}. Embedding generation will fail.")
-    else:
-        # CORRECTED: Log message to reflect the correct config variable name
-        logger.critical(
-            "config.DOCUMENT_EMBEDDING_MODEL_NAME not defined or empty. " 
-            "Sentence Transformer model not loaded. Embedding generation will fail."
-        )
 
 # --- Stage 1: File Parsing and Raw Content Extraction --- (Functions as previously corrected)
 def _parse_pdf_content(file_path: str) -> Optional[str]:
@@ -203,7 +77,7 @@ def _parse_pdf_content(file_path: str) -> Optional[str]:
         return text_content.strip() or None
     except FileNotFoundError:
         logger.error(f"pypdf: File not found: {file_path}"); return None
-    except _AI_CORE_PYPDF_PDFREADERROR as pdf_err: 
+    except PYPDF_PDFREADERROR as pdf_err: 
         logger.error(f"pypdf: Error reading PDF {os.path.basename(file_path)}: {pdf_err}"); return None
     except Exception as e:
         logger.error(f"pypdf: Unexpected error parsing PDF {os.path.basename(file_path)}: {e}", exc_info=True); return None
@@ -340,7 +214,7 @@ def perform_ocr_on_images(image_objects: List[Any]) -> str:
                 ocr_text_parts.append(text.strip())
                 images_ocrd += 1
         except Exception as e:
-            if _AI_CORE_TESSERACT_NOT_FOUND_ERROR and isinstance(e, _AI_CORE_TESSERACT_NOT_FOUND_ERROR):
+            if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):
                 logger.critical("Tesseract executable not found in PATH. OCR will fail for subsequent images too.")
                 raise 
             logger.error(f"Error during OCR for image {i+1}/{len(image_objects)}: {e}", exc_info=True)
@@ -491,8 +365,8 @@ def chunk_document_into_segments(
         return []
         
     # CORRECTED: Use AI_CORE_CHUNK_SIZE and AI_CORE_CHUNK_OVERLAP from server/config.py
-    chunk_s = getattr(config, 'AI_CORE_CHUNK_SIZE', 512) 
-    chunk_o = getattr(config, 'AI_CORE_CHUNK_OVERLAP', 100) 
+    chunk_s = AI_CORE_CHUNK_SIZE
+    chunk_o = AI_CORE_CHUNK_OVERLAP
 
     original_doc_name_for_log = document_level_metadata.get('file_name', 'unknown')
     logger.info(f"Starting text chunking for {original_doc_name_for_log}. "
@@ -595,8 +469,16 @@ def process_document_for_embeddings(file_path: str, original_name: str, user_id:
         raise FileNotFoundError(f"File not found: {file_path}")
 
     try:
+
+        # Step 1: Extract Raw content
         raw_content = extract_raw_content_from_file(file_path)
-        
+        # Example of how to access: raw_content['text_content'], raw_content['images'], etc.
+        # file_type will be important: raw_content['file_type']
+        # is_scanned will be important: raw_content['is_scanned']
+        initial_extracted_text = raw_content_data.get('text_content', "") # THIS IS WHAT YOU WANT TO RETURN for Node.js analysis
+
+
+        # Step 2: Perform OCR if needed
         ocr_text_output = ""
         if raw_content.get('is_scanned') and raw_content.get('images'):
             if PYTESSERACT_AVAILABLE and pytesseract:
@@ -648,10 +530,10 @@ def process_document_for_embeddings(file_path: str, original_name: str, user_id:
         final_chunks_with_embeddings = generate_segment_embeddings(chunks_with_metadata)
         
         logger.info(f"ai_core: Successfully processed {original_name}. Generated {len(final_chunks_with_embeddings)} chunks.")
-        return final_chunks_with_embeddings
+        return final_chunks_with_embeddings, initial_extracted_text
 
     except Exception as e: 
-        if _AI_CORE_TESSERACT_NOT_FOUND_ERROR and isinstance(e, _AI_CORE_TESSERACT_NOT_FOUND_ERROR):
+        if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):
             logger.critical(f"ai_core: Tesseract (OCR engine) was not found during processing of {original_name}. OCR could not be performed.", exc_info=False)
             raise 
         
