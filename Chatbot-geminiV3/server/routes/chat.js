@@ -15,7 +15,7 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) { // A
         console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot query RAG service.");
         throw new Error("RAG service configuration error."); // Throw error to be caught by caller
     }
-    const searchUrl = `${pythonServiceUrl}/query`; // <<<--- CORRECTED TO /search ---
+    const searchUrl = `${pythonServiceUrl}/query`; // <<<--- CORRECTED TO /query ---
 
     console.log(`Querying Python RAG service for User ${userId} at ${searchUrl} with query (first 50): "${query.substring(0,50)}...", k=${k}`);
     
