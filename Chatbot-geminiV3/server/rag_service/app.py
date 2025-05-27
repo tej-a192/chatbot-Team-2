@@ -35,9 +35,11 @@ try:
     logger.info("Initializing VectorDBService for Qdrant...")
     vector_service = VectorDBService()
     vector_service.setup_collection() # Create/validate Qdrant collection on startup
+    app.vector_service = vector_service
     logger.info("VectorDBService initialized and collection setup successfully.")
 except Exception as e:
     logger.critical(f"Failed to initialize VectorDBService or setup Qdrant collection: {e}", exc_info=True)
+    app.vector_service = None
     # Application might be non-functional, consider exiting or running in a degraded state
     # For now, vector_service will be None, and endpoints will fail gracefully.
 
@@ -165,7 +167,7 @@ def add_document_qdrant():
             "status": processing_status,
             "filename": original_name,
             "user_id": user_id,
-            "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
+            "num_chunks_added_to_qdrvecorant": num_chunks_added_to_qdrant,
             "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "" # Ensure it's always a string
         }
         current_app.logger.info(f"Successfully processed '{original_name}'. Returning raw text and Qdrant status.")

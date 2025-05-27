@@ -37,6 +37,7 @@ SPACY_MODEL_LOADED = config.SPACY_MODEL_LOADED
 PYPDF2_AVAILABLE = config.PYPDF2_AVAILABLE
 EMBEDDING_MODEL_LOADED = config.EMBEDDING_MODEL_LOADED
 MAX_TEXT_LENGTH_FOR_NER  = config.MAX_TEXT_LENGTH_FOR_NER
+LANGCHAIN_SPLITTER_AVAILABLE = config.LANGCHAIN_SPLITTER_AVAILABLE
 
 # Error Strings
 PYPDF_PDFREADERROR = config.PYPDF_PDFREADERROR
@@ -45,6 +46,7 @@ TESSERACT_ERROR = config.TESSERACT_ERROR
 # Libraries and Models
 pypdf = config.pypdf
 PyPDF2 = config.PyPDF2
+pdfplumber = config.pdfplumber
 pd = config.pd
 DocxDocument = config.DocxDocument
 Image = config.Image
@@ -462,7 +464,7 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
 
 
 # --- Main Orchestration Function (to be called by app.py) ---
-def process_document_for_embeddings(file_path: str, original_name: str, user_id: str) -> List[Dict[str, Any]]:
+def process_document_for_qdrant(file_path: str, original_name: str, user_id: str) -> List[Dict[str, Any]]:
     logger.info(f"ai_core: Orchestrating document processing for {original_name}, user {user_id}")
     if not os.path.exists(file_path): 
         logger.error(f"File not found at ai_core entry point: {file_path}")
@@ -475,7 +477,7 @@ def process_document_for_embeddings(file_path: str, original_name: str, user_id:
         # Example of how to access: raw_content['text_content'], raw_content['images'], etc.
         # file_type will be important: raw_content['file_type']
         # is_scanned will be important: raw_content['is_scanned']
-        initial_extracted_text = raw_content_data.get('text_content', "") # THIS IS WHAT YOU WANT TO RETURN for Node.js analysis
+        initial_extracted_text = raw_content.get('text_content', "") # THIS IS WHAT YOU WANT TO RETURN for Node.js analysis
 
 
         # Step 2: Perform OCR if needed
