@@ -125,7 +125,7 @@ def add_document_qdrant():
         # Assuming ai_core.process_document_for_embeddings is updated to return two values,
         # or you have a new function like ai_core.process_document_for_qdrant
         current_app.logger.info(f"Calling ai_core to process document: '{original_name}'")
-        processed_chunks_with_embeddings, raw_text_for_node_analysis = ai_core.process_document_for_qdrant(
+        processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata = ai_core.process_document_for_qdrant(
             file_path=file_path,
             original_name=original_name,
             user_id=user_id
@@ -167,8 +167,9 @@ def add_document_qdrant():
             "status": processing_status,
             "filename": original_name,
             "user_id": user_id,
-            "num_chunks_added_to_qdrvecorant": num_chunks_added_to_qdrant,
-            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "" # Ensure it's always a string
+            "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
+            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "", # Ensure it's always a string
+            "chunks_with_metadata": chunks_with_metadata
         }
         current_app.logger.info(f"Successfully processed '{original_name}'. Returning raw text and Qdrant status.")
         return jsonify(response_payload), 201 # 201 Created if resources (chunks) were made

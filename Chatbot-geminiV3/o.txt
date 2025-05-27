@@ -40,212 +40,9 @@
 |-- server
 |   |-- .env
 |   |-- .gitignore
-|   |-- assets
-|   |   |-- abcd
-|   |   |   |-- code
-|   |   |   |-- docs
-|   |   |   |-- images
-|   |   |   |-- others
-|   |   |-- pavan
-|   |   |   |-- code
-|   |   |   |-- docs
-|   |   |   |-- images
-|   |   |   |-- others
-|   |   |-- testing123
-|   |   |   |-- code
-|   |   |   |-- docs
-|   |   |   |-- images
-|   |   |   |-- others
-|   |-- backup_assets
-|   |   |-- abcd
-|   |   |   |-- backup_2025-05-24T05-42-04-908Z
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1747982019486-Data_Structures_and_Algorithms.pdf
-|   |   |   |   |   |-- 1748000064595-ML_UNIT-1_NOTES.pdf
-|   |   |   |   |   |-- 1748000403794-ML_UNIT-II_NOTES__1_.pdf
-|   |   |   |-- backup_2025-05-24T05-46-21-602Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T05-52-29-326Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748065596571-Data_Structures_and_Algorithms.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-01-49-319Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748065964188-Data_Structures_and_Algorithms.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-12-02-908Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748066534449-ML_UNIT-1_NOTES.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-21-04-074Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748067139788-ML_UNIT-1_NOTES.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T05-14-52-837Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748067691634-Devops_set-1.docx
-|   |   |   |   |   |-- 1748067940444-Devops_set-1.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T07-38-35-291Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748243671755-Devops_set-1.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T13-46-59-469Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748245130994-Devops_set-1.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T15-27-23-222Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- docs
-|   |   |   |   |-- 1748065397959-ML_UNIT-1_NOTES.pdf
-|   |   |   |   |-- 1748065513642-Data_Structures_and_Algorithms.pdf
-|   |   |   |   |-- 1748236524080-Devops_set-1.pdf
-|   |   |-- pavan
-|   |   |   |-- backup_2025-05-18T11-28-19-587Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-19T04-24-09-450Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-19T14-48-53-634Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-20T05-04-21-841Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-21T04-26-23-221Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1747718220899-Resume_Ravindra.pdf
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-21T10-59-36-262Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-22T04-46-13-641Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-23T06-32-01-560Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T05-42-04-908Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T05-46-21-602Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T05-52-29-326Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-01-49-319Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-12-02-908Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-24T06-21-04-074Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T05-14-52-837Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T07-38-35-291Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T13-46-59-469Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T15-27-23-222Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- docs
-|   |   |   |   |-- 1747220617618-HoI_letter__2_.docx
-|   |   |   |   |-- 1747555708261-OR-Previous.pdf
-|   |   |   |   |-- 1747568701235-Resume_Ravindra.pdf
-|   |   |-- testing
-|   |   |   |-- backup_2025-05-26T07-07-30-545Z
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748243070317-hai.txt.txt
-|   |   |   |-- backup_2025-05-26T07-15-34-465Z
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748243393220-hai.txt.txt
-|   |   |   |-- docs
-|   |   |   |   |-- 1748242648280-hai.txt.txt
-|   |   |   |   |-- 1748242704358-hai.txt.txt
-|   |   |   |   |-- 1748243276605-hai.txt.txt
-|   |   |-- testing123
-|   |   |   |-- backup_2025-05-26T07-15-34-465Z
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748243451888-hai.txt.txt
-|   |   |   |-- backup_2025-05-26T07-38-35-291Z
-|   |   |   |   |-- docs
-|   |   |   |   |   |-- 1748243742607-hai.txt.txt
-|   |   |   |-- backup_2025-05-26T13-46-59-469Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
-|   |   |   |-- backup_2025-05-26T15-27-23-222Z
-|   |   |   |   |-- code
-|   |   |   |   |-- docs
-|   |   |   |   |-- images
-|   |   |   |   |-- others
 |   |-- config
 |   |   |-- db.js
+|   |   |-- promptTemplates.js
 |   |-- faiss_indices
 |   |   |-- sample.txt
 |   |   |-- user_682477567efd11b5da11da01
@@ -292,9 +89,12 @@
 |   |-- server.js
 |   |-- services
 |   |   |-- geminiService.js
+|   |   |-- kgService.js
 |   |-- syllabi
 |   |   |-- embedded_systems.md
 |   |   |-- machine_learning.md
 |   |-- utils
 |   |   |-- assetCleanup.js
 |   |   |-- networkUtils.js
+|   |-- workers
+|   |   |-- kgWorker.js
