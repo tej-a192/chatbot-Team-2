@@ -1,0 +1,579 @@
+{
+  "edges": [
+    {
+      "from": "Voting_Classifiers",
+      "relationship": "subtopic_of",
+      "to": "Hard_Voting"
+    },
+    {
+      "from": "Voting_Classifiers",
+      "relationship": "subtopic_of",
+      "to": "Soft_Voting"
+    },
+    {
+      "from": "Kernel_Trick",
+      "relationship": "includes",
+      "to": "Polynomial_Kernel"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "Ensemble_Learning"
+    },
+    {
+      "from": "SVMAlgorithm",
+      "relationship": "has_subtopic",
+      "to": "SupportVectors"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "contains",
+      "to": "Random_Forest"
+    },
+    {
+      "from": "Hyperplane",
+      "relationship": "depends_on",
+      "to": "Margin"
+    },
+    {
+      "from": "Regression_Problems",
+      "relationship": "subtopic_of",
+      "to": "Support_Vector_Regression"
+    },
+    {
+      "from": "Posterior Probability",
+      "relationship": "subtopic",
+      "to": "Bayes' Theorem"
+    },
+    {
+      "from": "Machine_Learning_Topics",
+      "relationship": "contains",
+      "to": "Naive_Bayes_Classifier"
+    },
+    {
+      "from": "SVMAlgorithm",
+      "relationship": "subtopic_of",
+      "to": "LinearSVM"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Improve_Predictions"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Boosting"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Heterogeneous_Ensemble"
+    },
+    {
+      "from": "Support Vectors",
+      "relationship": "subtopic",
+      "to": "Support Vector Machines"
+    },
+    {
+      "from": "Machine_Learning_Algorithms",
+      "relationship": "subtopic",
+      "to": "Random_Forest_Disadvantages"
+    },
+    {
+      "from": "Naive_Bayes_Classifier",
+      "relationship": "describes",
+      "to": "Algorithm_Details"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Decrease_Variance"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Bagging_Pasting"
+    },
+    {
+      "from": "Hyperplane",
+      "relationship": "subtopic",
+      "to": "Support Vector Machines"
+    },
+    {
+      "from": "Linear SVM",
+      "relationship": "subtopic",
+      "to": "Support Vector Machines"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "Boosting"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Homogeneous_Ensemble"
+    },
+    {
+      "from": "Marginal Probability",
+      "relationship": "subtopic",
+      "to": "Bayes' Theorem"
+    },
+    {
+      "from": "Likelihood Probability",
+      "relationship": "subtopic",
+      "to": "Bayes' Theorem"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "Stacking"
+    },
+    {
+      "from": "Random_Forest_Algorithm",
+      "relationship": "subtopic",
+      "to": "How_Random_Forest_Works"
+    },
+    {
+      "from": "SVMAlgorithm",
+      "relationship": "has_subtopic",
+      "to": "Hyperplane"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Sequential_Approach"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "Random_Forest_Algorithm"
+    },
+    {
+      "from": "Naive_Bayes_Classifier",
+      "relationship": "explains",
+      "to": "Bayesian_Principles"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Parallel_Approach"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "contains",
+      "to": "Voting_Classifiers"
+    },
+    {
+      "from": "Machine_Learning_Algorithms",
+      "relationship": "subtopic",
+      "to": "Random_Forest_Advantages"
+    },
+    {
+      "from": "MachineLearningModels",
+      "relationship": "has_subtopic",
+      "to": "SVMAlgorithm"
+    },
+    {
+      "from": "MachineLearningModels",
+      "relationship": "has_subtopic",
+      "to": "KNNClassifier"
+    },
+    {
+      "from": "Non-Linear SVM",
+      "relationship": "subtopic",
+      "to": "Support Vector Machines"
+    },
+    {
+      "from": "Nonlinear_Data_Classification",
+      "relationship": "depends_on",
+      "to": "Support_Vector_Machines"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "subtopic",
+      "to": "Nonlinear_Data_Classification"
+    },
+    {
+      "from": "Kernel_Trick",
+      "relationship": "includes",
+      "to": "Linear_Kernel"
+    },
+    {
+      "from": "Conditional Probability",
+      "relationship": "depends_on",
+      "to": "Bayes' Theorem"
+    },
+    {
+      "from": "Ensemble_Learning",
+      "relationship": "subtopic_of",
+      "to": "Decrease_Bias"
+    },
+    {
+      "from": "Support Vectors",
+      "relationship": "defines_position_of",
+      "to": "Hyperplane"
+    },
+    {
+      "from": "SVMAlgorithm",
+      "relationship": "subtopic_of",
+      "to": "NonlinearSVM"
+    },
+    {
+      "from": "Kernel_Trick",
+      "relationship": "includes",
+      "to": "RBF_Kernel"
+    },
+    {
+      "from": "Machine_Learning_Algorithms",
+      "relationship": "related_to",
+      "to": "Support_Vector_Machine"
+    },
+    {
+      "from": "Support_Vector_Machines",
+      "relationship": "uses",
+      "to": "Kernel_Trick"
+    },
+    {
+      "from": "Machine_Learning_Topics",
+      "relationship": "contains",
+      "to": "Regression_Problems"
+    },
+    {
+      "from": "Machine_Learning",
+      "relationship": "subtopic",
+      "to": "Regression_Problems"
+    },
+    {
+      "from": "Margin",
+      "relationship": "subtopic",
+      "to": "Support Vector Machines"
+    },
+    {
+      "from": "Prior Probability",
+      "relationship": "subtopic",
+      "to": "Bayes' Theorem"
+    }
+  ],
+  "nodes": [
+    {
+      "description": "Field of study that uses algorithms to learn from and make predictions on data.",
+      "id": "Machine_Learning",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Methodology combining multiple models for better performance than individual ones",
+      "id": "Ensemble_Learning",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning algorithm for classification and regression",
+      "id": "Random_Forest",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Aggregates predictions from multiple classifiers to improve accuracy",
+      "id": "Voting_Classifiers",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Predicts class with highest majority of votes",
+      "id": "Hard_Voting",
+      "parent": "Voting_Classifiers",
+      "type": "subnode"
+    },
+    {
+      "description": "Predicts based on average probability for each class",
+      "id": "Soft_Voting",
+      "parent": "Voting_Classifiers",
+      "type": "subnode"
+    },
+    {
+      "description": "Reduces variance through methods like bagging and pasting",
+      "id": "Decrease_Variance",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Reduces bias using boosting techniques",
+      "id": "Decrease_Bias",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Enhances prediction accuracy through stacking methods",
+      "id": "Improve_Predictions",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Involves base learners with dependencies, e.g., Adaboost",
+      "id": "Sequential_Approach",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Uses independent base learners, e.g., Random Forest",
+      "id": "Parallel_Approach",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Single base learning algorithm used across all models",
+      "id": "Homogeneous_Ensemble",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Different base estimators algorithms are used",
+      "id": "Heterogeneous_Ensemble",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Bootstrap sampling and aggregation technique to reduce variance",
+      "id": "Bagging_Pasting",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Family of algorithms converting weak learners to strong ones through weighted voting or summing.",
+      "id": "Boosting",
+      "parent": "Ensemble_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Ensemble learning technique combining multiple models via a meta-classifier/regressor.",
+      "id": "Stacking",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning algorithm using decision trees for classification and regression tasks.",
+      "id": "Random_Forest_Algorithm",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Process of creating a random forest classifier through repeated tree creation and voting.",
+      "id": "How_Random_Forest_Works",
+      "parent": "Random_Forest_Algorithm",
+      "type": "subnode"
+    },
+    {
+      "description": "Collection of algorithms used in machine learning for classification and regression tasks.",
+      "id": "Machine_Learning_Algorithms",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Advantages include avoiding overfitting, versatility, and feature engineering.",
+      "id": "Random_Forest_Advantages",
+      "parent": "Machine_Learning_Algorithms",
+      "type": "subnode"
+    },
+    {
+      "description": "Disadvantages involve increased computational cost for higher accuracy and inability to describe data relationships.",
+      "id": "Random_Forest_Disadvantages",
+      "parent": "Machine_Learning_Algorithms",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning algorithm used primarily for classification tasks in machine learning.",
+      "id": "Support_Vector_Machine",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Models used for classification tasks",
+      "id": "MachineLearningModels",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Classification model using nearest neighbors",
+      "id": "KNNClassifier",
+      "parent": "MachineLearningModels",
+      "type": "subnode"
+    },
+    {
+      "description": "Support Vector Machine for classification tasks",
+      "id": "SVMAlgorithm",
+      "parent": "MachineLearningModels",
+      "type": "subnode"
+    },
+    {
+      "description": "Used for linearly separable data with a straight line boundary",
+      "id": "LinearSVM",
+      "parent": "SVMAlgorithm",
+      "type": "subnode"
+    },
+    {
+      "description": "Used for non-linearly separated data requiring complex boundaries",
+      "id": "NonlinearSVM",
+      "parent": "SVMAlgorithm",
+      "type": "subnode"
+    },
+    {
+      "description": "Decision boundary that separates data points in feature space",
+      "id": "Hyperplane",
+      "parent": "SVMAlgorithm",
+      "type": "subnode"
+    },
+    {
+      "description": "Extreme cases used to define the hyperplane in SVM",
+      "id": "SupportVectors",
+      "parent": "SVMAlgorithm",
+      "type": "subnode"
+    },
+    {
+      "description": "Technique for classification and regression analysis",
+      "id": "Support Vector Machines",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Distance between the hyperplane and closest data points (support vectors)",
+      "id": "Margin",
+      "parent": "Support Vector Machines",
+      "type": "subnode"
+    },
+    {
+      "description": "Data points that define the position of the hyperplane",
+      "id": "Support Vectors",
+      "parent": "Support Vector Machines",
+      "type": "subnode"
+    },
+    {
+      "description": "SVM for linearly separable data using a straight line as decision boundary",
+      "id": "Linear SVM",
+      "parent": "Support Vector Machines",
+      "type": "subnode"
+    },
+    {
+      "description": "SVM for non-linearly separable data using kernel tricks to transform features",
+      "id": "Non-Linear SVM",
+      "parent": "Support Vector Machines",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning technique used for regression tasks",
+      "id": "Support Vector Regression",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Techniques for classifying non-linearly separable datasets.",
+      "id": "Nonlinear_Data_Classification",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Algorithm that uses kernels to classify nonlinear data.",
+      "id": "Support_Vector_Machines",
+      "parent": "Nonlinear_Data_Classification",
+      "type": "subnode"
+    },
+    {
+      "description": "Technique used by SVMs to handle non-linear datasets.",
+      "id": "Kernel_Trick",
+      "parent": "Support_Vector_Machines",
+      "type": "subnode"
+    },
+    {
+      "description": "Function that computes the dot product between two observations.",
+      "id": "Linear_Kernel",
+      "parent": "Kernel_Trick",
+      "type": "subnode"
+    },
+    {
+      "description": "Allows for curved decision boundaries in input space.",
+      "id": "Polynomial_Kernel",
+      "parent": "Kernel_Trick",
+      "type": "subnode"
+    },
+    {
+      "description": "Creates complex regions within feature space for non-linear data separation.",
+      "id": "RBF_Kernel",
+      "parent": "Kernel_Trick",
+      "type": "subnode"
+    },
+    {
+      "description": "Problems involving mapping input variables to a continuous output variable",
+      "id": "Regression_Problems",
+      "parent": "Machine_Learning",
+      "type": "subnode"
+    },
+    {
+      "description": "Main topics in machine learning",
+      "id": "Machine_Learning_Topics",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Uses SVM principles for regression tasks",
+      "id": "Support_Vector_Regression",
+      "parent": "Regression_Problems",
+      "type": "subnode"
+    },
+    {
+      "description": "Supervised learning algorithm based on Bayes' theorem for classification",
+      "id": "Naive_Bayes_Classifier",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Details of the Naïve Bayes algorithm and its applications",
+      "id": "Algorithm_Details",
+      "parent": "Naive_Bayes_Classifier",
+      "type": "subnode"
+    },
+    {
+      "description": "Explanation of why it's called Naïve Bayes based on Bayesian principles",
+      "id": "Bayesian_Principles",
+      "parent": "Naive_Bayes_Classifier",
+      "type": "subnode"
+    },
+    {
+      "description": "Rule used to determine the probability of a hypothesis with prior knowledge",
+      "id": "Bayes' Theorem",
+      "parent": null,
+      "type": "major"
+    },
+    {
+      "description": "Probability of an event occurring given that another event has already occurred",
+      "id": "Conditional Probability",
+      "parent": "Bayes' Theorem",
+      "type": "subnode"
+    },
+    {
+      "description": "Probability of hypothesis A on the observed event B",
+      "id": "Posterior Probability",
+      "parent": "Bayes' Theorem",
+      "type": "subnode"
+    },
+    {
+      "description": "Probability of evidence given that a hypothesis is true",
+      "id": "Likelihood Probability",
+      "parent": "Bayes' Theorem",
+      "type": "subnode"
+    },
+    {
+      "description": "Probability of hypothesis before observing the evidence",
+      "id": "Prior Probability",
+      "parent": "Bayes' Theorem",
+      "type": "subnode"
+    },
+    {
+      "description": "Probability of Evidence",
+      "id": "Marginal Probability",
+      "parent": "Bayes' Theorem",
+      "type": "subnode"
+    }
+  ]
+}

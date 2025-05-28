@@ -7,19 +7,18 @@ import api from '../../services/api.js';
 import toast from 'react-hot-toast';
 import { LogIn, UserPlus, X, Terminal, KeyRound, Link2, User as UserIcon, AlertCircle } from 'lucide-react';
 import Button from '../core/Button.jsx';
-import IconButton from '../core/IconButton.jsx'; // <<--- ***** ADD THIS IMPORT *****
+import IconButton from '../core/IconButton.jsx';
 import { motion } from 'framer-motion';
 
-function AuthModal({ isOpen, onClose }) {
+function AuthModal({ isOpen, onClose }) { // onClose will be called with authData from AuthContext
     const { 
         login, signup, devLogin, 
-        DEV_MODE_ALLOW_DEV_LOGIN, // Flag from AuthContext
-        MOCK_DEV_USERNAME, MOCK_DEV_PASSWORD // Default credentials from AuthContext
+        DEV_MODE_ALLOW_DEV_LOGIN, 
+        MOCK_DEV_USERNAME, MOCK_DEV_PASSWORD
     } = useAuth(); 
     const { selectedLLM: globalSelectedLLM, switchLLM: setGlobalLLM } = useAppState();
     
     const [isLoginView, setIsLoginView] = useState(true);
-    // Pre-fill if dev mode allows and credentials are provided by AuthContext
     const [username, setUsername] = useState(DEV_MODE_ALLOW_DEV_LOGIN ? (MOCK_DEV_USERNAME || '') : '');
     const [password, setPassword] = useState(DEV_MODE_ALLOW_DEV_LOGIN ? (MOCK_DEV_PASSWORD || '') : '');
     const [localSelectedLLM, setLocalSelectedLLM] = useState(globalSelectedLLM || 'ollama');
@@ -57,29 +56,34 @@ function AuthModal({ isOpen, onClose }) {
         }
 
         setError(''); setLoading(true);
-
         const toastId = toast.loading(isLoginView ? 'Logging in...' : 'Signing up...');
         
         try {
-            let response;
+            let authDataResponse; // This will contain { token, _id, username, sessionId, message }
             const apiPayload = { username, password };
             if (isLoginView) {
-                response = await login(apiPayload);
+                authDataResponse = await login(apiPayload); // From AuthContext
             } else { 
-                response = await signup(apiPayload);
-                setGlobalLLM(localSelectedLLM);
+                authDataResponse = await signup(apiPayload); // From AuthContext
+                
+                setGlobalLLM(localSelectedLLM); // Update AppStateContext
+                
+                // Attempt to save LLM config (api.js will handle mock/real)
                 if (localSelectedLLM === 'gemini' && geminiApiKey.trim()) {
-                    await api.updateUserLLMConfig({ llmProvider: 'gemini', apiKey: geminiApiKey.trim() });
-                    toast.success('Gemini API key preference noted (mocked).');
+                    try {
+                        await api.updateUserLLMConfig({ llmProvider: 'gemini', apiKey: geminiApiKey.trim() });
+                        // No separate toast here, AuthContext's response is primary
+                    } catch (configErr) { toast.error(`Note: Could not save Gemini config to backend: ${configErr.message}`);}
                 }
                 if (localSelectedLLM === 'ollama' && ollamaApiUrl.trim()) {
-                     await api.updateUserLLMConfig({ llmProvider: 'ollama', ollamaUrl: ollamaApiUrl.trim() });
-                    toast.success('Ollama URL preference noted (mocked).');
+                    try {
+                         await api.updateUserLLMConfig({ llmProvider: 'ollama', ollamaUrl: ollamaApiUrl.trim() });
+                    } catch (configErr) { toast.error(`Note: Could not save Ollama config to backend: ${configErr.message}`);}
                 }
             }
             toast.dismiss(toastId);
-            toast.success(isLoginView ? 'Login Successful!' : 'Signup Successful!');
-            onClose(response); 
+            toast.success(authDataResponse.message || (isLoginView ? 'Login Successful!' : 'Signup Successful!'));
+            onClose(authDataResponse); // Pass the full authData from AuthContext to App.jsx
         } catch (err) {
             toast.dismiss(toastId);
             const errorMessage = err.response?.data?.message || err.message || `Failed: ${isLoginView ? 'login' : 'signup'}`;
@@ -89,28 +93,24 @@ function AuthModal({ isOpen, onClose }) {
     };
 
     const handleDevLogin = async () => {
-        if (devLogin) {
-            setDevLoginLoading(true); setError('');
-            const toastId = toast.loading("Attempting Dev Quick Login...");
-            try {
-                const devData = await devLogin(); 
-                if (devData && devData.token) {
-                    toast.dismiss(toastId);
-                    toast.success("Dev Quick Login Successful!");
-                    onClose(devData);
-                } else {
-                    throw new Error("Dev login conditions not met or mock API failed.");
-                }
-            } catch(err) {
-                toast.dismiss(toastId);
-                const errorMessage = err.message || "Dev Quick Login encountered an error.";
-                setError(errorMessage);
-                toast.error(errorMessage);
-            } finally {
-                setDevLoginLoading(false);
-            }
-        } else {
-            toast.error("Dev login feature not available in current AuthContext setup.");
+        if (!devLogin) {
+            toast.error("Dev Quick Login is not available in current setup.");
+            return;
+        }
+        setDevLoginLoading(true); setError('');
+        const toastId = toast.loading("Attempting Dev Quick Login...");
+        try {
+            const devAuthData = await devLogin(); // From AuthContext
+            toast.dismiss(toastId);
+            toast.success(devAuthData.message || "Dev Quick Login Successful!");
+            onClose(devAuthData); // Pass full authData
+        } catch(err) {
+            toast.dismiss(toastId);
+            const errorMessage = err.response?.data?.message || err.message || "Dev Quick Login encountered an error.";
+            setError(errorMessage);
+            toast.error(errorMessage);
+        } finally {
+            setDevLoginLoading(false);
         }
     };
 
@@ -134,10 +134,9 @@ function AuthModal({ isOpen, onClose }) {
                     <h2 className="text-xl sm:text-2xl font-bold text-text-light dark:text-text-dark">
                         {isLoginView ? 'Welcome Back' : 'Create Your Account'}
                     </h2>
-                    {/* This is where IconButton is used */}
                     <IconButton 
                         icon={X} 
-                        onClick={() => onClose(null)} 
+                        onClick={() => onClose(null)} // Pass null if modal closed manually without auth
                         variant="ghost" 
                         size="sm" 
                         title="Close" 
@@ -196,7 +195,7 @@ function AuthModal({ isOpen, onClose }) {
                     </button>
                 </p>
 
-                {DEV_MODE_ALLOW_DEV_LOGIN && (
+                {DEV_MODE_ALLOW_DEV_LOGIN && devLogin && (
                     <div className="mt-4 pt-4 border-t border-border-light dark:border-border-dark">
                         <Button
                             type="button" onClick={handleDevLogin} fullWidth 

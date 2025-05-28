@@ -532,7 +532,7 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
         final_chunks_with_embeddings = generate_segment_embeddings(chunks_with_metadata)
         
         logger.info(f"ai_core: Successfully processed {original_name}. Generated {len(final_chunks_with_embeddings)} chunks.")
-        return final_chunks_with_embeddings, initial_extracted_text
+        return final_chunks_with_embeddings, initial_extracted_text, chunks_with_metadata
 
     except Exception as e: 
         if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):

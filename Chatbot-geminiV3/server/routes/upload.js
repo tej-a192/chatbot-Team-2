@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { tempAuth } = require('../middleware/authMiddleware');
+const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User'); // Import the User model
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); 
 const geminiService = require('../services/geminiService');
@@ -52,9 +52,9 @@ const allowedExtensions = [
 // --- Multer Config ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        // tempAuth middleware ensures req.user exists here
+        // authMiddleware middleware ensures req.user exists here
         if (!req.user || !req.user.username) {
-            // This should ideally not happen if tempAuth works correctly
+            // This should ideally not happen if authMiddleware works correctly
             console.error("Multer Destination Error: User context missing after auth middleware.");
             return cb(new Error("Authentication error: User context not found."));
         }
@@ -88,7 +88,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    // tempAuth middleware should run before this, ensuring req.user exists
+    // authMiddleware middleware should run before this, ensuring req.user exists
     if (!req.user) {
          console.warn(`Upload Rejected (File Filter): User context missing.`);
          const error = new multer.MulterError('UNAUTHENTICATED'); // Custom code?
@@ -311,7 +311,7 @@ async function triggerAnalysisGeneration(userId, originalName, textForAnalysis) 
 
 
 // --- Modified Upload Route ---
-router.post('/', tempAuth, (req, res) => {
+router.post('/', authMiddleware, (req, res) => {
     const uploader = upload.single('file');
 
     uploader(req, res, async function (err) { // <<<< ASYNC HERE IS KEY

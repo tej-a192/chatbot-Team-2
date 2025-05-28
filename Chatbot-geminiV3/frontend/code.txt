@@ -957,206 +957,6 @@ export default MindmapViewer;
 `src/components/auth/AuthModal.jsx`
 
 ```javascript
-// // frontend/src/components/auth/AuthModal.jsx
-// import React, { useState, useEffect } from 'react';
-// import { useAuth } from '../../hooks/useAuth.jsx';
-// import { useAppState } from '../../contexts/AppStateContext.jsx';
-// import LLMSelection from './LLMSelection.jsx';
-// import api from '../../services/api.js'; // For V1, this will use mocked functions
-// import toast from 'react-hot-toast';
-// import { LogIn, UserPlus, X, Terminal, KeyRound, Link2, User as UserIcon } from 'lucide-react';
-// import Button from '../core/Button.jsx';
-// import { motion, AnimatePresence } from 'framer-motion'; // Assuming you're using AnimatePresence in App.jsx for this modal
-
-// function AuthModal({ isOpen, onClose }) {
-//     const { login, signup, devLogin, isTestingMode, DEV_MODE_ALLOW_DEV_LOGIN } = useAuth(); 
-//     const { selectedLLM: globalSelectedLLM, switchLLM: setGlobalLLM } = useAppState();
-    
-//     const [isLoginView, setIsLoginView] = useState(true);
-//     const [username, setUsername] = useState(isTestingMode || DEV_MODE_ALLOW_DEV_LOGIN ? 'DevUser' : '');
-//     const [password, setPassword] = useState(isTestingMode || DEV_MODE_ALLOW_DEV_LOGIN ? 'devpass' : '');
-//     const [localSelectedLLM, setLocalSelectedLLM] = useState(globalSelectedLLM || 'ollama');
-//     const [geminiApiKey, setGeminiApiKey] = useState('');
-//     const [ollamaApiUrl, setOllamaApiUrl] = useState('');
-    
-//     const [error, setError] = useState('');
-//     const [loading, setLoading] = useState(false);
-
-//     useEffect(() => {
-//         if (isOpen) {
-//             setUsername(isTestingMode || DEV_MODE_ALLOW_DEV_LOGIN ? 'DevUser' : '');
-//             setPassword(isTestingMode || DEV_MODE_ALLOW_DEV_LOGIN ? 'devpass' : '');
-//             setLocalSelectedLLM(globalSelectedLLM || 'ollama');
-//             setGeminiApiKey('');
-//             setOllamaApiUrl('');
-//             setError('');
-//         }
-//     }, [isOpen, isLoginView, isTestingMode, DEV_MODE_ALLOW_DEV_LOGIN, globalSelectedLLM]);
-
-//     const handleLlmChange = (llm) => setLocalSelectedLLM(llm);
-
-//     const handleSubmit = async (e) => {
-//         e.preventDefault();
-//         if (!username.trim() || !password.trim()) {
-//             setError("Username and password are required.");
-//             toast.error("Username and password are required.");
-//             return;
-//         }
-//         setError('');
-//         setLoading(true);
-//         const toastId = toast.loading(isLoginView ? 'Logging in...' : 'Signing up...');
-
-//         try {
-//             let response;
-//             const apiPayload = { username, password };
-
-//             if (isLoginView) {
-//                 response = await login(apiPayload); // Calls mock login from AuthContext or api.js
-//             } else { 
-//                 response = await signup(apiPayload); // Calls mock signup
-//                 setGlobalLLM(localSelectedLLM); 
-                
-//                 if (localSelectedLLM === 'gemini' && geminiApiKey.trim()) {
-//                     await api.updateUserLLMConfig({ llmProvider: 'gemini', apiKey: geminiApiKey.trim() }); // Mocked
-//                     toast.success('Gemini API key preference noted (mocked).');
-//                 }
-//                 if (localSelectedLLM === 'ollama' && ollamaApiUrl.trim()) {
-//                      await api.updateUserLLMConfig({ llmProvider: 'ollama', ollamaUrl: ollamaApiUrl.trim() }); // Mocked
-//                     toast.success('Ollama URL preference noted (mocked).');
-//                 }
-//             }
-//             toast.dismiss(toastId);
-//             toast.success(isLoginView ? 'Mock Login Successful!' : 'Mock Signup Successful!');
-//             onClose(response); 
-//         } catch (err) {
-//             toast.dismiss(toastId);
-//             const errorMessage = err.message || `Failed: ${isLoginView ? 'login' : 'signup'} (mock error)`;
-//             setError(errorMessage);
-//             toast.error(errorMessage);
-//         } finally {
-//             setLoading(false);
-//         }
-//     };
-
-//     const handleDevLogin = () => {
-//         if (devLogin) { // devLogin comes from AuthContext
-//             const devData = devLogin(); 
-//             if (devData) {
-//                 toast.success("Dev Quick Login Successful!");
-//                 onClose(devData);
-//             }
-//         } else {
-//             toast.error("Dev login not available.");
-//         }
-//     };
-
-//     if (!isOpen && !isTestingMode) return null; // If not testing mode and not open, render nothing
-//     if (isTestingMode && !isOpen && token && user) return null; // If testing mode, already "logged in" and modal not forced open
-
-//     // Define input classes here for consistency
-//     const inputWrapperClass = "relative";
-//     const inputIconClass = "absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted-light dark:text-text-muted-dark pointer-events-none";
-//     const inputFieldClass = "input-field pl-10 py-2.5 text-sm"; // Uses .input-field from index.css
-
-//     return (
-//         // No AnimatePresence here, App.jsx handles it for the modal
-//         <motion.div
-//             key="auth-modal-content" // For AnimatePresence in App.jsx
-//             initial={{ opacity: 0, scale: 0.95, y: -20 }}
-//             animate={{ opacity: 1, scale: 1, y: 0 }}
-//             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-//             transition={{ type: "spring", stiffness: 400, damping: 25 }}
-//             className="card-base p-6 sm:p-8 w-full max-w-md glass-effect" // Added glass-effect
-//             // Removed backdrop div, assuming Modal component in App.jsx handles it
-//         >
-//             <div className="flex justify-between items-center mb-6">
-//                 <h2 className="text-xl sm:text-2xl font-bold text-text-light dark:text-text-dark">
-//                     {isLoginView ? 'Welcome Back' : 'Create Your Account'}
-//                 </h2>
-//                 <IconButton 
-//                     icon={X} 
-//                     onClick={() => onClose(null)} // Pass null to indicate manual close
-//                     variant="ghost" 
-//                     size="sm" 
-//                     title="Close" 
-//                     className="text-text-muted-light dark:text-text-muted-dark hover:text-red-500 dark:hover:text-red-400"
-//                 />
-//             </div>
-
-//             {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm animate-fadeIn">{error}</div>}
-
-//             <form onSubmit={handleSubmit} className="space-y-5">
-//                 <div className={inputWrapperClass}>
-//                     <UserIcon className={inputIconClass} />
-//                     <input type="text" id="username" className={inputFieldClass} placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required disabled={loading}/>
-//                 </div>
-//                 <div className={inputWrapperClass}>
-//                     <KeyRound className={inputIconClass} />
-//                     <input type="password" id="password" className={inputFieldClass} placeholder="Password (min. 6 characters)" value={password} onChange={(e) => setPassword(e.target.value)} required minLength="6" disabled={loading}/>
-//                 </div>
-
-//                 {!isLoginView && (
-//                     <div className="space-y-4 pt-2 animate-fadeIn">
-//                         <LLMSelection selectedLLM={localSelectedLLM} onLlmChange={handleLlmChange} />
-//                         {localSelectedLLM === 'gemini' && (
-//                             <div className="mt-3 space-y-1">
-//                                 <label htmlFor="geminiApiKeyModal" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Gemini API Key (Optional)</label>
-//                                 <div className={inputWrapperClass}>
-//                                     <KeyRound className={inputIconClass} />
-//                                     <input type="password" id="geminiApiKeyModal" className={inputFieldClass} placeholder="Enter your Gemini API Key" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} disabled={loading}/>
-//                                 </div>
-//                             </div>
-//                         )}
-//                         {localSelectedLLM === 'ollama' && (
-//                             <div className="mt-3 space-y-1">
-//                                 <label htmlFor="ollamaApiUrlModal" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Ollama API URL (Optional)</label>
-//                                  <div className={inputWrapperClass}>
-//                                     <Link2 className={inputIconClass} />
-//                                     <input type="text" id="ollamaApiUrlModal" className={inputFieldClass} placeholder="Default: http://localhost:11434" value={ollamaApiUrl} onChange={(e) => setOllamaApiUrl(e.target.value)} disabled={loading}/>
-//                                 </div>
-//                             </div>
-//                         )}
-//                     </div>
-//                 )}
-
-//                 <Button type="submit" fullWidth isLoading={loading} leftIcon={isLoginView ? <LogIn size={18}/> : <UserPlus size={18}/>} className="py-2.5 !text-base"> {/* Made button text larger */}
-//                     {isLoginView ? 'Login' : 'Sign Up'}
-//                 </Button>
-//             </form>
-
-//             <p className="mt-6 text-center text-sm">
-//                 <button 
-//                     onClick={() => { setIsLoginView(!isLoginView); setError(''); }}
-//                     className="font-medium text-primary hover:text-primary-dark dark:text-primary-light dark:hover:text-primary-darker transition-colors"
-//                     disabled={loading}
-//                 >
-//                     {isLoginView ? "Don't have an account? Sign Up" : "Already have an account? Login"}
-//                 </button>
-//             </p>
-
-//             {/* DEV_MODE_ALLOW_DEV_LOGIN is from AuthContext */}
-//             {DEV_MODE_ALLOW_DEV_LOGIN && ( 
-//                 <div className="mt-4 pt-4 border-t border-border-light dark:border-border-dark">
-//                     <Button
-//                         type="button" onClick={handleDevLogin} fullWidth 
-//                         className="bg-yellow-500 hover:bg-yellow-600 dark:bg-yellow-600 dark:hover:bg-yellow-700 !text-white dark:!text-gray-900 font-semibold py-2.5 !text-base" // Overriding some default Button styles
-//                         leftIcon={<Terminal size={18} />}
-//                     >
-//                         Dev Quick Login
-//                     </Button>
-//                 </div>
-//             )}
-//         </motion.div>
-//     );
-// }
-// export default AuthModal;
-
-
-
-
-
-
-
 // frontend/src/components/auth/AuthModal.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth.jsx';
@@ -1214,8 +1014,11 @@ function AuthModal({ isOpen, onClose }) {
             toast.error("Username and password are required.");
             return;
         }
+
         setError(''); setLoading(true);
+
         const toastId = toast.loading(isLoginView ? 'Logging in...' : 'Signing up...');
+        
         try {
             let response;
             const apiPayload = { username, password };
@@ -2203,21 +2006,6 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
         fetchFiles();
     }, [fetchFiles]);
 
-    const handleRename = async (file, newOriginalName) => {
-        if (!newOriginalName || newOriginalName === file.originalName) return;
-        const toastId = toast.loading(`Renaming ${file.originalName} (mock)...`);
-        try {
-            await api.renameFile(file.serverFilename, newOriginalName); // Mocked
-            toast.success(`Renamed to ${newOriginalName} (mock).`, { id: toastId });
-            fetchFiles(); 
-            if (selectedDocument?.serverFilename === file.serverFilename) {
-                onSelectDocument({...file, originalName: newOriginalName});
-            }
-        } catch (err) {
-            toast.error(`Mock rename failed: ${err.message}`, { id: toastId });
-        }
-    };
-
     const handleDelete = async (file) => {
         if (!window.confirm(`MOCK: Are you sure you want to delete "${file.originalName}"?`)) return;
         const toastId = toast.loading(`Deleting ${file.originalName} (mock)...`);
@@ -2257,10 +2045,10 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
     return (
         <div className="space-y-1.5 text-xs custom-scrollbar pr-1"> {/* Added pr-1 for scrollbar */}
             {files.map(file => {
-                const isSelected = selectedDocument?.serverFilename === file.serverFilename;
+                const isSelected = selectedDocument;
                 return (
                     <div 
-                        key={file.serverFilename} 
+                        key={file.originalName} 
                         onClick={() => onSelectDocument(isSelected ? null : file)} // Call the prop
                         className={`p-2.5 bg-surface-light dark:bg-gray-800 border rounded-md flex items-center justify-between hover:shadow-md transition-all duration-150 cursor-pointer
                                     ${isSelected 
@@ -2278,10 +2066,6 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
                             </span>
                         </div>
                         <div className="flex-shrink-0 flex items-center gap-0.5"> {/* Reduced gap for smaller buttons */}
-                            <IconButton icon={Edit3} size="sm" variant="ghost" title="Rename"
-                                onClick={(e) => { e.stopPropagation(); const newN = prompt(`Rename "${file.originalName}" to:`, file.originalName); if(newN && newN.trim() !== '' && newN !== file.originalName) handleRename(file, newN.trim()); }}
-                                className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 p-1" // Smaller padding
-                            />
                             <IconButton icon={Trash2} size="sm" variant="ghost" title="Delete"
                                 onClick={(e) => { e.stopPropagation(); handleDelete(file);}}
                                 className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 p-1" // Smaller padding
@@ -2461,110 +2245,6 @@ export default DocumentUpload;
 `src/components/layout/CenterPanel.jsx`
 
 ```javascript
-// import React, { useState, useEffect } from 'react';
-// import ChatHistory from '../chat/ChatHistory';
-// import ChatInput from '../chat/ChatInput';
-// import api from '../../services/api';
-// import { useAuth } from '../../hooks/useAuth';
-// import { useAppState } from '../../contexts/AppStateContext';
-// import toast from 'react-hot-toast';
-
-// function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setChatStatus }) {
-//     const { token } = useAuth();
-//     const { selectedLLM } = useAppState(); // To know which LLM is active
-//     const [useRag, setUseRag] = useState(false); // Local state for RAG toggle in this panel
-//     const [isSending, setIsSending] = useState(false);
-    
-//     const handleSendMessage = async (inputText) => {
-//         if (!inputText.trim() || !token || isSending) return;
-
-//         const userMessage = {
-//             id: `user-${Date.now()}`,
-//             sender: 'user',
-//             text: inputText.trim(),
-//             timestamp: new Date().toISOString()
-//         };
-//         setMessages(prev => [...prev, userMessage]);
-        
-//         setIsSending(true);
-//         setChatStatus(useRag ? "Searching documents & Thinking (Ollama RAG)..." : "Thinking (Gemini)...");
-
-//         try {
-//             const historyForBackend = messages.map(m => ({ // Only previous messages
-//                 role: m.sender === 'bot' ? 'model' : 'user',
-//                 parts: [{ text: m.text }]
-//             }));
-
-//             const payload = {
-//                 query: inputText.trim(),
-//                 history: historyForBackend,
-//                 sessionId: currentSessionId,
-//                 useRag: useRag // This flag is crucial for the backend orchestrator
-//             };
-            
-//             const response = await api.sendMessage(payload); // Token auto-included by axios interceptor
-            
-//             // currentSessionId is managed by App.js if backend returns a new one
-//             // For now, assume session ID remains the same unless explicitly changed by App.js
-
-//             const botReply = response.reply;
-//             setMessages(prev => [...prev, {
-//                 id: `bot-${Date.now()}`,
-//                 sender: 'bot',
-//                 text: botReply.parts[0]?.text,
-//                 thinking: botReply.thinking,
-//                 references: botReply.references || [],
-//                 timestamp: botReply.timestamp,
-//                 source_pipeline: response.source_pipeline // Useful for display
-//             }]);
-//             setChatStatus(`Responded via ${response.source_pipeline}.`);
-//         } catch (error) {
-//             console.error("Error sending message:", error);
-//             const errorText = error.response?.data?.message || error.message || 'Failed to get response.';
-//             setMessages(prev => [...prev, { 
-//                 id: `error-${Date.now()}`, 
-//                 sender: 'bot', 
-//                 text: `Error: ${errorText}` 
-//             }]);
-//             setChatStatus(`Error: ${errorText}`);
-//             toast.error(errorText);
-//         } finally {
-//             setIsSending(false);
-//         }
-//     };
-
-//     return (
-//         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
-//             {/* Welcome Message - Conditional */}
-//             {messages.length === 0 && !isSending && (
-//                  <div className="p-8 text-center text-text-muted-light dark:text-text-muted-dark animate-fadeIn">
-//                     <h2 className="text-2xl font-semibold mb-2">HELLO MY FRIEND,</h2>
-//                     <p className="text-lg">HOW CAN I ASSIST YOU TODAY?</p>
-//                     <p className="text-sm mt-4">
-//                         Toggle "Use My Documents" below to chat with your uploaded files using Ollama RAG,
-//                         or chat directly with {selectedLLM.toUpperCase()} for general queries.
-//                     </p>
-//                 </div>
-//             )}
-
-//             <ChatHistory messages={messages} isLoading={isSending} />
-//             <ChatInput 
-//                 onSendMessage={handleSendMessage} 
-//                 isLoading={isSending} 
-//                 currentStatus={chatStatus}
-//                 useRag={useRag}
-//                 setUseRag={setUseRag}
-//             />
-//         </div>
-//     );
-// }
-// export default CenterPanel;
-
-
-
-
-
-
 // src/components/layout/CenterPanel.jsx
 import React, { useState } from 'react';
 import ChatHistory from '../chat/ChatHistory';
@@ -2959,157 +2639,6 @@ export default LeftPanel;
 `src/components/layout/LLMSelectionModal.jsx`
 
 ```javascript
-// import React, { useState, useEffect } from 'react';
-// import { X, HardDrive, Cloud, Save, AlertCircle } from 'lucide-react';
-// import api from '../../services/api';
-// import toast from 'react-hot-toast';
-// import { useAppState } from '../../contexts/AppStateContext';
-
-// function LLMSelectionModal({ isOpen, onClose, currentLLM, onSelectLLM }) {
-//     const { switchLLM: setGlobalLLM } = useAppState();
-//     const [selectedProvider, setSelectedProvider] = useState(currentLLM);
-//     const [geminiApiKey, setGeminiApiKey] = useState('');
-//     const [loading, setLoading] = useState(false);
-//     const [error, setError] = useState('');
-
-//     useEffect(() => {
-//         setSelectedProvider(currentLLM); // Sync with global state when modal opens
-//         setGeminiApiKey(''); // Clear API key field
-//         setError('');
-//     }, [isOpen, currentLLM]);
-
-//     const handleSave = async () => {
-//         setLoading(true);
-//         setError('');
-//         toast.loading('Saving LLM preference...');
-
-//         try {
-//             if (selectedProvider === 'gemini' && !geminiApiKey.trim()) {
-//                 // If switching to Gemini and no API key is provided, we can still switch
-//                 // but the Gemini functionality will fail if the backend doesn't have a key.
-//                 // OR, enforce API key input here if that's the desired flow.
-//                 // For now, let's allow switching and let backend handle key presence.
-//                 // A better UX might be to prompt for the key only if it's not already configured.
-//             }
-            
-//             // Call backend to update user's LLM preference & API key if provided
-//             // Backend needs to securely store this.
-//             await api.updateUserLLMConfig({ 
-//                 llmProvider: selectedProvider, 
-//                 apiKey: selectedProvider === 'gemini' ? geminiApiKey.trim() : undefined 
-//             });
-
-//             setGlobalLLM(selectedProvider); // Update global app state
-//             onSelectLLM(selectedProvider); // Inform parent (TopNav)
-//             toast.dismiss();
-//             toast.success(`Switched to ${selectedProvider.toUpperCase()} LLM.`);
-//             onClose();
-//         } catch (err) {
-//             toast.dismiss();
-//             const errorMessage = err.response?.data?.message || err.message || 'Failed to update LLM preference.';
-//             setError(errorMessage);
-//             toast.error(errorMessage);
-//         } finally {
-//             setLoading(false);
-//         }
-//     };
-
-//     if (!isOpen) return null;
-
-//     return (
-//         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4 animate-fadeIn">
-//             <div className="bg-surface-light dark:bg-surface-dark p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-lg transform transition-all">
-//                 <div className="flex justify-between items-center mb-6">
-//                     <h2 className="text-xl font-semibold text-text-light dark:text-text-dark">
-//                         Switch LLM Provider
-//                     </h2>
-//                     <button onClick={onClose} className="text-text-muted-light dark:text-text-muted-dark hover:text-red-500 transition-colors">
-//                         <X size={24} />
-//                     </button>
-//                 </div>
-
-//                 {error && <div className="mb-4 p-3 bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-200 rounded-md text-sm flex items-center gap-2"><AlertCircle size={18}/> {error}</div>}
-
-//                 <div className="space-y-4">
-//                     <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
-//                         Select your preferred Large Language Model provider. Your choice will be saved for future sessions.
-//                     </p>
-                    
-//                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-//                         {['ollama', 'gemini'].map(provider => (
-//                             <button
-//                                 key={provider}
-//                                 type="button"
-//                                 onClick={() => setSelectedProvider(provider)}
-//                                 className={`p-4 border rounded-lg text-left transition-all duration-150 focus:outline-none
-//                                     ${selectedProvider === provider 
-//                                         ? 'bg-primary-light dark:bg-primary-dark border-primary dark:border-primary-light ring-2 ring-primary dark:ring-primary-light shadow-lg' 
-//                                         : 'bg-surface-light dark:bg-surface-dark border-gray-300 dark:border-gray-600 hover:border-primary-light dark:hover:border-primary-dark hover:shadow-md'
-//                                     }`}
-//                             >
-//                                 <div className="flex items-center mb-1">
-//                                     {provider === 'ollama' ? <HardDrive size={20} className={`mr-2 ${selectedProvider === provider ? 'text-primary dark:text-primary-light' : 'text-text-muted-light dark:text-text-muted-dark'}`} /> : <Cloud size={20} className={`mr-2 ${selectedProvider === provider ? 'text-primary dark:text-primary-light' : 'text-text-muted-light dark:text-text-muted-dark'}`} />}
-//                                     <span className={`font-semibold ${selectedProvider === provider ? 'text-primary dark:text-primary-light' : 'text-text-light dark:text-text-dark'}`}>
-//                                         {provider.toUpperCase()} LLM
-//                                     </span>
-//                                 </div>
-//                                 <p className={`text-xs ${selectedProvider === provider ? 'text-primary-dark dark:text-primary' : 'text-text-muted-light dark:text-text-muted-dark'}`}>
-//                                     {provider === 'ollama' ? 'Local & Private. Requires Ollama running.' : 'Cloud-based by Google. API Key may be required.'}
-//                                 </p>
-//                             </button>
-//                         ))}
-//                     </div>
-
-//                     {selectedProvider === 'gemini' && (
-//                         <div className="mt-4">
-//                             <label htmlFor="modalGeminiApiKey" className="block text-sm font-medium text-text-light dark:text-text-dark mb-1">
-//                                 Gemini API Key (if not already configured)
-//                             </label>
-//                             <input
-//                                 type="password"
-//                                 id="modalGeminiApiKey"
-//                                 className="input-custom"
-//                                 placeholder="Enter new or update existing Gemini API Key"
-//                                 value={geminiApiKey}
-//                                 onChange={(e) => setGeminiApiKey(e.target.value)}
-//                                 disabled={loading}
-//                             />
-//                             <p className="text-xs text-text-muted-light dark:text-text-muted-dark mt-1">
-//                                 Leave blank to use previously saved key. Provided key will be securely stored by the backend.
-//                             </p>
-//                         </div>
-//                     )}
-//                 </div>
-
-//                 <div className="mt-8 flex justify-end gap-3">
-//                     <button
-//                         type="button"
-//                         onClick={onClose}
-//                         className="px-4 py-2 text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
-//                         disabled={loading}
-//                     >
-//                         Cancel
-//                     </button>
-//                     <button
-//                         type="button"
-//                         onClick={handleSave}
-//                         className="btn-primary-custom flex items-center justify-center gap-2"
-//                         disabled={loading}
-//                     >
-//                         {loading ? (
-//                             <span className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></span>
-//                         ) : (
-//                             <Save size={18} />
-//                         )}
-//                         Save Preference
-//                     </button>
-//                 </div>
-//             </div>
-//         </div>
-//     );
-// }
-// export default LLMSelectionModal;
-
 // frontend/src/components/layout/LLMSelectionModal.jsx
 import React, { useState, useEffect } from 'react';
 import { useAppState } from '../../contexts/AppStateContext.jsx';
@@ -3803,95 +3332,6 @@ export default TopNav;
 `src/contexts/AppStateContext.jsx`
 
 ```javascript
-// // frontend/src/contexts/AppStateContext.jsx
-// import React, { createContext, useState, useContext, useEffect } from 'react';
-
-// export const AppStateContext = createContext(null);
-
-// export const useAppState = () => {
-//     const context = useContext(AppStateContext);
-//     if (!context) throw new Error('useAppState must be used within an AppStateProvider');
-//     return context;
-// };
-
-// const INITIAL_DEV_SESSION_ID = `dev-ui-session-${Date.now()}`; 
-// const defaultSystemPromptText = "You are assessing understanding of engineering/scientific topics. Ask targeted questions to test knowledge, identify misconceptions, and provide feedback on the answers. Start by asking the user what topic they want to be quizzed on.";
-
-// export const AppStateProvider = ({ children }) => {
-//     const [theme, setThemeState] = useState(() => localStorage.getItem('theme') || 'dark');
-//     const [selectedLLM, setSelectedLLM] = useState(localStorage.getItem('selectedLLM') || 'ollama');
-//     const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
-//     const [isRightPanelOpen, setIsRightPanelOpen] = useState(true); 
-    
-//     const [currentSessionId, setCurrentSessionIdState] = useState(() => {
-//         return localStorage.getItem('aiTutorSessionId') || INITIAL_DEV_SESSION_ID;
-//     });
-    
-//     const [systemPrompt, setSystemPromptState] = useState(
-//         localStorage.getItem('aiTutorSystemPrompt') || defaultSystemPromptText
-//     );
-    
-//     // THIS IS THE STATE FOR THE SELECTED DOCUMENT
-//     const [selectedDocumentForAnalysis, setSelectedDocumentForAnalysisState] = useState(null); // Stores { originalName, serverFilename, ... } or null
-
-//     const toggleTheme = () => {
-//         setThemeState(prevTheme => {
-//             const newTheme = prevTheme === 'light' ? 'dark' : 'light';
-//             localStorage.setItem('theme', newTheme);
-//             return newTheme;
-//         });
-//     };
-    
-//     const switchLLM = (llm) => {
-//         setSelectedLLM(llm);
-//         localStorage.setItem('selectedLLM', llm);
-//     };
-
-//     const setSessionId = (sessionId) => {
-//         const newId = sessionId || INITIAL_DEV_SESSION_ID; 
-//         setCurrentSessionIdState(newId);
-//         localStorage.setItem('aiTutorSessionId', newId);
-//     };
-
-//     const setSystemPrompt = (promptText) => {
-//         const newPrompt = promptText || defaultSystemPromptText;
-//         setSystemPromptState(newPrompt);
-//         localStorage.setItem('aiTutorSystemPrompt', newPrompt);
-//     };
-
-//     // THIS IS THE SETTER FOR THE SELECTED DOCUMENT
-//     const selectDocumentForAnalysis = (documentFile) => { 
-//         console.log("AppStateContext: selectDocumentForAnalysis called with:", documentFile);
-//         setSelectedDocumentForAnalysisState(documentFile); // documentFile is { originalName, serverFilename } or null
-//     };
-
-//     useEffect(() => {
-//         document.documentElement.classList.remove('light', 'dark');
-//         document.documentElement.classList.add(theme);
-//     }, [theme]);
-
-//     useEffect(() => { 
-//         if (!currentSessionId) {
-//             setSessionId(INITIAL_DEV_SESSION_ID);
-//         }
-//     }, [currentSessionId]); // Removed setSessionId from dependencies
-
-
-//     return (
-//         <AppStateContext.Provider value={{
-//             theme, toggleTheme,
-//             selectedLLM, switchLLM,
-//             isLeftPanelOpen, setIsLeftPanelOpen,
-//             isRightPanelOpen, setIsRightPanelOpen,
-//             currentSessionId, setSessionId,
-//             systemPrompt, setSystemPrompt,
-//             selectedDocumentForAnalysis, selectDocumentForAnalysis // Provide selected doc and its setter
-//         }}>
-//             {children}
-//         </AppStateContext.Provider>
-//     );
-// };
-
 // frontend/src/contexts/AppStateContext.jsx
 // frontend/src/contexts/AppStateContext.jsx
 import React, { createContext, useState, useContext, useEffect } from 'react';
@@ -3939,7 +3379,10 @@ export const AppStateProvider = ({ children }) => {
     };
     
     // ... switchLLM, setSessionId, setSystemPrompt, selectDocumentForAnalysis ...
-    const switchLLM = (llm) => { setSelectedLLM(llm); localStorage.setItem('selectedLLM', llm); };
+    const switchLLM = (llm) => {
+         setSelectedLLM(llm); localStorage.setItem('selectedLLM', llm);
+    };
+    
     const setSessionId = (sessionId) => { /* ... as before ... */ };
     const setSystemPrompt = (promptText) => { /* ... as before ... */ };
     const selectDocumentForAnalysis = (documentFile) => { setSelectedDocumentForAnalysisState(documentFile); };
@@ -3972,84 +3415,6 @@ export const AppStateProvider = ({ children }) => {
 `src/contexts/AuthContext.jsx`
 
 ```javascript
-// // frontend/src/contexts/AuthContext.jsx (Version 1 - Testing/Development with Bypassed Auth)
-// import React, { createContext, useState, useEffect } from 'react';
-// // No jwt-decode or real api needed for this fully bypassed version
-
-// export const AuthContext = createContext(null);
-
-// const BYPASS_AUTH_FOR_DEVELOPMENT = true; 
-
-// const MOCK_USER_VERSION_1 = {
-//     id: 'devUserV1-001',
-//     username: 'DevUI-User',
-// };
-// const MOCK_TOKEN_VERSION_1 = 'static-mock-dev-token-for-v1-ui-testing';
-
-// export const AuthProvider = ({ children }) => {
-//     const [token, setToken] = useState(null);
-//     const [user, setUser] = useState(null);
-//     const [loading, setLoading] = useState(true); 
-
-//     useEffect(() => {
-//         console.log("AuthContext (V1 Testing): Initializing...");
-//         if (BYPASS_AUTH_FOR_DEVELOPMENT) {
-//             setToken(MOCK_TOKEN_VERSION_1);
-//             setUser(MOCK_USER_VERSION_1);
-//             // Simulate token storage for other parts of app that might check localStorage
-//             localStorage.setItem('authToken', MOCK_TOKEN_VERSION_1); 
-//             console.log("AuthContext (V1 Testing): Auth BYPASSED. User set:", MOCK_USER_VERSION_1);
-//         } else {
-//             // This branch is for non-bypassed mode, not active in V1
-//             localStorage.removeItem('authToken');
-//             setToken(null);
-//             setUser(null);
-//         }
-//         setLoading(false);
-//     }, []);
-
-//     const login = async () => {
-//         console.log("AuthContext (V1 Testing): MOCK login called. Auto-success.");
-//         setUser(MOCK_USER_VERSION_1);
-//         setToken(MOCK_TOKEN_VERSION_1);
-//         return { token: MOCK_TOKEN_VERSION_1, username: MOCK_USER_VERSION_1.username, _id: MOCK_USER_VERSION_1.id, sessionId: `dev-session-${Date.now()}` };
-//     };
-    
-//     const signup = async () => {
-//         console.log("AuthContext (V1 Testing): MOCK signup called. Auto-success.");
-//         setUser(MOCK_USER_VERSION_1);
-//         setToken(MOCK_TOKEN_VERSION_1);
-//         return { token: MOCK_TOKEN_VERSION_1, username: MOCK_USER_VERSION_1.username, _id: MOCK_USER_VERSION_1.id, sessionId: `dev-session-signup-${Date.now()}` };
-//     };
-
-//     const logout = () => {
-//         console.log("AuthContext (V1 Testing): MOCK logout called.");
-//         setToken(null);
-//         setUser(null);
-//         localStorage.removeItem('authToken');
-//         // In a real app, you'd redirect or App.jsx would show AuthModal
-//     };
-    
-//     const devLogin = () => login({}); // For testing, devLogin just calls mock login
-
-//     return (
-//         <AuthContext.Provider value={{ 
-//             token, user, loading, login, signup, logout, devLogin, 
-//             setUser, setToken, 
-//             isTestingMode: BYPASS_AUTH_FOR_DEVELOPMENT // Expose flag
-//         }}>
-//             {children}
-//         </AuthContext.Provider>
-//     );
-// };
-
-
-
-
-
-
-
-
 // frontend/src/contexts/AuthContext.jsx
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api.js'; 
@@ -4083,41 +3448,62 @@ export const AuthProvider = ({ children }) => {
         }
     }, []);
 
+    // Example adjustment in AuthContext.jsx's useEffect
     useEffect(() => {
-        setLoading(true);
-        const storedToken = localStorage.getItem('authToken');
-        if (storedToken) {
-            const decodedUser = parseToken(storedToken);
-            if (decodedUser) {
-                setUser(decodedUser);
-                setToken(storedToken);
-            } else {
-                setToken(null); setUser(null);
+        const attemptAutoLogin = async () => {
+            setLoading(true);
+            const storedToken = localStorage.getItem('authToken');
+            if (storedToken) {
+                try {
+                    // If DEV_MODE_MOCK_API is true, api.getMe() will use its mock.
+                    // If false, it hits the real /auth/me endpoint with the token.
+                    const userData = await api.getMe(); 
+                    setUser({ id: userData._id, username: userData.username }); // Assuming _id is returned as id
+                    setToken(storedToken);
+                    console.log("AuthContext: Auto-login successful via /me endpoint.", userData);
+                } catch (error) {
+                    console.warn("AuthContext: Auto-login failed (token invalid or /me error). Clearing token.", error.response?.data?.message || error.message);
+                    localStorage.removeItem('authToken');
+                    setToken(null);
+                    setUser(null);
+                }
             }
-        } else {
-            setToken(null); setUser(null);
-        }
-        setLoading(false);
-    }, [parseToken]);
+            setLoading(false);
+        };
+        attemptAutoLogin();
+    }, []); // No dependencies, runs once on mount
 
     const login = async (credentials) => {
-        const data = await api.login(credentials); 
-        localStorage.setItem('authToken', data.token);
-        const decodedUser = parseToken(data.token);
-        setUser(decodedUser);
-        setToken(data.token);
-        return data; 
+        setLoading(true); // Good practice to set loading true for the API call
+        try {
+            const data = await api.login(credentials); // This now hits the real backend if DEV_MODE_MOCK_API is false
+            localStorage.setItem('authToken', data.token);
+            // Use user details directly from response if available and preferred
+            setUser({ id: data._id, username: data.username }); 
+            setToken(data.token);
+            setLoading(false);
+            return data; // Return the full response which includes sessionId etc.
+        } catch (error) {
+            setLoading(false);
+            throw error; // Re-throw for AuthModal to handle
+        }
     };
     
     const signup = async (signupData) => {
-        const data = await api.signup(signupData); 
-        if (data.token) { 
-            localStorage.setItem('authToken', data.token);
-            const decodedUser = parseToken(data.token);
-            setUser(decodedUser);
-            setToken(data.token);
+        setLoading(true);
+        try {
+            const data = await api.signup(signupData); 
+            if (data.token) { 
+                localStorage.setItem('authToken', data.token);
+                setUser({ id: data._id, username: data.username });
+                setToken(data.token);
+            }
+            setLoading(false);
+            return data;
+        } catch (error) {
+            setLoading(false);
+            throw error;
         }
-        return data;
     };
 
     const logout = () => {
@@ -4419,534 +3805,668 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 `src/services/api.js`
 
 ```javascript
-// // frontend/src/services/api.js (Version 1 - Testing/Development with Static Mocks)
+// frontend/src/services/api.js
+import axios from "axios";
 
-// // This flag is central to this version. All functions will return mock data.
-// const DEV_MODE_MOCK_API = true; 
+// --- CENTRAL CONTROL FLAG FOR MOCKING ---
+// << SET THIS TO false TO USE REAL BACKEND & JWT AUTHENTICATION >>
+const DEV_MODE_MOCK_API = true;
+// When false, this file will attempt to make real API calls to your Node.js backend.
+// Ensure your Node.js backend is running and configured for JWTs.
+// Ensure your AuthContext.jsx has DEV_MODE_ALLOW_DEV_LOGIN = false if you want to force forms.
 
-// const mockDelay = (ms = 200) => new Promise(resolve => setTimeout(resolve, ms)); // Shorter delay for faster UI testing
+const mockDelay = (ms = 200) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-// // --- MOCK DATA STORE ---
-// const MOCK_CURRENT_USER = {
-//     _id: 'devUser001',
-//     username: 'DevUI-User',
-//     // Any other user details your UI might display from a /me endpoint (if you had one)
-// };
-
-// let MOCK_SESSIONS_STORE = {
-//     'session-mock-1': { 
-//         sessionId: 'session-mock-1', 
-//         updatedAt: new Date(Date.now() - 3600000).toISOString(), 
-//         messageCount: 4, 
-//         preview: "Conversation about thermodynamics and its applications..." 
-//     },
-//     'session-mock-2': { 
-//         sessionId: 'session-mock-2', 
-//         updatedAt: new Date(Date.now() - 7200000).toISOString(), 
-//         messageCount: 6, 
-//         preview: "Exploring quantum entanglement and its implications for computing..." 
-//     },
-//     'dev-initial-session-appstate': { // Matches AppStateContext default
-//         sessionId: 'dev-initial-session-appstate', 
-//         updatedAt: new Date().toISOString(), 
-//         messageCount: 2, 
-//         preview: "Initial development session with UI focus..."
-//     }
-// };
-
-// let MOCK_CHAT_HISTORY_STORE = {
-//     'session-mock-1': [
-//         { _id: 'msg1-1', role: 'user', parts: [{text: "Hello AI tutor! Can you explain the first law of thermodynamics?"}], timestamp: new Date(Date.now() - 3550000).toISOString() },
-//         { _id: 'msg1-2', role: 'model', parts: [{text: "Certainly! The first law of thermodynamics, also known as the law of conservation of energy, states that energy cannot be created or destroyed in an isolated system. It can only be transformed from one form to another. \n\nFor example, in a heat engine, chemical energy in fuel is converted into thermal energy, which is then converted into mechanical work."}], thinking: "<thinking>User asked for 1st law. Provided definition and an example.</thinking>", references: [], timestamp: new Date(Date.now() - 3540000).toISOString(), source_pipeline: 'mock_ollama_direct'},
-//         { _id: 'msg1-3', role: 'user', parts: [{text: "What about its applications in aerospace engineering?"}], timestamp: new Date(Date.now() - 3500000).toISOString() },
-//         { _id: 'msg1-4', role: 'model', parts: [{text: "Great question! In aerospace, it's fundamental for designing jet engines and rocket propulsion systems, analyzing aerodynamic heating, and managing thermal control systems for spacecraft. For instance, understanding energy conversion is key to optimizing engine efficiency [1]."}], thinking: "<thinking>User asked for aerospace applications. Linked to engine design and thermal management. Added a mock reference.</thinking>", references: [{number: 1, source: "Aerospace_Thermo_Principles.pdf", content_preview:"Optimizing jet engine thrust requires careful application of thermodynamic laws..."}], timestamp: new Date(Date.now() - 3400000).toISOString(), source_pipeline: 'mock_ollama_rag'},
-//     ],
-//     'session-mock-2': [
-//         { _id: 'msg2-1', role: 'user', parts: [{text: "Explain quantum entanglement simply."}], timestamp: new Date(Date.now() - 7100000).toISOString() },
-//         { _id: 'msg2-2', role: 'model', parts: [{text: "Imagine two coins that are intrinsically linked. If you flip one and observe 'heads', you instantly know the other coin, no matter how far away, will show 'tails' (if they were set up to be opposite). Quantum entanglement is a similar phenomenon where particles become interconnected, and the state of one particle instantly influences the state of the other(s), regardless of the distance separating them. It's a cornerstone of quantum mechanics!"}], thinking: null, references: [], timestamp: new Date(Date.now() - 7000000).toISOString(), source_pipeline: 'mock_gemini_direct'},
-//         // ... more messages for session-mock-2
-//     ],
-//     'dev-initial-session-appstate': [ // Corresponds to AppStateContext initial dev session
-//         { _id: 'devmsg1', role: 'user', parts: [{text: "Hi there, this is the initial dev session!"}], timestamp: new Date(Date.now() - 60000).toISOString() },
-//         { _id: 'devmsg2', role: 'model', parts: [{text: "Hello Dev User! This is a mocked response for the initial session. The UI looks great!"}], thinking: null, references: [], timestamp: new Date().toISOString(), source_pipeline: 'mock_gemini_direct'},
-//     ]
-// };
-
-// let MOCK_FILES_STORE_STATIC = [
-//     { serverFilename: 'doc-physics-001.pdf', originalName: 'Quantum_Basics.pdf', type: 'application/pdf', size: 204800, lastModified: new Date(Date.now() - 86400000 * 2).toISOString() },
-//     { serverFilename: 'doc-eng-002.docx', originalName: 'Thermodynamics_Notes.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 120500, lastModified: new Date(Date.now() - 86400000).toISOString() },
-//     { serverFilename: 'code-python-003.py', originalName: 'simulation_script.py', type: 'text/x-python', size: 15300, lastModified: new Date().toISOString() },
-// ];
-
-// const MOCK_ANALYSIS_RESULTS = {
-//     faq: {
-//         content: "## Frequently Asked Questions (Mocked)\n\n**Q1: What is the main topic of this document?**\nA1: This document primarily discusses [mocked main topic] and its implications in [mocked field].\n\n**Q2: What are the key takeaways?**\nA2: Key takeaways include [mocked takeaway 1], [mocked takeaway 2], and the importance of [mocked concept].\n\n**Q3: Are there any examples provided?**\nA3: Yes, the document illustrates [mocked example scenario] to explain [another mocked concept].",
-//         thinking: "<thinking>Generated mock FAQs based on the document's title and a generic structure.</thinking>"
-//     },
-//     topics: {
-//         content: "### Key Topics Extracted (Mocked)\n\n- **Mock Topic A:** Detailed discussion on the foundational principles.\n- **Mock Topic B:** Practical applications and case studies (simulated).\n- **Mock Topic C:** Future research directions and challenges.",
-//         thinking: "<thinking>Identified common patterns for topic extraction and populated with placeholder content.</thinking>"
-//     },
-//     mindmap: {
-//         content: `# Mocked Mindmap: Document Title\n## Core Concept\n### Sub-Concept 1\n- Detail 1.A\n- Detail 1.B\n### Sub-Concept 2\n- Detail 2.A\n- Detail 2.B\n## Applications\n### Industry A\n### Research Area B\n## Challenges\n- Limitation X\n- Constraint Y`,
-//         thinking: "<thinking>Created a hierarchical Markdown structure suitable for Markmap rendering, using generic terms.</thinking>"
-//     }
-// };
-
-// const api = {
-//     // --- Auth ---
-//     login: async (credentials) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for login");
-//         await mockDelay(500);
-//         console.log("MOCK API (V1): login", credentials);
-//         const userToLogin = MOCK_USER_DATA['devUser001'];
-//         const sessionId = `session-login-${Date.now()}`;
-//         MOCK_CHAT_HISTORY_STORE[sessionId] = []; // Initialize history for new session
-//         MOCK_SESSIONS_STORE[sessionId] = { sessionId, updatedAt: new Date().toISOString(), messageCount: 0, preview: "New Login Session" };
-//         return { 
-//             token: `mock-token-${userToLogin.username}-${Date.now()}`, 
-//             username: userToLogin.username, 
-//             _id: userToLogin._id, 
-//             sessionId: sessionId
-//         };
-//     },
-//     signup: async (userData) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for signup");
-//         await mockDelay(500);
-//         console.log("MOCK API (V1): signup", userData);
-//         const userToLogin = MOCK_USER_DATA['devUser001']; // Sign up as the main mock user
-//         const sessionId = `session-signup-${Date.now()}`;
-//         MOCK_CHAT_HISTORY_STORE[sessionId] = [];
-//         MOCK_SESSIONS_STORE[sessionId] = { sessionId, updatedAt: new Date().toISOString(), messageCount: 0, preview: "New Signup Session" };
-//         return { 
-//             token: `mock-signup-token-${userToLogin.username}-${Date.now()}`, 
-//             username: userToLogin.username, 
-//             _id: userToLogin._id, 
-//             sessionId: sessionId
-//         };
-//     },
-
-//     // --- Chat ---
-//     sendMessage: async (payload) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for sendMessage");
-//         await mockDelay(payload.useRag ? 1000 : 500);
-//         console.log("MOCK API (V1): sendMessage", payload);
-
-//         const query = payload.query || "";
-//         const llmInUse = payload.llmProvider || 'ollama'; // From AppStateContext via CenterPanel
-//         const systemP = payload.systemPrompt || "Default system prompt in use.";
-
-//         const botText = payload.useRag 
-//             ? `This is a MOCKED RAG response from ${llmInUse.toUpperCase()} for: "${query.substring(0,25)}...". Based on your document [1] and system prompt starting with "${systemP.substring(0,20)}...". It seems important.`
-//             : `This is a MOCK direct response from ${llmInUse.toUpperCase()} for: "${query.substring(0,25)}...". System prompt started with "${systemP.substring(0,20)}...".`;
-        
-//         const thinking = payload.useRag 
-//             ? `<thinking>Query: "${query.substring(0,15)}..."\nLLM: ${llmInUse.toUpperCase()} (RAG)\nSystem Prompt: "${systemP.substring(0,30)}..."\n(Mock) Doc search -> Found relevant info. Synthesizing...</thinking>` 
-//             : `<thinking>Query: "${query.substring(0,15)}..."\nLLM: ${llmInUse.toUpperCase()} (Direct)\nSystem Prompt: "${systemP.substring(0,30)}..."\n(Mock) Processing direct query.</thinking>`;
-        
-//         const references = payload.useRag 
-//             ? [{ number: 1, source: MOCK_FILES_STORE_STATIC[0]?.originalName || "mock_source.pdf", content_preview: "This is a snippet from the relevant mock document related to your query..."}] 
-//             : [];
-        
-//         const botMsg = { 
-//             id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-//             role: 'model', 
-//             parts: [{text: botText }], 
-//             thinking, 
-//             references,
-//             timestamp: new Date().toISOString(),
-//             source_pipeline: payload.useRag ? `mock_${llmInUse}_rag` : `mock_${llmInUse}_direct`
-//         };
-        
-//         // Add to mock history store if session exists
-//         if (payload.sessionId) {
-//             if (!MOCK_CHAT_HISTORY_STORE[payload.sessionId]) {
-//                 MOCK_CHAT_HISTORY_STORE[payload.sessionId] = [];
-//             }
-//             // Don't add user message here, App.jsx/CenterPanel does it to local state for immediate UI
-//             MOCK_CHAT_HISTORY_STORE[payload.sessionId].push(botMsg); // Only add bot message to persistent mock
-//             // Update session list
-//             if(MOCK_SESSIONS_STORE[payload.sessionId]) {
-//                 MOCK_SESSIONS_STORE[payload.sessionId].messageCount = MOCK_CHAT_HISTORY_STORE[payload.sessionId].length;
-//                 MOCK_SESSIONS_STORE[payload.sessionId].updatedAt = new Date().toISOString();
-//                 MOCK_SESSIONS_STORE[payload.sessionId].preview = botText.substring(0,50) + "...";
-//             }
-//         }
-//         return { reply: botMsg, sessionId: payload.sessionId, source_pipeline: botMsg.source_pipeline };
-//     },
-//     getChatHistory: async (sessionId) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getChatHistory");
-//         await mockDelay();
-//         console.log("MOCK API (V1): getChatHistory for session", sessionId);
-//         return MOCKED_CHAT_HISTORY_STORE[sessionId] || [];
-//     },
-//     getChatSessions: async () => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getChatSessions");
-//         await mockDelay();
-//         console.log("MOCK API (V1): getChatSessions");
-//         return Object.values(MOCK_SESSIONS_STORE).sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-//     },
-//     startNewSession: async () => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for startNewSession");
-//         await mockDelay();
-//         const newSid = `session-mock-${Date.now()}`;
-//         MOCK_CHAT_HISTORY_STORE[newSid] = [];
-//         MOCK_SESSIONS_STORE[newSid] = { sessionId: newSid, updatedAt: new Date().toISOString(), messageCount: 0, preview: "New Chat Session (Mock)" };
-//         console.log("MOCK API (V1): startNewSession, created:", newSid);
-//         return { sessionId: newSid };
-//     },
-
-//     // --- Files ---
-//     uploadFile: async (formData, onUploadProgress) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for uploadFile");
-//         const file = formData.get('file');
-//         const mockFileName = file?.name || 'mock_upload.pdf';
-//         console.log("MOCK API (V1): uploadFile", mockFileName);
-        
-//         if (onUploadProgress) { /* simulate progress */
-//             let p=0; const i=setInterval(()=>{p+=20; onUploadProgress({loaded:p,total:100}); if(p>=100) clearInterval(i);},100);
-//         }
-//         await mockDelay(600);
-//         const newFileEntry = { 
-//             serverFilename: `mock-server-${Date.now()}-${mockFileName}`, 
-//             originalName: mockFileName, 
-//             type: file?.type || 'application/octet-stream', 
-//             size: file?.size || 12345, 
-//             lastModified: new Date().toISOString() 
-//         };
-//         MOCK_FILES_STORE_STATIC.unshift(newFileEntry); // Add to top of list
-//         return { message: `${mockFileName} uploaded (mocked)! Processing initiated.`, filename: newFileEntry.serverFilename, originalname: newFileEntry.originalName };
-//     },
-//     getFiles: async () => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getFiles");
-//         await mockDelay();
-//         console.log("MOCK API (V1): getFiles");
-//         return [...MOCK_FILES_STORE_STATIC]; // Return a copy
-//     },
-//     renameFile: async (serverFilename, newOriginalName) => {
-//          if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for renameFile");
-//          await mockDelay();
-//          console.log("MOCK API (V1): renameFile", serverFilename, "to", newOriginalName);
-//          const file = MOCK_FILES_STORE_STATIC.find(f => f.serverFilename === serverFilename);
-//          if (file) file.originalName = newOriginalName;
-//          return { message: "File renamed (mocked)" };
-//     },
-//     deleteFile: async (serverFilename) => {
-//          if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for deleteFile");
-//          await mockDelay();
-//          console.log("MOCK API (V1): deleteFile", serverFilename);
-//          MOCK_FILES_STORE_STATIC = MOCK_FILES_STORE_STATIC.filter(f => f.serverFilename !== serverFilename);
-//          return { message: "File deleted (mocked)" };
-//     },
-
-//     // --- Analysis ---
-//     requestAnalysis: async (payload) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for requestAnalysis");
-//         await mockDelay(payload.analysis_type === 'mindmap' ? 1500 : 800);
-//         console.log("MOCK API (V1): requestAnalysis", payload);
-//         const result = MOCK_ANALYSIS_RESULTS[payload.analysis_type] || { content: `No mock data for ${payload.analysis_type} on ${payload.filename}`, thinking: "Used fallback."};
-//         return { ...result, content: result.content.replace("Document Title", payload.filename || "Selected Document") };
-//     },
-    
-//     // --- User LLM Config ---
-//     updateUserLLMConfig: async (configData) => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for updateUserLLMConfig");
-//         await mockDelay(); 
-//         console.log("MOCK API (V1): updateUserLLMConfig", configData);
-//         // Simulate saving preference (e.g., to localStorage for mock persistence)
-//         localStorage.setItem('mockUserLLMPreference', configData.llmProvider);
-//         if(configData.llmProvider === 'gemini' && configData.apiKey) {
-//             localStorage.setItem('mockUserGeminiKeyStatus', 'Provided (Mock)');
-//         }
-//         return { message: `LLM preference updated to ${configData.llmProvider} (mocked).` };
-//     },
-//     getUserLLMConfig: async () => {
-//          if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getUserLLMConfig");
-//          await mockDelay();
-//          const llmProvider = localStorage.getItem('mockUserLLMPreference') || 'ollama';
-//          console.log("MOCK API (V1): getUserLLMConfig, returning:", llmProvider);
-//          return { llmProvider }; // Only return provider, not API key
-//     },
-
-//     // --- Status & Syllabus ---
-//     getOrchestratorStatus: async () => {
-//         if (!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getOrchestratorStatus");
-//         await mockDelay(100);
-//         return { status: "ok", message: "Backend (Mocked & Healthy)", database_status: "Connected" };
-//     },
-//     getSyllabus: async (subjectId) => {
-//         if(!DEV_MODE_MOCK_API) throw new Error("Mock API disabled for getSyllabus");
-//         await mockDelay();
-//         console.log("MOCK API (V1): getSyllabus", subjectId);
-//         return `# Mock Syllabus: ${subjectId.replace("_"," ")}\n\n- Topic 1: Introduction to ${subjectId}\n- Topic 2: Core Principles\n- Topic 3: Advanced Applications`;
-//     }
-// };
-
-// export default api;
-// // No need to export apiClient in this fully mocked version if it's not used by real calls.
-// // export { apiClient }; 
-
-
-
-
-
-
-
-
-
-// frontend/src/services/api.js (Version 1 - UI Testing with Full Mocks)
-import axios from 'axios'; // Keep for V2 structure, not used by V1 mocks directly
-
-const DEV_MODE_MOCK_API = true; 
-
-const mockDelay = (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
-
-// --- MOCK DATA STORE - Ensure these are defined AT THE TOP LEVEL of this module ---
-const MOCK_USER_DATA_STORE = { 
-    'devUser001': { username: 'DevUI-User', _id: 'devUser001' }
+// --- MOCK DATA STORE (Only used if DEV_MODE_MOCK_API is true) ---
+const MOCK_USER_DATA_STORE = {
+  devUser001: { username: "DevUI-User", _id: "devUser001" },
 };
 
-let MOCK_SESSIONS_STORE = { // Renamed to avoid conflict if you copy-pasted with _API suffix
-    'session-mock-1': { sessionId: 'session-mock-1', updatedAt: new Date(Date.now() - 3600000).toISOString(), messageCount: 4, preview: "Thermodynamics basics and applications..." },
-    'session-mock-2': { sessionId: 'session-mock-2', updatedAt: new Date(Date.now() - 7200000).toISOString(), messageCount: 6, preview: "Exploring quantum entanglement simply..." },
-    'dev-initial-session-appstate': { sessionId: 'dev-initial-session-appstate', updatedAt: new Date().toISOString(), messageCount: 2, preview: "Initial development session for UI testing..." }
+let MOCK_SESSIONS_STORE = {
+  "session-mock-1": {
+    sessionId: "session-mock-1",
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+    messageCount: 4,
+    preview: "Thermodynamics basics and applications...",
+  },
+  "session-mock-2": {
+    sessionId: "session-mock-2",
+    updatedAt: new Date(Date.now() - 7200000).toISOString(),
+    messageCount: 6,
+    preview: "Exploring quantum entanglement simply...",
+  },
+  "dev-initial-session-appstate": {
+    sessionId: "dev-initial-session-appstate",
+    updatedAt: new Date().toISOString(),
+    messageCount: 2,
+    preview: "Initial development session for UI testing...",
+  },
 };
 
-let MOCK_CHAT_HISTORY_STORE = { // Renamed
-    'session-mock-1': [
-        { id: 's1msg1', _id: 's1msg1', role: 'user', parts: [{text: "Hello AI tutor! Can you explain the first law of thermodynamics?"}], timestamp: new Date(Date.now() - 3550000).toISOString() },
-        { id: 's1msg2', _id: 's1msg2', role: 'model', parts: [{text: "Certainly! The first law of thermodynamics, also known as the law of conservation of energy, states that energy cannot be created or destroyed in an isolated system. It can only be transformed from one form to another. \n\nFor example, in a heat engine, chemical energy in fuel is converted into thermal energy, which is then converted into mechanical work."}], thinking: "<thinking>User asked for 1st law. Provided definition and an example.</thinking>", references: [], timestamp: new Date(Date.now() - 3540000).toISOString(), source_pipeline: 'mock_ollama_direct'},
-        { id: 's1msg3', _id: 's1msg3', role: 'user', parts: [{text: "What about its applications in aerospace engineering?"}], timestamp: new Date(Date.now() - 3500000).toISOString() },
-        { id: 's1msg4', _id: 's1msg4', role: 'model', parts: [{text: "Great question! In aerospace, it's fundamental for designing jet engines and rocket propulsion systems (analyzing thrust from energy conversion), understanding aerodynamic heating on re-entry vehicles, and managing thermal control systems for satellites and spacecraft to maintain operational temperatures in the vacuum of space. For instance, the energy balance for a jet engine directly applies this law [1]."}], thinking: "<thinking>User asked for aerospace applications. Linked to engine design and thermal management. Added a mock reference.</thinking>", references: [{number: 1, source: "Aerospace_Thermo_Principles_Vol1.pdf", content_preview:"The first law is applied to calculate the energy changes as air and fuel pass through a jet engine, determining available thrust..."}], timestamp: new Date(Date.now() - 3400000).toISOString(), source_pipeline: 'mock_ollama_rag'},
-    ],
-    'dev-initial-session-appstate': [
-        { id: 'devmsg1', _id: 'devmsg1', role: 'user', parts: [{text: "Hi there, this is the initial dev session for UI testing!"}], timestamp: new Date(Date.now() - 60000).toISOString() },
-        { id: 'devmsg2', _id: 'devmsg2', role: 'model', parts: [{text: "Hello Dev User! Welcome to the UI testing environment. All systems are currently using mock data. Feel free to explore!"}], thinking: null, references: [], timestamp: new Date().toISOString(), source_pipeline: 'mock_gemini_direct'},
-    ]
+let MOCK_CHAT_HISTORY_STORE = {
+  "session-mock-1": [
+    {
+      id: "s1msg1",
+      _id: "s1msg1",
+      role: "user",
+      parts: [
+        {
+          text: "Hello AI tutor! Can you explain the first law of thermodynamics?",
+        },
+      ],
+      timestamp: new Date(Date.now() - 3550000).toISOString(),
+    },
+    {
+      id: "s1msg2",
+      _id: "s1msg2",
+      role: "model",
+      parts: [
+        {
+          text: "Certainly! The first law of thermodynamics, also known as the law of conservation of energy, states that energy cannot be created or destroyed in an isolated system. It can only be transformed from one form to another. \n\nFor example, in a heat engine, chemical energy in fuel is converted into thermal energy, which is then converted into mechanical work.",
+        },
+      ],
+      thinking:
+        "<thinking>User asked for 1st law. Provided definition and an example.</thinking>",
+      references: [],
+      timestamp: new Date(Date.now() - 3540000).toISOString(),
+      source_pipeline: "mock_ollama_direct",
+    },
+    {
+      id: "s1msg3",
+      _id: "s1msg3",
+      role: "user",
+      parts: [
+        { text: "What about its applications in aerospace engineering?" },
+      ],
+      timestamp: new Date(Date.now() - 3500000).toISOString(),
+    },
+    {
+      id: "s1msg4",
+      _id: "s1msg4",
+      role: "model",
+      parts: [
+        {
+          text: "Great question! In aerospace, it's fundamental for designing jet engines and rocket propulsion systems (analyzing thrust from energy conversion), understanding aerodynamic heating on re-entry vehicles, and managing thermal control systems for satellites and spacecraft to maintain operational temperatures in the vacuum of space. For instance, the energy balance for a jet engine directly applies this law [1].",
+        },
+      ],
+      thinking:
+        "<thinking>User asked for aerospace applications. Linked to engine design and thermal management. Added a mock reference.</thinking>",
+      references: [
+        {
+          number: 1,
+          source: "Aerospace_Thermo_Principles_Vol1.pdf",
+          content_preview:
+            "The first law is applied to calculate the energy changes as air and fuel pass through a jet engine, determining available thrust...",
+        },
+      ],
+      timestamp: new Date(Date.now() - 3400000).toISOString(),
+      source_pipeline: "mock_ollama_rag",
+    },
+  ],
+  "dev-initial-session-appstate": [
+    {
+      id: "devmsg1",
+      _id: "devmsg1",
+      role: "user",
+      parts: [
+        { text: "Hi there, this is the initial dev session for UI testing!" },
+      ],
+      timestamp: new Date(Date.now() - 60000).toISOString(),
+    },
+    {
+      id: "devmsg2",
+      _id: "devmsg2",
+      role: "model",
+      parts: [
+        {
+          text: "Hello Dev User! Welcome to the UI testing environment. All systems are currently using mock data. Feel free to explore!",
+        },
+      ],
+      thinking: null,
+      references: [],
+      timestamp: new Date().toISOString(),
+      source_pipeline: "mock_gemini_direct",
+    },
+  ],
 };
 
-let MOCK_FILES_STORE = [ // Renamed
-    { serverFilename: 'doc-quantum-001.pdf', originalName: 'Quantum_Entanglement_Intro.pdf', type: 'application/pdf', size: 305800, lastModified: new Date(Date.now() - 86400000 * 3).toISOString() },
-    { serverFilename: 'doc-thermo-002.docx', originalName: 'Aerospace_Thermo_Principles_Vol1.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 150200, lastModified: new Date(Date.now() - 86400000 * 2).toISOString() },
-    { serverFilename: 'code-rocket-sim-003.py', originalName: 'rocket_trajectory_sim.py', type: 'text/x-python', size: 25700, lastModified: new Date(Date.now() - 86400000).toISOString() },
+let MOCK_FILES_STORE = [
+  {
+    originalName: "Quantum_Entanglement_Intro.pdf",
+  },
+  {
+    originalName: "Pavan.pdf",
+  },
+  {
+    originalName: "Ston.pdf",
+  },
+  {
+    originalName: "MK.pdf",
+  },
+  
 ];
 
-let MOCK_ANALYSIS_RESULTS = { // Renamed
-    faq: { content: "## Mocked FAQs for Selected Document\n\n**Q1: What is this?**\nA1: A mock FAQ section.", thinking: "Generated mock FAQs." },
-    topics: { content: "### Mock Key Topics\n\n- Mock Topic Alpha\n- Mock Topic Beta", thinking: "Identified mock topics." },
-    mindmap: { content: `# Mocked Mindmap: Selected Document\n## Central Theme\n### Key Concept A\n### Key Concept B`, thinking: "Created mock mindmap structure." }
+let MOCK_ANALYSIS_RESULTS = {
+  faq: {
+    content:
+      "## Mocked FAQs for Selected Document\n\n**Q1: What is this?**\nA1: A mock FAQ section.",
+    thinking: "Generated mock FAQs.",
+  },
+  topics: {
+    content: "### Mock Key Topics\n\n- Mock Topic Alpha\n- Mock Topic Beta",
+    thinking: "Identified mock topics.",
+  },
+  mindmap: {
+    content: `# Mocked Mindmap: Selected Document\n## Central Theme\n### Key Concept A\n### Key Concept B`,
+    thinking: "Created mock mindmap structure.",
+  },
 };
 // --- END OF MOCK DATA STORE ---
 
-
-const apiClient = axios.create({ // This is for V2
-    baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api',
+// --- Axios API Client (for real backend calls) ---
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api", // Default for development
 });
-apiClient.interceptors.request.use(config => { /* ... as before ... */ });
 
-
-const api = {
-    login: async (credentials) => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(400); 
-            console.log("MOCK API (V1): login attempt", credentials);
-            const username = credentials.username || 'DevUser';
-            const userToLogin = MOCK_USER_DATA_STORE['devUser001'] || { username: username, _id: `mock-id-${username}` };
-            
-            const sessionId = `session-login-${Date.now()}`;
-            
-            // Initialize stores if they were somehow cleared (shouldn't happen at module scope but defensive)
-            if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {};
-            if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {};
-
-            MOCK_CHAT_HISTORY_STORE[sessionId] = []; 
-            MOCK_SESSIONS_STORE[sessionId] = { 
-                sessionId, 
-                updatedAt: new Date().toISOString(), 
-                messageCount: 0, 
-                preview: "New Session (Mock Login)" 
-            };
-            
-            return { 
-                token: `mock-token-for-${userToLogin.username}-${Date.now()}`, 
-                username: userToLogin.username, 
-                _id: userToLogin._id, 
-                sessionId: sessionId
-            };
-        }
-        // Real call for V2
-        const response = await apiClient.post('/auth/signin', credentials);
-        return response.data;
-    },
-
-    signup: async (userData) => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(400);
-            console.log("MOCK API (V1): signup attempt", userData);
-            const sessionId = `session-signup-${Date.now()}`;
-
-            if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {};
-            if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {};
-
-            MOCK_CHAT_HISTORY_STORE[sessionId] = [];
-            MOCK_SESSIONS_STORE[sessionId] = { sessionId, updatedAt: new Date().toISOString(), messageCount: 0, preview: "New Session (Mock Signup)" };
-            return { 
-                token: `mock-signup-token-${userData.username}-${Date.now()}`, 
-                username: userData.username, 
-                _id: `mock-id-${userData.username}`, 
-                sessionId: sessionId 
-            };
-        }
-        const response = await apiClient.post('/auth/signup', userData);
-        return response.data;
-    },
-
-    sendMessage: async (payload) => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(payload.useRag ? 800 : 400); console.log("MOCK API (V1): sendMessage", payload);
-            const query = payload.query || ""; const llmInUse = payload.llmProvider || 'ollama'; const systemP = payload.systemPrompt || "Default prompt.";
-            const botText = payload.useRag 
-                ? `This is a MOCKED RAG response from ${llmInUse.toUpperCase()} for: "${query.substring(0,25)}...". Considering your system prompt for a "${systemP.substring(0,20)}..." style, document [1] offers insights.`
-                : `This is a MOCK direct response from ${llmInUse.toUpperCase()} for: "${query.substring(0,25)}...". Your system prompt mode: "${systemP.substring(0,20)}...".`;
-            const thinking = payload.useRag ? `<thinking>Query: "${query.substring(0,15)}..."\nLLM: ${llmInUse.toUpperCase()} (RAG)\nSystem Prompt: "${systemP.substring(0,30)}..."\n(Mock) Found context in '${MOCK_FILES_STORE[0]?.originalName || "mock_doc.pdf"}'.</thinking>` : `<thinking>Query: "${query.substring(0,15)}..."\nLLM: ${llmInUse.toUpperCase()} (Direct)\nSystem Prompt: "${systemP.substring(0,30)}..."\n(Mock) Processing direct query.</thinking>`;
-            const references = payload.useRag ? [{ number: 1, source: MOCK_FILES_STORE[0]?.originalName || "default_mock.pdf", content_preview: "This is a snippet from the relevant mock document related to your query..."}] : [];
-            const botMsg = { id: `bot-${Date.now()}`, role: 'model', parts: [{text: botText }], thinking, references, timestamp: new Date().toISOString(), source_pipeline: payload.useRag ? `mock_${llmInUse}_rag` : `mock_${llmInUse}_direct`};
-            if (payload.sessionId) {
-                if (!MOCK_CHAT_HISTORY_STORE[payload.sessionId]) MOCK_CHAT_HISTORY_STORE[payload.sessionId] = [];
-                MOCK_CHAT_HISTORY_STORE[payload.sessionId].push(botMsg); 
-                if(MOCK_SESSIONS_STORE[payload.sessionId]) { MOCK_SESSIONS_STORE[payload.sessionId].messageCount = (MOCK_SESSIONS_STORE[payload.sessionId].messageCount || 0) + 2; MOCK_SESSIONS_STORE[payload.sessionId].updatedAt = new Date().toISOString(); MOCK_SESSIONS_STORE[payload.sessionId].preview = botText.substring(0,50) + "..."; }
-            }
-            return { reply: botMsg, sessionId: payload.sessionId, source_pipeline: botMsg.source_pipeline };
-        }
-        const response = await apiClient.post('/chat/message', payload); return response.data;
-    },
-
-    getChatHistory: async (sessionId) => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(150); console.log("MOCK API (V1): getChatHistory for", sessionId);
-            if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
-            return MOCK_CHAT_HISTORY_STORE[sessionId] || [];
-        }
-        const response = await apiClient.get(`/chat/history/${sessionId}`); return response.data;
-    },
-
-    getChatSessions: async () => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(150); console.log("MOCK API (V1): getChatSessions");
-            if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
-            return Object.values(MOCK_SESSIONS_STORE).sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-        }
-        const response = await apiClient.get('/chat/sessions'); return response.data;
-    },
-
-    startNewSession: async () => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(50); const newSid = `session-mock-new-${Date.now()}`;
-            if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
-            if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
-            MOCK_CHAT_HISTORY_STORE[newSid] = [];
-            MOCK_SESSIONS_STORE[newSid] = { sessionId: newSid, updatedAt: new Date().toISOString(), messageCount: 0, preview: "Newly Started Mock Session" };
-            console.log("MOCK API (V1): startNewSession, created:", newSid);
-            return { sessionId: newSid };
-        }
-        const response = await apiClient.post('/chat/new_session', {}); return response.data;
-    },
-
-    uploadFile: async (formData, onUploadProgress) => {
-        if (DEV_MODE_MOCK_API) {
-            const file = formData.get('file'); const mockFileName = file?.name || 'mock_upload.pdf';
-            console.log("MOCK API (V1): uploadFile", mockFileName);
-            if(onUploadProgress){ let p=0;const i=setInterval(()=>{p+=25;onUploadProgress({loaded:p,total:100});if(p>=100)clearInterval(i);},80);}
-            await mockDelay(400);
-            const newFileEntry = { serverFilename: `mock-server-${Date.now()}-${mockFileName}`, originalName: mockFileName, type: file?.type || 'application/octet-stream', size: file?.size || Math.floor(Math.random()*100000), lastModified: new Date().toISOString() };
-            if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
-            MOCK_FILES_STORE.unshift(newFileEntry);
-            return { message: `${mockFileName} uploaded (mocked)!`, filename: newFileEntry.serverFilename, originalname: newFileEntry.originalName };
-        }
-        const response = await apiClient.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, onUploadProgress }); return response.data;
-    },
-
-    getFiles: async () => {
-        if (DEV_MODE_MOCK_API) { 
-            await mockDelay(100); console.log("MOCK API (V1): getFiles"); 
-            if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
-            return [...MOCK_FILES_STORE]; 
-        }
-        const response = await apiClient.get('/files'); return response.data;
-    },
-
-    renameFile: async (serverFilename, newOriginalName) => {
-         if (DEV_MODE_MOCK_API) {
-            await mockDelay(); console.log("MOCK API (V1): renameFile", serverFilename, "to", newOriginalName);
-            if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
-            const file = MOCK_FILES_STORE.find(f => f.serverFilename === serverFilename);
-            if (file) file.originalName = newOriginalName;
-            return { message: "File renamed (mocked)" };
-        }
-        const response = await apiClient.patch(`/files/${serverFilename}`, { newOriginalName }); return response.data;
-    },
-
-    deleteFile: async (serverFilename) => {
-         if (DEV_MODE_MOCK_API) {
-            await mockDelay(); console.log("MOCK API (V1): deleteFile", serverFilename);
-            if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
-            MOCK_FILES_STORE = MOCK_FILES_STORE.filter(f => f.serverFilename !== serverFilename);
-            return { message: "File deleted (mocked)" };
-        }
-        const response = await apiClient.delete(`/files/${serverFilename}`); return response.data;
-    },
-
-    requestAnalysis: async (payload) => {
-        if (DEV_MODE_MOCK_API) {
-            await mockDelay(payload.analysis_type === 'mindmap' ? 1200 : 600);
-            console.log("MOCK API (V1): requestAnalysis", payload);
-            if (!MOCK_ANALYSIS_RESULTS) MOCK_ANALYSIS_RESULTS = {}; // Defensive
-            const result = MOCK_ANALYSIS_RESULTS[payload.analysis_type] || { content: `No mock data for ${payload.analysis_type} on ${payload.filename}`, thinking: "Used fallback."};
-            return { ...result, content: result.content.replace("Selected Document", payload.filename || "the Document") };
-        }
-        const response = await apiClient.post('/analysis/document', payload); return response.data;
-    },
-
-    updateUserLLMConfig: async (configData) => {
-        if (DEV_MODE_MOCK_API) { 
-            await mockDelay(); console.log("MOCK API (V1): updateUserLLMConfig", configData);
-            localStorage.setItem('mockUserLLMPreference', configData.llmProvider);
-            if(configData.llmProvider === 'gemini' && configData.apiKey) localStorage.setItem('mockUserGeminiKeyStatus_V1', 'ProvidedDuringMock');
-            if(configData.llmProvider === 'ollama' && configData.ollamaUrl) localStorage.setItem('mockUserOllamaUrl_V1', configData.ollamaUrl);
-            return { message: `LLM preference updated (mocked).` };
-        }
-        const response = await apiClient.post('/user/config/llm', configData); return response.data;
-    },
-
-    getUserLLMConfig: async () => {
-         if (DEV_MODE_MOCK_API) {
-            await mockDelay(); const llmProvider = localStorage.getItem('mockUserLLMPreference') || 'ollama';
-            console.log("MOCK API (V1): getUserLLMConfig, returning:", llmProvider);
-            return { llmProvider };
-        }
-        const response = await apiClient.get('/user/config/llm'); return response.data;
-    },
-
-    getOrchestratorStatus: async () => {
-        if (DEV_MODE_MOCK_API) { 
-            await mockDelay(50); 
-            return { status: "ok", message: "Backend (Mocked & Online)", database_status: "Connected (Mock)" };
-        }
-        const baseUrlForHealth = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api').replace('/api', '');
-        const response = await axios.get(`${baseUrlForHealth}/api/health`);
-        return response.data;
-    },
-
-    getSyllabus: async (subjectId) => {
-        if(DEV_MODE_MOCK_API) { 
-            await mockDelay(); console.log("MOCK API (V1): getSyllabus for", subjectId);
-            return `# Mock Syllabus: ${subjectId}\n\n- Section 1: Intro to ${subjectId}\n- Section 2: Core Principles`;
-        }
-        const response = await apiClient.get(`/syllabus/${subjectId}`); return response.data;
+apiClient.interceptors.request.use(
+  (config) => {
+    // Add JWT token to headers IF NOT IN MOCK MODE
+    if (!DEV_MODE_MOCK_API) {
+      const token = localStorage.getItem("authToken");
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+// --- End Axios API Client ---
+
+// --- API Definition Object (Mock or Real) ---
+const api = {
+  // --- Auth ---
+  login: async (credentials) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(400);
+      console.log("MOCK API (V1): login attempt", credentials);
+      const username = credentials.username || "DevUser"; // Use provided or default for mock
+      const userToLogin = MOCK_USER_DATA_STORE["devUser001"] || {
+        username: username,
+        _id: `mock-id-${username}`,
+      }; // Simplistic mock user
+      const sessionId = `session-login-${Date.now()}`;
+      if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
+      if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
+      MOCK_CHAT_HISTORY_STORE[sessionId] = [];
+      MOCK_SESSIONS_STORE[sessionId] = {
+        sessionId,
+        updatedAt: new Date().toISOString(),
+        messageCount: 0,
+        preview: "New Session (Mock Login)",
+      };
+      return {
+        token: `mock-token-for-${userToLogin.username}-${Date.now()}`, // Mock token
+        username: userToLogin.username,
+        _id: userToLogin._id,
+        sessionId: sessionId,
+      };
+    }
+    const response = await apiClient.post("/auth/signin", credentials);
+    return response.data;
+  },
+
+  signup: async (userData) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(400);
+      console.log("MOCK API (V1): signup attempt", userData);
+      const sessionId = `session-signup-${Date.now()}`;
+      if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
+      if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
+      MOCK_CHAT_HISTORY_STORE[sessionId] = [];
+      MOCK_SESSIONS_STORE[sessionId] = {
+        sessionId,
+        updatedAt: new Date().toISOString(),
+        messageCount: 0,
+        preview: "New Session (Mock Signup)",
+      };
+      return {
+        token: `mock-signup-token-${userData.username}-${Date.now()}`, // Mock token
+        username: userData.username,
+        _id: `mock-id-${userData.username}`, // Mock ID
+        sessionId: sessionId,
+      };
+    }
+    const response = await apiClient.post("/auth/signup", userData);
+    return response.data;
+  },
+
+  getMe: async () => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(100);
+      const mockToken = localStorage.getItem("authToken");
+      // Simulate /me based on AuthContext's DevUser or a generic one
+      if (
+        mockToken &&
+        (mockToken.includes("mock-token-for-DevUser") ||
+          mockToken.includes("mock-token-for-DevUI-User"))
+      ) {
+        return {
+          _id: "devUser001",
+          username: "DevUI-User",
+          createdAt: new Date().toISOString(),
+        };
+      } else if (mockToken) {
+        // Other mock token?
+        try {
+          const usernameFromToken =
+            mockToken.split("-")[2] || "MockedUserFromToken";
+          return {
+            _id: `mock-id-${usernameFromToken}`,
+            username: usernameFromToken,
+            createdAt: new Date().toISOString(),
+          };
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      // If no suitable mock token, reject as if unauthorized
+      return Promise.reject({
+        response: {
+          status: 401,
+          data: { message: "Mock: No valid token for /me" },
+        },
+      });
+    }
+    const response = await apiClient.get("/auth/me");
+    return response.data;
+  },
+
+  // --- Chat ---
+  sendMessage: async (payload) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(payload.useRag ? 800 : 400);
+      console.log("MOCK API (V1): sendMessage", payload);
+      const query = payload.query || "";
+      const llmInUse = payload.llmProvider || "ollama";
+      const systemP = payload.systemPrompt || "Default prompt.";
+      const botText = payload.useRag
+        ? `This is a MOCKED RAG response from ${llmInUse.toUpperCase()} for: "${query.substring(
+            0,
+            25
+          )}...". Considering your system prompt for a "${systemP.substring(
+            0,
+            20
+          )}..." style, document [1] offers insights.`
+        : `This is a MOCK direct response from ${llmInUse.toUpperCase()} for: "${query.substring(
+            0,
+            25
+          )}...". Your system prompt mode: "${systemP.substring(0, 20)}...".`;
+      const thinking = payload.useRag
+        ? `<thinking>Query: "${query.substring(
+            0,
+            15
+          )}..."\nLLM: ${llmInUse.toUpperCase()} (RAG)\nSystem Prompt: "${systemP.substring(
+            0,
+            30
+          )}..."\n(Mock) Found context in '${
+            MOCK_FILES_STORE[0]?.originalName || "mock_doc.pdf"
+          }'.</thinking>`
+        : `<thinking>Query: "${query.substring(
+            0,
+            15
+          )}..."\nLLM: ${llmInUse.toUpperCase()} (Direct)\nSystem Prompt: "${systemP.substring(
+            0,
+            30
+          )}..."\n(Mock) Processing direct query.</thinking>`;
+      const references = payload.useRag
+        ? [
+            {
+              number: 1,
+              source: MOCK_FILES_STORE[0]?.originalName || "default_mock.pdf",
+              content_preview:
+                "This is a snippet from the relevant mock document related to your query...",
+            },
+          ]
+        : [];
+      const botMsg = {
+        id: `bot-${Date.now()}`,
+        role: "model",
+        parts: [{ text: botText }],
+        thinking,
+        references,
+        timestamp: new Date().toISOString(),
+        source_pipeline: payload.useRag
+          ? `mock_${llmInUse}_rag`
+          : `mock_${llmInUse}_direct`,
+      };
+      if (payload.sessionId) {
+        if (!MOCK_CHAT_HISTORY_STORE[payload.sessionId])
+          MOCK_CHAT_HISTORY_STORE[payload.sessionId] = [];
+        MOCK_CHAT_HISTORY_STORE[payload.sessionId].push(botMsg);
+        if (MOCK_SESSIONS_STORE[payload.sessionId]) {
+          MOCK_SESSIONS_STORE[payload.sessionId].messageCount =
+            (MOCK_SESSIONS_STORE[payload.sessionId].messageCount || 0) + 2;
+          MOCK_SESSIONS_STORE[payload.sessionId].updatedAt =
+            new Date().toISOString();
+          MOCK_SESSIONS_STORE[payload.sessionId].preview =
+            botText.substring(0, 50) + "...";
+        }
+      }
+      return {
+        reply: botMsg,
+        sessionId: payload.sessionId,
+        source_pipeline: botMsg.source_pipeline,
+      };
+    }
+    const response = await apiClient.post("/chat/message", payload);
+    return response.data;
+  },
+
+  getChatHistory: async (sessionId) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(150);
+      console.log("MOCK API (V1): getChatHistory for", sessionId);
+      if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
+      return MOCK_CHAT_HISTORY_STORE[sessionId] || [];
+    }
+    // Real backend requires sessionId in the path for GET
+    const response = await apiClient.get(`/chat/session/${sessionId}`);
+    return response.data.messages || []; // Adapt if backend returns full session
+  },
+
+  getChatSessions: async () => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(150);
+      console.log("MOCK API (V1): getChatSessions");
+      if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
+      return Object.values(MOCK_SESSIONS_STORE).sort(
+        (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+      );
+    }
+    const response = await apiClient.get("/chat/sessions");
+    return response.data;
+  },
+
+  startNewSession: async () => {
+    // For V1, this just creates a mock session ID
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(50);
+      const newSid = `session-mock-new-${Date.now()}`;
+      if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {}; // Defensive
+      if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {}; // Defensive
+      MOCK_CHAT_HISTORY_STORE[newSid] = [];
+      MOCK_SESSIONS_STORE[newSid] = {
+        sessionId: newSid,
+        updatedAt: new Date().toISOString(),
+        messageCount: 0,
+        preview: "Newly Started Mock Session",
+      };
+      console.log("MOCK API (V1): startNewSession, created:", newSid);
+      return { sessionId: newSid };
+    }
+    // Real backend might have a dedicated endpoint or frontend generates a UUID for new sessions
+    // For now, assuming frontend generates a new UUID and this is used in App.jsx
+    // If backend needs to create it:
+    // const response = await apiClient.post('/chat/new_session'); return response.data;
+    // For this integration, let's assume the frontend handles new session ID generation or
+    // the backend's /auth/signin or /auth/signup provides the initial sessionId.
+    // If strictly "start new chat" *after* login means a new ID from backend:
+    console.warn(
+      "api.startNewSession: Real backend call for starting a new session explicitly not yet defined, ensure backend handles this or frontend generates new UUIDs for sessions."
+    );
+    const newSid = `client-generated-session-${Date.now()}`; // Placeholder for client-side generation
+    return { sessionId: newSid };
+  },
+
+  saveChatHistory: async (sessionId, messages) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(100);
+      console.log(
+        `MOCK API: Saving history for session ${sessionId}, ${messages.length} messages`
+      );
+      if (!MOCK_CHAT_HISTORY_STORE) MOCK_CHAT_HISTORY_STORE = {};
+      MOCK_CHAT_HISTORY_STORE[sessionId] = messages.map((m) => ({ ...m })); // Save a copy
+
+      if (!MOCK_SESSIONS_STORE) MOCK_SESSIONS_STORE = {};
+      if (MOCK_SESSIONS_STORE[sessionId]) {
+        MOCK_SESSIONS_STORE[sessionId].messageCount = messages.length;
+        MOCK_SESSIONS_STORE[sessionId].updatedAt = new Date().toISOString();
+        MOCK_SESSIONS_STORE[sessionId].preview =
+          messages[0]?.parts?.[0]?.text.substring(0, 50) + "..." ||
+          "Chat Session";
+      } else if (messages.length > 0) {
+        MOCK_SESSIONS_STORE[sessionId] = {
+          sessionId: sessionId,
+          updatedAt: new Date().toISOString(),
+          messageCount: messages.length,
+          preview:
+            messages[0]?.parts?.[0]?.text.substring(0, 50) + "..." ||
+            "Chat Session",
+        };
+      }
+      const newClientSessionId = `session-mock-new-${Date.now()}`;
+      return {
+        message: "Mock history saved.",
+        savedSessionId: sessionId,
+        newSessionId: newClientSessionId,
+      };
+    }
+    const response = await apiClient.post("/chat/history", {
+      sessionId,
+      messages,
+    });
+    return response.data;
+  },
+
+  // --- Files ---
+  uploadFile: async (formData, onUploadProgress) => {
+    if (DEV_MODE_MOCK_API) {
+      const file = formData.get("file");
+      const mockFileName = file?.name || "mock_upload.pdf";
+      console.log("MOCK API (V1): uploadFile", mockFileName);
+      if (onUploadProgress) {
+        let p = 0;
+        const i = setInterval(() => {
+          p += 25;
+          onUploadProgress({ loaded: p, total: 100 });
+          if (p >= 100) clearInterval(i);
+        }, 80);
+      }
+      await mockDelay(400);
+      const newFileEntry = {
+        serverFilename: `mock-server-${Date.now()}-${mockFileName}`,
+        originalName: mockFileName,
+        type: file?.type || "application/octet-stream",
+        size: file?.size || Math.floor(Math.random() * 100000),
+        lastModified: new Date().toISOString(),
+      };
+      if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
+      MOCK_FILES_STORE.unshift(newFileEntry);
+      return {
+        message: `${mockFileName} uploaded (mocked)!`,
+        filename: newFileEntry.serverFilename,
+        originalname: newFileEntry.originalName,
+      };
+    }
+    const response = await apiClient.post("/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress,
+    });
+    return response.data;
+  },
+
+  getFiles: async () => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(100);
+      console.log("MOCK API (V1): getFiles");
+      if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
+      return [...MOCK_FILES_STORE];
+    }
+    const response = await apiClient.get("/files");
+    return response.data;
+  },
+
+  renameFile: async (serverFilename, newOriginalName) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay();
+      console.log(
+        "MOCK API (V1): renameFile",
+        serverFilename,
+        "to",
+        newOriginalName
+      );
+      if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
+      const file = MOCK_FILES_STORE.find(
+        (f) => f.serverFilename === serverFilename
+      );
+      if (file) file.originalName = newOriginalName;
+      return { message: "File renamed (mocked)" };
+    }
+    const response = await apiClient.patch(`/files/${serverFilename}`, {
+      newOriginalName,
+    });
+    return response.data;
+  },
+
+  deleteFile: async (serverFilename) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay();
+      console.log("MOCK API (V1): deleteFile", serverFilename);
+      if (!MOCK_FILES_STORE) MOCK_FILES_STORE = []; // Defensive
+      MOCK_FILES_STORE = MOCK_FILES_STORE.filter(
+        (f) => f.serverFilename !== serverFilename
+      );
+      return { message: "File deleted (mocked)" };
+    }
+    const response = await apiClient.delete(`/files/${serverFilename}`);
+    return response.data;
+  },
+
+  // --- Analysis ---
+  requestAnalysis: async (payload) => {
+    // payload: { filename (original), analysis_type }
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(payload.analysis_type === "mindmap" ? 1200 : 600);
+      console.log("MOCK API (V1): requestAnalysis", payload);
+      if (!MOCK_ANALYSIS_RESULTS) MOCK_ANALYSIS_RESULTS = {}; // Defensive
+      const result = MOCK_ANALYSIS_RESULTS[payload.analysis_type] || {
+        content: `No mock data for ${payload.analysis_type} on ${payload.filename}`,
+        thinking: "Used fallback.",
+      };
+      return {
+        ...result,
+        content: result.content.replace(
+          "Selected Document",
+          payload.filename || "the Document"
+        ),
+      };
+    }
+    // Real backend needs to be implemented for analysis
+    // For now, this will likely fail or use a non-existent endpoint
+    // const response = await apiClient.post('/analysis/document', payload); return response.data;
+    console.warn(
+      "api.requestAnalysis: Real backend endpoint for analysis not yet defined."
+    );
+    // Fallback to mock even if DEV_MODE_MOCK_API is false, until backend is ready
+    await mockDelay(payload.analysis_type === "mindmap" ? 1200 : 600);
+    const result = MOCK_ANALYSIS_RESULTS[payload.analysis_type] || {
+      content: `No mock data for ${payload.analysis_type} on ${payload.filename}`,
+      thinking: "Used fallback (real endpoint pending).",
+    };
+    return {
+      ...result,
+      content: result.content.replace(
+        "Selected Document",
+        payload.filename || "the Document"
+      ),
+    };
+  },
+
+  // --- User LLM Config ---
+  updateUserLLMConfig: async (configData) => {
+    // { llmProvider, apiKey?, ollamaUrl? }
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay();
+      console.log("MOCK API (V1): updateUserLLMConfig", configData);
+      localStorage.setItem("mockUserLLMPreference", configData.llmProvider);
+      if (configData.llmProvider === "gemini" && configData.apiKey)
+        localStorage.setItem(
+          "mockUserGeminiKeyStatus_V1",
+          "ProvidedDuringMock"
+        );
+      if (configData.llmProvider === "ollama" && configData.ollamaUrl)
+        localStorage.setItem("mockUserOllamaUrl_V1", configData.ollamaUrl);
+      return { message: `LLM preference updated (mocked).` };
+    }
+    // Backend endpoint for this needs to be implemented.
+    // For now, mock success
+    // const response = await apiClient.post('/user/config/llm', configData); return response.data;
+    console.warn(
+      "api.updateUserLLMConfig: Real backend endpoint for LLM config not yet defined."
+    );
+    return {
+      message: `LLM preference update noted locally (real endpoint pending).`,
+    };
+  },
+
+  getUserLLMConfig: async () => {
+    // Expects { llmProvider }
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay();
+      const llmProvider =
+        localStorage.getItem("mockUserLLMPreference") || "ollama";
+      console.log("MOCK API (V1): getUserLLMConfig, returning:", llmProvider);
+      return { llmProvider };
+    }
+    // Backend endpoint for this needs to be implemented.
+    // For now, mock success
+    // const response = await apiClient.get('/user/config/llm'); return response.data;
+    console.warn(
+      "api.getUserLLMConfig: Real backend endpoint for LLM config not yet defined."
+    );
+    return { llmProvider: localStorage.getItem("selectedLLM") || "ollama" }; // Return local preference
+  },
+
+  // --- Status & Syllabus ---
+  getOrchestratorStatus: async () => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay(50);
+      return {
+        status: "ok",
+        message: "Backend (Mocked & Online)",
+        database_status: "Connected (Mock)",
+      };
+    }
+    // If your Node.js backend has a health endpoint (e.g., GET /api/health)
+    // This is different from the Python RAG service health.
+    // For now, assume Node.js backend is okay if this function is called.
+    // const response = await apiClient.get('/health'); // Example
+    // return response.data;
+    return {
+      status: "ok",
+      message: "Node.js Backend (Assumed OK)",
+      database_status: "Connected (Assumed)",
+    };
+  },
+
+  getSyllabus: async (subjectId) => {
+    if (DEV_MODE_MOCK_API) {
+      await mockDelay();
+      console.log("MOCK API (V1): getSyllabus for", subjectId);
+      return `# Mock Syllabus: ${subjectId}\n\n- Section 1: Intro to ${subjectId}\n- Section 2: Core Principles`;
+    }
+    const response = await apiClient.get(`/syllabus/${subjectId}`);
+    // Assuming backend returns { syllabus: "markdown_content" }
+    return response.data.syllabus;
+  },
 };
 
 export default api;
+
 ```
 
 `src/utils/helpers.js`

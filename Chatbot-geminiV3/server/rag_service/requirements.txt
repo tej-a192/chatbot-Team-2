@@ -1,6 +1,5 @@
-Flask
+flask
 requests
-sentence-transformers
 faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
@@ -14,18 +13,19 @@ uuid
 langchain-community
 pdfplumber
 fitz # PyMuPDF for PDF parsing
-pyteseract
+pytesseract
 nltk
-spacy
 spacy-layout
 pandas
 numpy
-re
 typing
 PIL # For image processing
 pytesseract # OCR
 pillow
 qdrant-client
+neo4j
+sentence_transformers
+spacy
 
 
 

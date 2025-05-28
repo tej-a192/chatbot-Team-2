@@ -2,7 +2,7 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const { tempAuth } = require('../middleware/authMiddleware'); // Protect the route
+const { authMiddleware } = require('../middleware/authMiddleware'); // Protect the route
 
 const router = express.Router();
 const SYLLABI_DIR = path.join(__dirname, '..', 'syllabi');
@@ -10,7 +10,7 @@ const SYLLABI_DIR = path.join(__dirname, '..', 'syllabi');
 // --- @route   GET /api/syllabus/:subjectId ---
 // --- @desc    Get syllabus content for a specific subject ---
 // --- @access  Private (requires auth) ---
-router.get('/:subjectId', tempAuth, async (req, res) => {
+router.get('/:subjectId', authMiddleware, async (req, res) => {
     const { subjectId } = req.params;
 
     // Basic sanitization: Allow only alphanumeric and underscores

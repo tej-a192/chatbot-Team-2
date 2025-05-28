@@ -2,7 +2,7 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const { tempAuth } = require('../middleware/authMiddleware');
+const { authMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -37,9 +37,9 @@ const ensureDirExists = async (dirPath) => {
 
 
 // --- @route   GET /api/files ---
-// Use tempAuth middleware
-router.get('/', tempAuth, async (req, res) => {
-    // req.user is guaranteed to exist here because of tempAuth middleware
+// Use authMiddleware middleware
+router.get('/', authMiddleware, async (req, res) => {
+    // req.user is guaranteed to exist here because of authMiddleware middleware
     const sanitizedUsername = sanitizeUsernameForDir(req.user.username);
     if (!sanitizedUsername) {
         console.warn("GET /api/files: Invalid user identifier after sanitization.");
@@ -90,11 +90,11 @@ router.get('/', tempAuth, async (req, res) => {
 });
 
 // --- @route   PATCH /api/files/:serverFilename ---
-// Use tempAuth middleware
-router.patch('/:serverFilename', tempAuth, async (req, res) => {
+// Use authMiddleware middleware
+router.patch('/:serverFilename', authMiddleware, async (req, res) => {
     const { serverFilename } = req.params;
     const { newOriginalName } = req.body;
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by tempAuth
+    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by authMiddleware
 
     // Validations
     if (!sanitizedUsername) return res.status(400).json({ message: 'Invalid user identifier.' });
@@ -140,10 +140,10 @@ router.patch('/:serverFilename', tempAuth, async (req, res) => {
 
 
 // --- @route   DELETE /api/files/:serverFilename ---
-// Use tempAuth middleware
-router.delete('/:serverFilename', tempAuth, async (req, res) => {
+// Use authMiddleware middleware
+router.delete('/:serverFilename', authMiddleware, async (req, res) => {
     const { serverFilename } = req.params;
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by tempAuth
+    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by authMiddleware
 
     // Validations
     if (!sanitizedUsername) return res.status(400).json({ message: 'Invalid user identifier.' });

@@ -1,3 +1,5 @@
+# server/vector_db_service.py
+
 import uuid
 import logging
 from typing import List, Dict, Tuple, Optional, Any
@@ -5,16 +7,12 @@ from typing import List, Dict, Tuple, Optional, Any
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
-# Assuming vector_db_service.py and config.py are in the same package directory (e.g., rag_service/)
-# and you run your application as a module (e.g., python -m rag_service.main_app)
-# or have otherwise correctly set up the Python path.
-import config # Changed to relative import
+import config
 
-# Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class Document: # For search result formatting
+class Document:
     def __init__(self, page_content: str, metadata: dict):
         self.page_content = page_content
         self.metadata = metadata
@@ -29,8 +27,6 @@ class VectorDBService:
         logger.info(f"  Collection: {config.QDRANT_COLLECTION_NAME}")
         logger.info(f"  Query Embedding Model: {config.QUERY_EMBEDDING_MODEL_NAME}")
         
-        # The vector dimension for the Qdrant collection is defined by the DOCUMENT embedding model
-        # This is set in config.QDRANT_COLLECTION_VECTOR_DIM
         self.vector_dim = config.QDRANT_COLLECTION_VECTOR_DIM
         logger.info(f"  Service expects Vector Dim for Qdrant collection: {self.vector_dim} (from document model config)")
 
@@ -49,8 +45,6 @@ class VectorDBService:
             )
 
         try:
-            # This model is for encoding search queries.
-            # Its output dimension MUST match self.vector_dim (QDRANT_COLLECTION_VECTOR_DIM).
             logger.info(f"  Loading query embedding model: '{config.QUERY_EMBEDDING_MODEL_NAME}'")
             self.model = SentenceTransformer(config.QUERY_EMBEDDING_MODEL_NAME)
             model_embedding_dim = self.model.get_sentence_embedding_dimension()
@@ -66,17 +60,16 @@ class VectorDBService:
                     "or environment variables for dimensions are correctly set."
                 )
                 logger.error(error_msg)
-                raise ValueError(error_msg) # Critical error, stop initialization
+                raise ValueError(error_msg)
             else:
                 logger.info(f"  Query model output dimension ({model_embedding_dim}) matches "
                             f"Qdrant collection dimension ({self.vector_dim}).")
 
         except Exception as e:
             logger.error(f"Error initializing SentenceTransformer model '{config.QUERY_EMBEDDING_MODEL_NAME}' for query encoding: {e}", exc_info=True)
-            raise # Re-raise to prevent service startup with a non-functional query encoder
+            raise
 
         self.collection_name = config.QDRANT_COLLECTION_NAME
-        # No ThreadPoolExecutor needed here if document encoding is external
 
     def _recreate_qdrant_collection(self):
         logger.info(f"Attempting to (re)create collection '{self.collection_name}' with vector size {self.vector_dim}.")
@@ -98,17 +91,15 @@ class VectorDBService:
             collection_info = self.client.get_collection(collection_name=self.collection_name)
             logger.info(f"Collection '{self.collection_name}' already exists.")
             
-            # Handle different Qdrant client versions for accessing vector config
             current_vectors_config = None
-            if hasattr(collection_info.config.params, 'vectors'): # For simple vector config
+            if hasattr(collection_info.config.params, 'vectors'):
                 if isinstance(collection_info.config.params.vectors, models.VectorParams):
                      current_vectors_config = collection_info.config.params.vectors
                 elif isinstance(collection_info.config.params.vectors, dict): # For named vectors
-                    # Assuming default unnamed vector or first one if named
-                    default_vector_name = '' # Common for single vector setup
+                    default_vector_name = '' # Qdrant client uses empty string for default unnamed vector
                     if default_vector_name in collection_info.config.params.vectors:
                         current_vectors_config = collection_info.config.params.vectors[default_vector_name]
-                    elif collection_info.config.params.vectors: # Get first one if default not found
+                    elif collection_info.config.params.vectors: # Fallback if default not found, get first one
                         current_vectors_config = next(iter(collection_info.config.params.vectors.values()))
 
             if not current_vectors_config:
@@ -118,18 +109,17 @@ class VectorDBService:
                 logger.warning(f"Collection '{self.collection_name}' vector size {current_vectors_config.size} "
                                f"differs from service's expected {self.vector_dim}. Recreating.")
                 self._recreate_qdrant_collection()
-            elif current_vectors_config.distance != models.Distance.COSINE: # Ensure distance is also checked
+            elif current_vectors_config.distance != models.Distance.COSINE:
                 logger.warning(f"Collection '{self.collection_name}' distance {current_vectors_config.distance} "
                                f"differs from expected {models.Distance.COSINE}. Recreating.")
                 self._recreate_qdrant_collection()
             else:
                 logger.info(f"Collection '{self.collection_name}' configuration is compatible (Size: {current_vectors_config.size}, Distance: {current_vectors_config.distance}).")
 
-        except Exception as e: # Broad exception for Qdrant client errors
-            # More specific check for "Not found" type errors
+        except Exception as e:
             if "not found" in str(e).lower() or \
                (hasattr(e, 'status_code') and e.status_code == 404) or \
-               " ভাগ্যবান" in str(e).lower(): # "Lucky" in Bengali, seems to be part of an error message you encountered
+               " ভাগ্যবান" in str(e).lower():
                  logger.info(f"Collection '{self.collection_name}' not found. Attempting to create...")
             else:
                  logger.warning(f"Error checking collection '{self.collection_name}': {type(e).__name__} - {e}. Attempting to (re)create anyway...")
@@ -141,22 +131,27 @@ class VectorDBService:
             return 0
 
         points_to_upsert = []
+        # Try to get a representative document name for logging from the first chunk's metadata
+        # This assumes ai_core provides 'file_name' or 'original_name' in metadata
         doc_name_for_logging = "Unknown Document"
+        if processed_chunks and 'metadata' in processed_chunks[0]:
+            first_chunk_meta = processed_chunks[0]['metadata']
+            doc_name_for_logging = first_chunk_meta.get('file_name', first_chunk_meta.get('original_name', "Unknown Document"))
 
         for chunk_data in processed_chunks:
             point_id = chunk_data.get('id', str(uuid.uuid4()))
             vector = chunk_data.get('embedding')
             
+            # The payload is primarily the metadata from ai_core
             payload = chunk_data.get('metadata', {}).copy()
+            # Add the actual text content of the chunk to the payload
             payload['chunk_text_content'] = chunk_data.get('text_content', '')
 
-            if not doc_name_for_logging or doc_name_for_logging == "Unknown Document":
-                doc_name_for_logging = payload.get('original_name', payload.get('document_name', "Unknown Document"))
-
+            # Validation for vector
             if not vector:
                 logger.warning(f"Chunk with ID '{point_id}' from '{doc_name_for_logging}' is missing 'embedding'. Skipping.")
                 continue
-            if not isinstance(vector, list) or not all(isinstance(x, (float, int)) for x in vector): # Allow int too, SentenceTransformer can return float32 which might be int-like in lists
+            if not isinstance(vector, list) or not all(isinstance(x, (float, int)) for x in vector):
                 logger.warning(f"Chunk with ID '{point_id}' from '{doc_name_for_logging}' has an invalid 'embedding' format. Skipping.")
                 continue
             if len(vector) != self.vector_dim:
@@ -177,7 +172,7 @@ class VectorDBService:
             return 0
 
         try:
-            self.client.upsert(collection_name=self.collection_name, points=points_to_upsert, wait=True) # wait=True can be useful for debugging
+            self.client.upsert(collection_name=self.collection_name, points=points_to_upsert, wait=True)
             logger.info(f"Successfully upserted {len(points_to_upsert)} chunks for document: {doc_name_for_logging} into Qdrant.")
             return len(points_to_upsert)
         except Exception as e:
@@ -185,7 +180,6 @@ class VectorDBService:
             raise
 
     def search_documents(self, query: str, k: int = -1, filter_conditions: Optional[models.Filter] = None) -> Tuple[List[Document], str, Dict]:
-        # Use default k from config if not provided or invalid
         if k <= 0:
             k_to_use = config.QDRANT_DEFAULT_SEARCH_K
         else:
@@ -197,9 +191,9 @@ class VectorDBService:
 
         logger.info(f"Searching with query (first 50 chars): '{query[:50]}...', k: {k_to_use}")
         if filter_conditions:
-            try: filter_dict = filter_conditions.dict()
-            except AttributeError: # For older Pydantic versions
-                try: filter_dict = filter_conditions.model_dump()
+            try: filter_dict = filter_conditions.dict() # For Pydantic v1
+            except AttributeError:
+                try: filter_dict = filter_conditions.model_dump() # For Pydantic v2
                 except AttributeError: filter_dict = str(filter_conditions) # Fallback
             logger.info(f"Applying filter: {filter_dict}")
         else:
@@ -215,7 +209,7 @@ class VectorDBService:
                 query_filter=filter_conditions,
                 limit=k_to_use,
                 with_payload=True,
-                score_threshold=config.QDRANT_SEARCH_MIN_RELEVANCE_SCORE # Apply score threshold directly in search
+                score_threshold=config.QDRANT_SEARCH_MIN_RELEVANCE_SCORE
             )
             logger.info(f"Qdrant client.search returned {len(search_results)} results (after score threshold).")
 
@@ -223,12 +217,6 @@ class VectorDBService:
                 return context_docs, formatted_context_text, context_docs_map
 
             for idx, point in enumerate(search_results):
-                # Score threshold is already applied by Qdrant if score_threshold parameter is used.
-                # If not using score_threshold in client.search, uncomment this:
-                # if point.score < config.QDRANT_SEARCH_MIN_RELEVANCE_SCORE:
-                #     logger.debug(f"Skipping point ID {point.id} with score {point.score:.4f} (below threshold {config.QDRANT_SEARCH_MIN_RELEVANCE_SCORE})")
-                #     continue
-
                 payload = point.payload
                 content = payload.get("chunk_text_content", payload.get("text_content", payload.get("chunk_text", "")))
 
@@ -239,32 +227,31 @@ class VectorDBService:
                 doc = Document(page_content=content, metadata=retrieved_metadata)
                 context_docs.append(doc)
 
-            # Format context and citations
             formatted_context_parts = []
             for i, doc_obj in enumerate(context_docs):
                 citation_index = i + 1
                 doc_meta = doc_obj.metadata
-                # Use more robust fetching of metadata keys
-                display_subject = doc_meta.get("title", doc_meta.get("subject", "Unknown Subject")) # Prefer title for subject
-                doc_name = doc_meta.get("original_name", doc_meta.get("file_name", "N/A"))
-                page_num_info = f" (Page: {doc_meta.get('page_number', 'N/A')})" if doc_meta.get('page_number') else "" # Add page number if available
+                display_subject = doc_meta.get("title", doc_meta.get("subject", "Unknown Subject"))
+                # Use 'file_name' first (as per Qdrant payload), then 'original_name'
+                doc_name = doc_meta.get("file_name", doc_meta.get("original_name", "N/A"))
+                page_num_info = f" (Page: {doc_meta.get('page_number', 'N/A')})" if doc_meta.get('page_number') else ""
                 
                 content_preview = doc_obj.page_content[:200] + "..." if len(doc_obj.page_content) > 200 else doc_obj.page_content
 
                 formatted = (f"[{citation_index}] Score: {doc_meta.get('score', 0.0):.4f} | "
                              f"Source: {doc_name}{page_num_info} | Subject: {display_subject}\n"
-                             f"Content: {content_preview}") # Show content preview
+                             f"Content: {content_preview}")
                 formatted_context_parts.append(formatted)
 
                 context_docs_map[str(citation_index)] = {
                     "subject": display_subject,
                     "document_name": doc_name,
                     "page_number": doc_meta.get("page_number"),
-                    "content_preview": content_preview, # Store preview
-                    "full_content": doc_obj.page_content, # Store full content for potential later use
+                    "content_preview": content_preview,
+                    "full_content": doc_obj.page_content,
                     "score": doc_meta.get("score", 0.0),
                     "qdrant_id": doc_meta.get("qdrant_id"),
-                    "original_metadata": doc_meta # Store all original metadata from payload
+                    "original_metadata": doc_meta
                 }
             if formatted_context_parts:
                 formatted_context_text = "\n\n---\n\n".join(formatted_context_parts)
@@ -277,7 +264,79 @@ class VectorDBService:
 
         return context_docs, formatted_context_text, context_docs_map
 
+    def delete_document_embeddings(self, user_id: str, original_name: str) -> int:
+        """
+        Deletes all points (embeddings) associated with a specific original_name and user_id.
+        'original_name' from the API call maps to 'file_name' in the Qdrant payload.
+        'user_id' from the API call maps to 'processing_user' in the Qdrant payload.
+
+        Args:
+            user_id: The ID of the user (will be matched against 'processing_user' in Qdrant payload).
+            original_name: The original name of the document (will be matched against 'file_name' in Qdrant payload).
+
+        Returns:
+            The number of points confirmed or targeted for deletion.
+
+        Raises:
+            Exception: If the deletion operation fails or returns an unexpected status.
+        """
+        logger.info(f"Attempting to delete embeddings for user_id (maps to 'processing_user')='{user_id}', "
+                    f"original_name (maps to 'file_name' in Qdrant)='{original_name}' "
+                    f"from collection '{self.collection_name}'.")
+
+        # Define the filter conditions using the ACTUAL keys in your Qdrant payload
+        filter_conditions = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="processing_user",  # This is the key in Qdrant for user_id
+                    match=models.MatchValue(value=user_id)
+                ),
+                models.FieldCondition(
+                    key="file_name",        # This is the key in Qdrant for original_name
+                    match=models.MatchValue(value=original_name)
+                )
+            ]
+        )
+
+        try:
+            count_response = self.client.count(
+                collection_name=self.collection_name,
+                count_filter=filter_conditions,
+                exact=True
+            )
+            num_to_delete = count_response.count
+            logger.info(f"Found {num_to_delete} points matching criteria for processing_user='{user_id}', file_name='{original_name}'.")
+
+            if num_to_delete == 0:
+                logger.info("No points to delete.")
+                return 0
+
+            delete_result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=filter_conditions),
+                wait=True
+            )
+
+            logger.info(f"Deletion operation for processing_user='{user_id}', file_name='{original_name}' "
+                        f"completed with status: {delete_result.status}. Expected to delete: {num_to_delete} points.")
+
+            if delete_result.status == models.UpdateStatus.COMPLETED:
+                logger.info(f"Successfully deleted {num_to_delete} points for processing_user='{user_id}', file_name='{original_name}'.")
+                return num_to_delete
+            elif delete_result.status == models.UpdateStatus.ACKNOWLEDGED:
+                logger.warning(f"Deletion operation acknowledged (status: {delete_result.status}) for {num_to_delete} points "
+                               f"for processing_user='{user_id}', file_name='{original_name}'. Assuming success as points were targeted.")
+                return num_to_delete
+            else:
+                error_msg = (f"Qdrant deletion operation for processing_user='{user_id}', file_name='{original_name}' "
+                             f"returned unexpected status: {delete_result.status}. Expected to delete {num_to_delete} points.")
+                logger.error(error_msg)
+                raise Exception(error_msg)
+
+        except Exception as e:
+            logger.error(f"Error during deletion process for processing_user='{user_id}', file_name='{original_name}': {e}", exc_info=True)
+            raise
+
     def close(self):
         logger.info("VectorDBService close called.")
-        # No specific resources like ThreadPoolExecutor to release in this version.
-        # QdrantClient does not have an explicit close() method in recent versions.
+        # QdrantClient does not have an explicit close() method.

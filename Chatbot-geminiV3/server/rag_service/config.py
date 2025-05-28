@@ -1,7 +1,7 @@
 # server/config.py
 import os
 import logging
-
+import sys
 # ─── Logging Configuration ───────────────────────────
 logger = logging.getLogger(__name__)
 LOGGING_LEVEL_NAME = os.getenv('LOGGING_LEVEL', 'INFO').upper()
@@ -30,6 +30,13 @@ def setup_logging():
     logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
 
 # === Embedding Model Configuration ===
+# === Neo4j Configuration === # <--- Good, clear section heading
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password") # Or the new password you set
+# You added logging for URI and User, which is good:
+logger.info(f"[Config] Neo4j URI: {NEO4J_URI}")
+logger.info(f"[Config] Neo4j User: {NEO4J_USER}")
 DEFAULT_DOC_EMBED_MODEL = 'mixedbread-ai/mxbai-embed-large-v1'
 DOCUMENT_EMBEDDING_MODEL_NAME = os.getenv('DOCUMENT_EMBEDDING_MODEL_NAME', DEFAULT_DOC_EMBED_MODEL)
 MAX_TEXT_LENGTH_FOR_NER = int(os.getenv("MAX_TEXT_LENGTH_FOR_NER", 500000))
@@ -60,11 +67,19 @@ SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
 logger.info(f"[Config] SpaCy Model: {SPACY_MODEL_NAME}")
 
 # === Qdrant Configuration ===
-QDRANT_HOST = os.getenv("QDRANT_HOST", "http://172.180.2.48")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "my_qdrant_rag_collection")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 QDRANT_URL = os.getenv("QDRANT_URL", None)
+# It's generally good practice NOT to log the actual password,
+# but you could log whether it's set or not:
+if NEO4J_PASSWORD and NEO4J_PASSWORD != "password": # Assuming "password" is a known default placeholder
+    logger.info(f"[Config] Neo4j Password: Is SET (using environment variable or changed from default)")
+elif NEO4J_PASSWORD == "password":
+    logger.info(f"[Config] Neo4j Password: Using default placeholder 'password'. Ensure this is correct or changed!")
+else:
+    logger.warning("[Config] Neo4j Password: IS NOT SET. Connection will likely fail.")
 
 QDRANT_COLLECTION_VECTOR_DIM = DOCUMENT_VECTOR_DIMENSION
 logger.info(f"[Config] Qdrant Vector Dimension: {QDRANT_COLLECTION_VECTOR_DIM}")

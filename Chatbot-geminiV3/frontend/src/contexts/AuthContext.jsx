@@ -1,137 +1,160 @@
 // frontend/src/contexts/AuthContext.jsx
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api.js'; 
-import { jwtDecode } from 'jwt-decode';
-import toast from 'react-hot-toast'; // IMPORTED
+import toast from 'react-hot-toast';
+// No need for jwt-decode here if backend sends user details or /me provides them.
 
 export const AuthContext = createContext(null);
 
-export const DEV_MODE_ALLOW_DEV_LOGIN = true; 
+// --- DEVELOPMENT FLAGS ---
+export const DEV_MODE_ALLOW_DEV_LOGIN = false; // <-- SET TO false
 const MOCK_DEV_USERNAME = 'DevUser'; 
 const MOCK_DEV_PASSWORD = 'devpassword';   
+// --- END DEVELOPMENT FLAGS ---
 
 export const AuthProvider = ({ children }) => {
-    const [token, setToken] = useState(localStorage.getItem('authToken'));
-    const [user, setUser] = useState(null);
+    const [token, setTokenState] = useState(localStorage.getItem('authToken'));
+    const [user, setUserState] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    const parseToken = useCallback((tok) => {
-        if (!tok) return null;
-        try {
-            const decoded = jwtDecode(tok); 
-            return { id: decoded.id || decoded.sub || 'mock-user-id', username: decoded.username || 'MockedUser' };
-        } catch (e) {
-            // console.warn("AuthContext: Failed to decode token (likely a simple mock token):", e.message);
-            if (tok && (tok.startsWith('mock-token-') || tok.startsWith('fake-dev-token-'))) { 
-                 const usernameFromMockToken = tok.split('-')[2] || MOCK_DEV_USERNAME;
-                 return {id: `mock-id-${usernameFromMockToken}`, username: usernameFromMockToken};
-            }
-            localStorage.removeItem('authToken'); 
-            return null;
+    const setToken = (newToken) => {
+        if (newToken) {
+            localStorage.setItem('authToken', newToken);
+        } else {
+            localStorage.removeItem('authToken');
         }
-    }, []);
+        setTokenState(newToken);
+    };
 
-    // Example adjustment in AuthContext.jsx's useEffect
+    const setUser = (newUser) => {
+        setUserState(newUser);
+    };
+    
+    const processAuthData = useCallback((authApiResponse) => {
+        // Expects authApiResponse to be: { token, _id, username, sessionId?, message? }
+        if (authApiResponse && authApiResponse.token && authApiResponse._id && authApiResponse.username) {
+            setToken(authApiResponse.token);
+            setUser({ id: authApiResponse._id, username: authApiResponse.username });
+            console.log("AuthContext: User and Token set.", { username: authApiResponse.username });
+            // Session ID from authApiResponse (like authApiResponse.sessionId)
+            // will be passed to App.jsx through the onClose callback of AuthModal
+            return authApiResponse; 
+        } else {
+            console.error("AuthContext: processAuthData received incomplete data from API", authApiResponse);
+            // Clear any partial auth state
+            setToken(null);
+            setUser(null);
+            throw new Error("Authentication response from server was incomplete.");
+        }
+    }, []); // No dependencies needed as setToken and setUser are stable
+
     useEffect(() => {
-        const attemptAutoLogin = async () => {
-            setLoading(true);
+        const verifyTokenAndLoadUser = async () => {
             const storedToken = localStorage.getItem('authToken');
             if (storedToken) {
+                setTokenState(storedToken); // Set token for api.getMe() to use Authorization header
                 try {
-                    // If DEV_MODE_MOCK_API is true, api.getMe() will use its mock.
-                    // If false, it hits the real /auth/me endpoint with the token.
-                    const userData = await api.getMe(); 
-                    setUser({ id: userData._id, username: userData.username }); // Assuming _id is returned as id
-                    setToken(storedToken);
-                    console.log("AuthContext: Auto-login successful via /me endpoint.", userData);
+                    console.log("AuthContext: Found stored token. Verifying with /me...");
+                    const userDataFromMe = await api.getMe(); // api.js will include the token
+                    if (userDataFromMe && userDataFromMe._id && userDataFromMe.username) {
+                        setUser({ id: userDataFromMe._id, username: userDataFromMe.username });
+                        // Token is already set from localStorage and has been confirmed valid by /me
+                        console.log("AuthContext: Token verified, user loaded via /me.", userDataFromMe);
+                    } else {
+                        console.warn("AuthContext: /me endpoint did not return valid user data.", userDataFromMe);
+                        setToken(null); // Clear invalid token from state and localStorage
+                        setUser(null);
+                    }
                 } catch (error) {
-                    console.warn("AuthContext: Auto-login failed (token invalid or /me error). Clearing token.", error.response?.data?.message || error.message);
-                    localStorage.removeItem('authToken');
-                    setToken(null);
+                    console.warn("AuthContext: Auto-login via /me failed. Token might be invalid or expired.", error.message);
+                    setToken(null); // Clear invalid token
                     setUser(null);
                 }
+            } else {
+                console.log("AuthContext: No stored token found.");
             }
             setLoading(false);
         };
-        attemptAutoLogin();
-    }, []); // No dependencies, runs once on mount
+        verifyTokenAndLoadUser();
+    }, []);
 
     const login = async (credentials) => {
-        setLoading(true); // Good practice to set loading true for the API call
+        setLoading(true);
         try {
-            const data = await api.login(credentials); // This now hits the real backend if DEV_MODE_MOCK_API is false
-            localStorage.setItem('authToken', data.token);
-            // Use user details directly from response if available and preferred
-            setUser({ id: data._id, username: data.username }); 
-            setToken(data.token);
-            setLoading(false);
-            return data; // Return the full response which includes sessionId etc.
+            const data = await api.login(credentials); // data = { token, _id, username, sessionId, message }
+            return processAuthData(data);
         } catch (error) {
+            setToken(null); 
+            setUser(null);
+            console.error("AuthContext login error:", error.response?.data?.message || error.message);
+            throw error; 
+        } finally {
             setLoading(false);
-            throw error; // Re-throw for AuthModal to handle
         }
     };
     
     const signup = async (signupData) => {
         setLoading(true);
         try {
-            const data = await api.signup(signupData); 
-            if (data.token) { 
-                localStorage.setItem('authToken', data.token);
-                setUser({ id: data._id, username: data.username });
-                setToken(data.token);
-            }
-            setLoading(false);
-            return data;
+            const data = await api.signup(signupData); // data = { token, _id, username, sessionId, message }
+            return processAuthData(data);
         } catch (error) {
-            setLoading(false);
+            setToken(null);
+            setUser(null);
+            console.error("AuthContext signup error:", error.response?.data?.message || error.message);
             throw error;
+        } finally {
+            setLoading(false);
         }
     };
 
     const logout = () => {
-        localStorage.removeItem('authToken');
+        console.log("AuthContext: Logging out user.");
+        setToken(null); 
         setUser(null);
-        setToken(null);
-        toast.success("Logged out.");
+        // Other contexts (like AppStateContext for sessionId) should react to token/user becoming null.
+        toast.success("You have been logged out.");
     };
 
-    const devLogin = async () => { // Ensure it's async
-        if (DEV_MODE_ALLOW_DEV_LOGIN) {
-            console.log("AuthContext: devLogin initiated.");
-            try {
-                // This calls the mocked api.login from services/api.js
-                const data = await api.login({ username: MOCK_DEV_USERNAME, password: MOCK_DEV_PASSWORD });
-                if (data && data.token) { // Check if data and token are returned
-                    localStorage.setItem('authToken', data.token);
-                    const decodedUser = parseToken(data.token);
-                    setUser(decodedUser);
-                    setToken(data.token);
-                    console.log("AuthContext: Dev Quick Login successful. User:", decodedUser);
-                    return data; // Crucially, return the data object
-                } else {
-                    console.error("AuthContext: Mock api.login for devLogin did not return expected data (token).");
-                    throw new Error("Mock API login failed to provide token.");
-                }
-            } catch (error) {
-                console.error("AuthContext: Dev Quick Login via mock api.login failed:", error);
-                toast.error(`Dev Login Error: ${error.message}`); // More specific error
-                // Do not rethrow here if AuthModal will handle based on null return
-                return null; // Indicate failure
-            }
+    // Dev login will attempt to use MOCK_DEV_USERNAME/PASSWORD against the REAL backend if DEV_MODE_MOCK_API in api.js is false.
+    // This will likely fail unless that user exists on the backend.
+    const devLogin = async () => {
+        if (!DEV_MODE_ALLOW_DEV_LOGIN) {
+            const msg = "Dev Quick Login is disabled in AuthContext.";
+            toast.error(msg);
+            return Promise.reject(new Error(msg));
         }
-        console.warn("devLogin called but DEV_MODE_ALLOW_DEV_LOGIN is false.");
-        return null; // Return null if not allowed or if it fails
+        console.warn("AuthContext: devLogin initiated. This attempts to log in with MOCK credentials against the configured API endpoint.");
+        setLoading(true);
+        try {
+            const data = await api.login({ username: MOCK_DEV_USERNAME, password: MOCK_DEV_PASSWORD });
+            return processAuthData(data);
+        } catch (error) {
+            setToken(null);
+            setUser(null);
+            const errorMsg = error.response?.data?.message || error.message || "Dev login attempt failed.";
+            console.error("AuthContext: Dev Quick Login via API failed:", errorMsg);
+            toast.error(`Dev Login Error: ${errorMsg}`);
+            throw error; 
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
         <AuthContext.Provider value={{ 
-            token, user, loading, 
-            login, signup, logout, 
-            devLogin: DEV_MODE_ALLOW_DEV_LOGIN ? devLogin : undefined, 
-            setUser, setToken, 
+            token, 
+            user, 
+            loading, 
+            login, 
+            signup, 
+            logout, 
+            devLogin: DEV_MODE_ALLOW_DEV_LOGIN ? devLogin : undefined,
+            setUser, // Allow App.jsx or other components to potentially set user details if needed
+            // setToken, // Exposing setToken directly is usually not needed by consumers
             DEV_MODE_ALLOW_DEV_LOGIN,
-            MOCK_DEV_USERNAME, MOCK_DEV_PASSWORD
+            MOCK_DEV_USERNAME,
+            MOCK_DEV_PASSWORD
         }}>
             {children}
         </AuthContext.Provider>

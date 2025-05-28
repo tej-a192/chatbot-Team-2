@@ -33,21 +33,6 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
         fetchFiles();
     }, [fetchFiles]);
 
-    const handleRename = async (file, newOriginalName) => {
-        if (!newOriginalName || newOriginalName === file.originalName) return;
-        const toastId = toast.loading(`Renaming ${file.originalName} (mock)...`);
-        try {
-            await api.renameFile(file.serverFilename, newOriginalName); // Mocked
-            toast.success(`Renamed to ${newOriginalName} (mock).`, { id: toastId });
-            fetchFiles(); 
-            if (selectedDocument?.serverFilename === file.serverFilename) {
-                onSelectDocument({...file, originalName: newOriginalName});
-            }
-        } catch (err) {
-            toast.error(`Mock rename failed: ${err.message}`, { id: toastId });
-        }
-    };
-
     const handleDelete = async (file) => {
         if (!window.confirm(`MOCK: Are you sure you want to delete "${file.originalName}"?`)) return;
         const toastId = toast.loading(`Deleting ${file.originalName} (mock)...`);
@@ -87,10 +72,10 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
     return (
         <div className="space-y-1.5 text-xs custom-scrollbar pr-1"> {/* Added pr-1 for scrollbar */}
             {files.map(file => {
-                const isSelected = selectedDocument?.serverFilename === file.serverFilename;
+                const isSelected = selectedDocument;
                 return (
                     <div 
-                        key={file.serverFilename} 
+                        key={file.originalName} 
                         onClick={() => onSelectDocument(isSelected ? null : file)} // Call the prop
                         className={`p-2.5 bg-surface-light dark:bg-gray-800 border rounded-md flex items-center justify-between hover:shadow-md transition-all duration-150 cursor-pointer
                                     ${isSelected 
@@ -108,10 +93,6 @@ function DocumentList({ onSelectDocument, selectedDocument }) {
                             </span>
                         </div>
                         <div className="flex-shrink-0 flex items-center gap-0.5"> {/* Reduced gap for smaller buttons */}
-                            <IconButton icon={Edit3} size="sm" variant="ghost" title="Rename"
-                                onClick={(e) => { e.stopPropagation(); const newN = prompt(`Rename "${file.originalName}" to:`, file.originalName); if(newN && newN.trim() !== '' && newN !== file.originalName) handleRename(file, newN.trim()); }}
-                                className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 p-1" // Smaller padding
-                            />
                             <IconButton icon={Trash2} size="sm" variant="ghost" title="Delete"
                                 onClick={(e) => { e.stopPropagation(); handleDelete(file);}}
                                 className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 p-1" // Smaller padding
