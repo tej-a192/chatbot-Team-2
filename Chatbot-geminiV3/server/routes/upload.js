@@ -425,7 +425,7 @@ router.post('/', tempAuth, (req, res) => {
                 );
             }
 
-            // ----- STAGE 5: KG Worker Initiation -----
+            // ----- STAGE 4: KG Worker Initiation -----
             let kgWorkerInitiated = false;
             // Condition for KG: RAG was successful (status 'added'), and chunks are available.
             // The initial document entry is already saved in STAGE 2.5.
@@ -443,7 +443,6 @@ router.post('/', tempAuth, (req, res) => {
                             originalName: originalName,
                             // documentIdInDb is no longer strictly needed if KG service uses userId/originalName to update DB
                             // but can be passed as originalName for context if kgService expects a document identifier
-                            documentIdInDb: originalName // Using originalName as the identifier for KG context
                         }
                     });
                     kgWorkerInitiated = true;

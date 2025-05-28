@@ -1,19 +1,48 @@
 // server/services/kgService.js
 const geminiService = require('./geminiService'); // Assuming it's in the same folder or adjust path
 const { v4: uuidv4 } = require('uuid'); // For generating unique IDs if needed, or rely on LLM
+const axios = require('axios');
 
-const KG_GENERATION_SYSTEM_PROMPT = `You are an expert in knowledge graph creation. Your task is to read the provided text chunk and create a partial graph-based memory map.
-Identify major topics as top-level nodes, subtopics as subnodes under their respective parents, and relationships between nodes.
-Output the result ONLY as a valid JSON object with "nodes" and "edges" sections. Ensure the JSON is complete and properly formatted.
-All node IDs and relationship types must be strings.
-Node IDs should be descriptive and preferably unique within the chunk, but global uniqueness will be handled during merging.
-For descriptions, keep them concise (around 1-2 sentences).
+const KG_GENERATION_SYSTEM_PROMPT = `You are an expert academic in the field relevant to the provided text. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment.
+The output MUST be a valid JSON object with "nodes" and "edges" sections.
 
-Example node: {"id": "Machine Learning Introduction", "type": "major", "parent": null, "description": "An overview of machine learning concepts."}
-Example subnode: {"id": "Supervised Learning", "type": "subnode", "parent": "Machine Learning Introduction", "description": "Learning from labeled data."}
-Example edge: {"from": "Supervised Learning", "to": "Machine Learning Introduction", "relationship": "subtopic_of"}
-Allowed relationship types: subtopic_of, related_to, depends_on, example_of, leads_to.
+Instructions for Node Creation:
+1.  Identify CORE CONCEPTS or main topics discussed in the chunk. These should be 'major' nodes (parent: null).
+2.  Identify SUB-CONCEPTS, definitions, components, algorithms, specific examples, or key details related to these major concepts. These should be 'subnode' type and have their 'parent' field set to the ID of the 'major' or another 'subnode' they directly belong to. Aim for a granular breakdown.
+3.  Node 'id': Use a concise, descriptive, and specific term for the concept (e.g., "Linear Regression", "LMS Update Rule", "Feature Selection"). Capitalize appropriately.
+4.  Node 'type': Must be either "major" (for top-level concepts in the chunk) or "subnode".
+5.  Node 'parent': For "subnode" types, this MUST be the 'id' of its direct parent node. For "major" nodes, this MUST be null.
+6.  Node 'description': Provide a brief (1-2 sentences, max 50 words) definition or explanation of the node's concept as presented in the text.
+
+Instructions for Edge Creation:
+1.  Edges represent relationships BETWEEN the nodes you've identified.
+2.  The 'from' field should be the 'id' of the child/more specific node.
+3.  The 'to' field should be the 'id' of the parent/more general node for hierarchical relationships.
+4.  Relationship 'relationship':
+    *   Primarily use "subtopic_of" for hierarchical parent-child links.
+    *   Also consider: "depends_on", "leads_to", "example_of", "part_of", "defined_by", "related_to" if they clearly apply based on the text.
+5.  Ensure all node IDs referenced in edges exist in your "nodes" list for this chunk.
+
+Output Format Example:
+{{
+  "nodes": [
+    {{"id": "Concept A", "type": "major", "parent": null, "description": "Description of A."}},
+    {{"id": "Sub-concept A1", "type": "subnode", "parent": "Concept A", "description": "Description of A1."}},
+    {{"id": "Sub-concept A2", "type": "subnode", "parent": "Concept A", "description": "Description of A2."}},
+    {{"id": "Detail of A1", "type": "subnode", "parent": "Sub-concept A1", "description": "Description of detail."}}
+  ],
+  "edges": [
+    {{"from": "Sub-concept A1", "to": "Concept A", "relationship": "subtopic_of"}},
+    {{"from": "Sub-concept A2", "to": "Concept A", "relationship": "subtopic_of"}},
+    {{"from": "Detail of A1", "to": "Sub-concept A1", "relationship": "subtopic_of"}},
+    {{"from": "Sub-concept A1", "to": "Sub-concept A2", "relationship": "related_to"}} // Example of a non-hierarchical link
+  ]
+}}
+
+Analyze the provided text chunk carefully and generate the JSON. Be thorough in identifying distinct concepts and their relationships to create a rich graph.
+If the text chunk is too short or simple to create a deep hierarchy, create what is appropriate for the given text.
 `;
+
 
 function constructKgPromptForChunk(chunkText) {
     return `
@@ -152,15 +181,14 @@ function _mergeGraphFragments(graphFragments) {
  * @param {Array<Object>} chunksForKg - Array of chunks, e.g., [{id, text_content, metadata}, ...]
  * @param {string} userId - The ID of the user.
  * @param {string} originalName - The original name of the uploaded file.
- * @param {string} documentIdInDb - The MongoDB document ID for this file.
  * @returns {Promise<Object|null>} The merged knowledge graph {nodes, edges} or null on failure.
  */
 
 
 
 
-async function generateAndStoreKg(chunksForKg, userId, originalName, documentIdInDb) {
-    console.log(`[KG Service] Starting KG generation for document: ${originalName} (DocID: ${documentIdInDb}, User: ${userId}) with ${chunksForKg.length} chunks.`);
+async function generateAndStoreKg(chunksForKg, userId, originalName) {
+    console.log(`[KG Service] Starting KG generation for document: ${originalName} (User: ${userId}) with ${chunksForKg.length} chunks.`);
 
     if (!chunksForKg || chunksForKg.length === 0) {
         console.warn("[KG Service] No chunks provided for KG generation.");
@@ -220,15 +248,75 @@ async function generateAndStoreKg(chunksForKg, userId, originalName, documentIdI
 
     // --- THIS IS WHERE YOU'D INTEGRATE NEO4J LATER ---
     // For now, we just log it.
-    console.log(`[KG Service] Successfully generated KG for document: ${originalName} (DocID: ${documentIdInDb})`);
-    console.log("[KG Service] Final Merged KG (Nodes):", JSON.stringify(finalKg.nodes.slice(0, 5), null, 2) + (finalKg.nodes.length > 5 ? "\n..." : "")); // Log first 5 nodes
-    console.log("[KG Service] Final Merged KG (Edges):", JSON.stringify(finalKg.edges.slice(0, 5), null, 2) + (finalKg.edges.length > 5 ? "\n..." : "")); // Log first 5 edges
+    // console.log(`[KG Service] Successfully generated KG for document: ${originalName}`);
+    // console.log("[KG Service] Final Merged KG (Nodes):", JSON.stringify(finalKg.nodes.slice(0, 5), null, 2) + (finalKg.nodes.length > 5 ? "\n..." : "")); // Log first 5 nodes
+    // console.log("[KG Service] Final Merged KG (Edges):", JSON.stringify(finalKg.edges.slice(0, 5), null, 2) + (finalKg.edges.length > 5 ? "\n..." : "")); // Log first 5 edges
     // To see the full graph: console.log("[KG Service] Full Final Merged KG:", JSON.stringify(finalKg, null, 2));
+    console.log("[KG Service] Full Final Merged KG : ", finalKg);
+    
 
+        // --- Determine and Call the KG Ingestion API ---
+    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002'; // Use default if not set
+    const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`; // Ensure no double slash and append /kg
 
-    // You might want to return the KG structure or a success status.
-    // The worker will get this return value.
-    return { success: true, knowledgeGraph: finalKg, documentId: documentIdInDb };
+    if (!kgIngestionApiUrl.startsWith('http')) { // Basic check if a valid URL was formed
+        console.error("[KG Service] KG Ingestion API URL could not be determined properly. Check DEFAULT_PYTHON_RAG_URL. Current URL:", kgIngestionApiUrl);
+        return {
+            success: false,
+            message: "KG generated, but KG Ingestion API URL is invalid. KG not stored.",
+        };
+    }
+
+    console.log(`[KG Service] Sending KG for '${originalName}' to KG Ingestion API: ${kgIngestionApiUrl}`);
+    try {
+        const payload = {
+            userId: userId,
+            originalName: originalName,
+            nodes: finalKg.nodes,
+            edges: finalKg.edges
+        };
+
+        const serviceResponse = await axios.post(kgIngestionApiUrl, payload, {
+            timeout: 180000 // 3 minute timeout
+        });
+
+        const responseData = serviceResponse.data;
+        console.log(`[KG Service] KG Ingestion API response for '${originalName}':`, responseData);
+
+        // --- Define how to determine success from your API's response ---
+        // Example: expecting { "document-name": "...", "status": "completed", "userId": "..." }
+        const API_SUCCESS_STATUS_VALUE = "completed"; // <<<< IMPORTANT: CHANGE THIS to your API's actual success status string
+        // ---
+
+        if (serviceResponse.status >= 200 && serviceResponse.status < 300 && responseData && responseData.status === API_SUCCESS_STATUS_VALUE) {
+            if (responseData['document-name'] !== originalName || responseData.userId !== userId) {
+                console.warn(`[KG Service] Mismatch in KG API response for '${originalName}'. Expected doc/user: ${originalName}/${userId}, Got: ${responseData['document-name']}/${responseData.userId}`);
+            }
+            const successMessage = `KG for '${originalName}' successfully processed by Ingestion API. Status: ${responseData.status}.`;
+            console.log(`[KG Service] ${successMessage}`);
+            return {
+                success: true,
+                message: successMessage,
+                serviceResponseData: responseData // Pass back the API's response data
+            };
+        } else {
+            const failureMessage = `KG Ingestion API for '${originalName}' indicated failure or unexpected status. HTTP: ${serviceResponse.status}, API Status: '${responseData?.status || "N/A"}'. Response Msg: ${responseData?.message || responseData?.error || 'No specific error from API.'}`;
+            console.warn(`[KG Service] ${failureMessage}`);
+            return {
+                success: false,
+                message: failureMessage,
+                serviceResponseData: responseData
+            };
+        }
+    } catch (error) {
+        const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || "Unknown error calling KG Ingestion API";
+        console.error(`[KG Service] Error calling KG Ingestion API for '${originalName}':`, errorMsg);
+        if (error.response?.data) console.error("[KG Service] KG API Error Response Data:", error.response.data);
+        return {
+            success: false,
+            message: `KG generated, but error calling KG Ingestion API: ${errorMsg}`,
+        };
+    }
 }
 
 module.exports = { generateAndStoreKg };

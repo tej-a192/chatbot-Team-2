@@ -7,10 +7,9 @@ const { workerData, parentPort } = require('worker_threads');
 const kgService = require('../services/kgService'); // <<<< IMPORTANT: CHECK THIS PATH
 
 async function runKgGeneration() {
-    const { chunksForKg, userId, originalName, documentIdInDb } = workerData;
+    const { chunksForKg, userId, originalName } = workerData;
 
     console.log(`[KG Worker ${process.pid}] Received task. Starting KG generation via kgService for:`);
-    console.log(`  Document ID: ${documentIdInDb}`);
     console.log(`  User ID: ${userId}`);
     console.log(`  Original Filename: ${originalName}`);
     console.log(`  Number of Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
@@ -21,14 +20,13 @@ async function runKgGeneration() {
         }
 
         // Call the main function from your kgService
-        const result = await kgService.generateAndStoreKg(chunksForKg, userId, originalName, documentIdInDb);
+        const result = await kgService.generateAndStoreKg(chunksForKg, userId, originalName);
 
         if (result && result.success) {
-            console.log(`[KG Worker ${process.pid}] KG generation successful for document ID: ${documentIdInDb}`);
+            console.log(`[KG Worker ${process.pid}] KG generation successful for document: ${originalName}`);
             if (parentPort) {
                 parentPort.postMessage({
                     success: true,
-                    documentId: documentIdInDb,
                     message: "KG generation completed successfully by worker.",
                     // Optionally, send back a summary if needed by the main thread
                     // knowledgeGraphSummary: {
@@ -39,26 +37,26 @@ async function runKgGeneration() {
             }
         } else {
             const errorMessage = (result && result.message) ? result.message : "KG generation process failed in service or returned no result.";
-            console.error(`[KG Worker ${process.pid}] KG generation failed for document ID: ${documentIdInDb}. Error: ${errorMessage}`);
+            console.error(`[KG Worker ${process.pid}] KG generation failed for document: ${originalName}. Error: ${errorMessage}`);
             if (parentPort) {
                 parentPort.postMessage({
                     success: false,
                     error: errorMessage,
-                    documentId: documentIdInDb
+                    document: originalName
                 });
             }
         }
     } catch (error) {
-        console.error(`[KG Worker ${process.pid}] Critical error during KG generation task for document ID: ${documentIdInDb}:`, error);
+        console.error(`[KG Worker ${process.pid}] Critical error during KG generation task for document: ${originalName}:`, error);
         if (parentPort) {
             parentPort.postMessage({
                 success: false,
                 error: error.message || "Unknown critical error in KG worker.",
-                documentId: documentIdInDb
+                document: originalName
             });
         }
     } finally {
-        // If not using parentPort.postMessage, the worker might exit.
+        // If not using parentPort.postMessage , the worker might exit.
         // If parentPort is used, the main thread controls when the worker instance might be terminated
         // or if the worker should explicitly close itself (e.g., if it's designed for one-off tasks).
         // For simple fire-and-forget, this is okay.
