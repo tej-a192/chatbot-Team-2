@@ -14,7 +14,7 @@ uuid
 langchain-community
 pdfplumber
 fitz # PyMuPDF for PDF parsing
-pytesseract
+pyteseract
 nltk
 spacy
 spacy-layout

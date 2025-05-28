@@ -60,7 +60,7 @@ SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
 logger.info(f"[Config] SpaCy Model: {SPACY_MODEL_NAME}")
 
 # === Qdrant Configuration ===
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "http://172.180.2.48")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "my_qdrant_rag_collection")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)

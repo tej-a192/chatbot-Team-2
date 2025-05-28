@@ -1,81 +1,3 @@
-// // frontend/src/contexts/AuthContext.jsx (Version 1 - Testing/Development with Bypassed Auth)
-// import React, { createContext, useState, useEffect } from 'react';
-// // No jwt-decode or real api needed for this fully bypassed version
-
-// export const AuthContext = createContext(null);
-
-// const BYPASS_AUTH_FOR_DEVELOPMENT = true; 
-
-// const MOCK_USER_VERSION_1 = {
-//     id: 'devUserV1-001',
-//     username: 'DevUI-User',
-// };
-// const MOCK_TOKEN_VERSION_1 = 'static-mock-dev-token-for-v1-ui-testing';
-
-// export const AuthProvider = ({ children }) => {
-//     const [token, setToken] = useState(null);
-//     const [user, setUser] = useState(null);
-//     const [loading, setLoading] = useState(true); 
-
-//     useEffect(() => {
-//         console.log("AuthContext (V1 Testing): Initializing...");
-//         if (BYPASS_AUTH_FOR_DEVELOPMENT) {
-//             setToken(MOCK_TOKEN_VERSION_1);
-//             setUser(MOCK_USER_VERSION_1);
-//             // Simulate token storage for other parts of app that might check localStorage
-//             localStorage.setItem('authToken', MOCK_TOKEN_VERSION_1); 
-//             console.log("AuthContext (V1 Testing): Auth BYPASSED. User set:", MOCK_USER_VERSION_1);
-//         } else {
-//             // This branch is for non-bypassed mode, not active in V1
-//             localStorage.removeItem('authToken');
-//             setToken(null);
-//             setUser(null);
-//         }
-//         setLoading(false);
-//     }, []);
-
-//     const login = async () => {
-//         console.log("AuthContext (V1 Testing): MOCK login called. Auto-success.");
-//         setUser(MOCK_USER_VERSION_1);
-//         setToken(MOCK_TOKEN_VERSION_1);
-//         return { token: MOCK_TOKEN_VERSION_1, username: MOCK_USER_VERSION_1.username, _id: MOCK_USER_VERSION_1.id, sessionId: `dev-session-${Date.now()}` };
-//     };
-    
-//     const signup = async () => {
-//         console.log("AuthContext (V1 Testing): MOCK signup called. Auto-success.");
-//         setUser(MOCK_USER_VERSION_1);
-//         setToken(MOCK_TOKEN_VERSION_1);
-//         return { token: MOCK_TOKEN_VERSION_1, username: MOCK_USER_VERSION_1.username, _id: MOCK_USER_VERSION_1.id, sessionId: `dev-session-signup-${Date.now()}` };
-//     };
-
-//     const logout = () => {
-//         console.log("AuthContext (V1 Testing): MOCK logout called.");
-//         setToken(null);
-//         setUser(null);
-//         localStorage.removeItem('authToken');
-//         // In a real app, you'd redirect or App.jsx would show AuthModal
-//     };
-    
-//     const devLogin = () => login({}); // For testing, devLogin just calls mock login
-
-//     return (
-//         <AuthContext.Provider value={{ 
-//             token, user, loading, login, signup, logout, devLogin, 
-//             setUser, setToken, 
-//             isTestingMode: BYPASS_AUTH_FOR_DEVELOPMENT // Expose flag
-//         }}>
-//             {children}
-//         </AuthContext.Provider>
-//     );
-// };
-
-
-
-
-
-
-
-
 // frontend/src/contexts/AuthContext.jsx
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api.js'; 
@@ -109,41 +31,62 @@ export const AuthProvider = ({ children }) => {
         }
     }, []);
 
+    // Example adjustment in AuthContext.jsx's useEffect
     useEffect(() => {
-        setLoading(true);
-        const storedToken = localStorage.getItem('authToken');
-        if (storedToken) {
-            const decodedUser = parseToken(storedToken);
-            if (decodedUser) {
-                setUser(decodedUser);
-                setToken(storedToken);
-            } else {
-                setToken(null); setUser(null);
+        const attemptAutoLogin = async () => {
+            setLoading(true);
+            const storedToken = localStorage.getItem('authToken');
+            if (storedToken) {
+                try {
+                    // If DEV_MODE_MOCK_API is true, api.getMe() will use its mock.
+                    // If false, it hits the real /auth/me endpoint with the token.
+                    const userData = await api.getMe(); 
+                    setUser({ id: userData._id, username: userData.username }); // Assuming _id is returned as id
+                    setToken(storedToken);
+                    console.log("AuthContext: Auto-login successful via /me endpoint.", userData);
+                } catch (error) {
+                    console.warn("AuthContext: Auto-login failed (token invalid or /me error). Clearing token.", error.response?.data?.message || error.message);
+                    localStorage.removeItem('authToken');
+                    setToken(null);
+                    setUser(null);
+                }
             }
-        } else {
-            setToken(null); setUser(null);
-        }
-        setLoading(false);
-    }, [parseToken]);
+            setLoading(false);
+        };
+        attemptAutoLogin();
+    }, []); // No dependencies, runs once on mount
 
     const login = async (credentials) => {
-        const data = await api.login(credentials); 
-        localStorage.setItem('authToken', data.token);
-        const decodedUser = parseToken(data.token);
-        setUser(decodedUser);
-        setToken(data.token);
-        return data; 
+        setLoading(true); // Good practice to set loading true for the API call
+        try {
+            const data = await api.login(credentials); // This now hits the real backend if DEV_MODE_MOCK_API is false
+            localStorage.setItem('authToken', data.token);
+            // Use user details directly from response if available and preferred
+            setUser({ id: data._id, username: data.username }); 
+            setToken(data.token);
+            setLoading(false);
+            return data; // Return the full response which includes sessionId etc.
+        } catch (error) {
+            setLoading(false);
+            throw error; // Re-throw for AuthModal to handle
+        }
     };
     
     const signup = async (signupData) => {
-        const data = await api.signup(signupData); 
-        if (data.token) { 
-            localStorage.setItem('authToken', data.token);
-            const decodedUser = parseToken(data.token);
-            setUser(decodedUser);
-            setToken(data.token);
+        setLoading(true);
+        try {
+            const data = await api.signup(signupData); 
+            if (data.token) { 
+                localStorage.setItem('authToken', data.token);
+                setUser({ id: data._id, username: data.username });
+                setToken(data.token);
+            }
+            setLoading(false);
+            return data;
+        } catch (error) {
+            setLoading(false);
+            throw error;
         }
-        return data;
     };
 
     const logout = () => {
