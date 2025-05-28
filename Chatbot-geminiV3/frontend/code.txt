@@ -76,6 +76,12 @@ export default [
 
 ```
 
+`o.txt`
+
+```
+
+```
+
 `postcss.config.js`
 
 ```javascript
