@@ -297,6 +297,96 @@ const ChatPage = ({ setIsAuthenticated }) => {
 }, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout, /* currentKnowledgeGraphs - if used directly */]);
      // Removed sessionId/userId state deps
 
+    // const handleSendMessage = useCallback(async (e) => {
+    //     if (e) e.preventDefault();
+    //     const textToSend = inputText.trim();
+    //     const currentSessionId = localStorage.getItem('sessionId'); // Get fresh ID
+    //     const currentUserId = localStorage.getItem('userId'); // Get fresh ID
+
+    //     if (!textToSend || isLoading || isRagLoading || !currentSessionId || !currentUserId) {
+    //         if (!currentSessionId || !currentUserId) {
+    //              setError("Session invalid. Please refresh or log in again.");
+    //              // Optionally trigger logout if auth info is missing
+    //              if (!currentUserId) handleLogout(true);
+    //         }
+    //         return;
+    //     }
+
+    //     const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
+    //     const previousMessages = messages;
+    //     setMessages(prev => [...prev, newUserMessage]);
+    //     setInputText('');
+    //     setError('');
+
+    //     let relevantDocs = [];
+    //     let ragError = null;
+
+    //     if (isRagEnabled) {
+    //         setIsRagLoading(true);
+    //         try {
+    //             console.log("RAG Enabled: Querying backend /rag endpoint...");
+    //             // Interceptor adds user ID header
+    //             const ragResponse = await queryRagService({ message: textToSend });
+    //             relevantDocs = ragResponse.data.relevantDocs || [];
+    //             console.log(`RAG Query returned ${relevantDocs.length} documents.`);
+    //         } catch (err) {
+    //             console.error("RAG Query Error:", err.response || err);
+    //             ragError = err.response?.data?.message || "Failed to retrieve documents for RAG.";
+    //             if (err.response?.status === 401) {
+    //                  console.warn("Received 401 during RAG query, logging out.");
+    //                  handleLogout(true);
+    //                  setIsRagLoading(false); // Stop loading before returning
+    //                  return; // Stop processing if auth failed
+    //             }
+    //         } finally {
+    //             setIsRagLoading(false);
+    //         }
+    //     } else {
+    //         console.log("RAG Disabled: Skipping RAG query.");
+    //     }
+
+    //     setIsLoading(true);
+    //     const historyForAPI = previousMessages;
+    //     const systemPromptToSend = editableSystemPromptText;
+
+    //     try {
+    //         if (ragError) {
+    //              setError(prev => prev ? `${prev} | RAG Error: ${ragError}` : `RAG Error: ${ragError}`);
+    //         }
+
+    //         console.log(`Sending message to backend /message. RAG Enabled: ${isRagEnabled}, Docs Found: ${relevantDocs.length}`);
+    //         // Interceptor adds user ID header
+    //         const sendMessageResponse = await sendMessage({
+    //             message: textToSend,
+    //             history: historyForAPI,
+    //             sessionId: currentSessionId,
+    //             systemPrompt: systemPromptToSend,
+    //             isRagEnabled: isRagEnabled,
+    //             relevantDocs: relevantDocs
+    //         });
+
+    //         const modelReply = sendMessageResponse.data.reply;
+    //         if (modelReply?.role && modelReply?.parts?.length > 0) {
+    //             setMessages(prev => [...prev, modelReply]);
+    //         } else {
+    //             throw new Error("Invalid reply structure received from backend.");
+    //         }
+    //         setError(prev => prev && (prev.includes("Session invalid") || prev.includes("Critical Error")) ? prev : '');
+
+    //     } catch (err) {
+    //         const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
+    //         setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
+    //         console.error("Send Message Error:", err.response || err);
+    //         setMessages(previousMessages); // Rollback UI
+    //         if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
+    //              console.warn("Received 401 sending message, logging out.");
+    //              handleLogout(true);
+    //         }
+    //     } finally {
+    //         setIsLoading(false);
+    //     }
+    // }, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout]); // Removed sessionId/userId state deps
+
     const handleEnterKey = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();

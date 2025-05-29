@@ -114,7 +114,10 @@ export const uploadFile = (formData) => api.post('/upload', formData);
 // File Management
 export const getUserFiles = () => api.get('/files');
 export const renameUserFile = (serverFilename, newOriginalName) => api.patch(`/files/${serverFilename}`, { newOriginalName });
-export const deleteUserFile = (serverFilename) => api.delete(`/files/${serverFilename}`);
+export const deleteUserFile = async (serverFilename) => {
+    const response = await api.delete(`/files/${serverFilename}`);
+    return response; // Return the full response object
+};
 
 
 // --- DEFAULT EXPORT ---

@@ -29,7 +29,7 @@ def setup_logging():
     logging.getLogger("faiss.loader").setLevel(logging.WARNING)
     logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://192.168.99.100:7687")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password") # IMPORTANT: Change this default or use ENV VAR!
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
@@ -64,7 +64,7 @@ SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
 logger.info(f"[Config] SpaCy Model: {SPACY_MODEL_NAME}")
 
 # === Qdrant Configuration ===
-QDRANT_HOST = os.getenv("QDRANT_HOST", "192.168.99.100")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "my_qdrant_rag_collection")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)

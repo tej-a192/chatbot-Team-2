@@ -274,7 +274,7 @@ router.post('/message', tempAuth, async (req, res) => {
     }
 });
 
-// // --- @route   POST /api/chat/message ---
+// --- @route   POST /api/chat/message ---
 // router.post('/message', tempAuth, async (req, res) => {
 //     // `relevantDocs` from client is an array of {documentName, content, score}
 //     // `knowledge_graphs` would now also be part of the RAG step, but the Gemini prompt

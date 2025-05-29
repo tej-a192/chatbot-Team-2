@@ -317,6 +317,38 @@ def search_qdrant_documents_and_get_kg(): # Renamed for clarity
         current_app.logger.error(f"/query processing failed: {e}\n{traceback.format_exc()}", exc_info=True)
         return create_error_response(f"Error during query processing: {str(e)}", 500)
 
+@app.route('/delete_qdrant_document_data', methods=['DELETE']) # Ensure this route is defined
+def delete_qdrant_data_route():
+    current_app.logger.info("--- DELETE /delete_qdrant_document_data Request ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
+
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
+
+    data = request.get_json()
+    user_id = data.get('user_id')
+    document_name = data.get('document_name') 
+
+    if not user_id or not document_name:
+        return create_error_response("Missing 'user_id' or 'document_name' in request body.", 400)
+
+    try:
+        # This assumes you have a method 'delete_document_vectors' in your vector_service
+        result = vector_service.delete_document_vectors(user_id, document_name) 
+        
+        if result.get("success"):
+            return jsonify({"message": result.get("message", "Qdrant vectors for document processed for deletion.")}), 200
+        else:
+            return create_error_response(result.get("message", "Failed to delete Qdrant vectors."), 500) # Or a more specific code
+            
+    except ConnectionError as ce:
+        current_app.logger.error(f"Qdrant connection error during /delete_qdrant_document_data for user {user_id}, doc {document_name}: {ce}", exc_info=True)
+        return create_error_response(f"Qdrant service connection error: {str(ce)}", 503)
+    except Exception as e:
+        current_app.logger.error(f"/delete_qdrant_document_data for user {user_id}, doc {document_name} failed: {e}", exc_info=True)
+        return create_error_response(f"Error during Qdrant data deletion: {str(e)}", 500)
+
 # === KG (Neo4j) Endpoints ===
 
 @app.route('/kg', methods=['POST'])

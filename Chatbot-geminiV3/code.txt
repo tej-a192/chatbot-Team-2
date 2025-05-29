@@ -1021,94 +1021,194 @@ const ChatPage = ({ setIsAuthenticated }) => {
      }, [isLoading, isRagLoading, saveAndReset]);
 
     const handleSendMessage = useCallback(async (e) => {
-        if (e) e.preventDefault();
-        const textToSend = inputText.trim();
-        const currentSessionId = localStorage.getItem('sessionId'); // Get fresh ID
-        const currentUserId = localStorage.getItem('userId'); // Get fresh ID
+    if (e) e.preventDefault();
+    const textToSend = inputText.trim();
+    const currentSessionId = localStorage.getItem('sessionId');
+    const currentUserId = localStorage.getItem('userId');
 
-        if (!textToSend || isLoading || isRagLoading || !currentSessionId || !currentUserId) {
-            if (!currentSessionId || !currentUserId) {
-                 setError("Session invalid. Please refresh or log in again.");
-                 // Optionally trigger logout if auth info is missing
-                 if (!currentUserId) handleLogout(true);
-            }
-            return;
-        }
+    // ... (existing validation) ...
 
-        const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
-        const previousMessages = messages;
-        setMessages(prev => [...prev, newUserMessage]);
-        setInputText('');
-        setError('');
+    const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
+    const previousMessages = messages;
+    setMessages(prev => [...prev, newUserMessage]);
+    setInputText('');
+    setError('');
 
-        let relevantDocs = [];
-        let ragError = null;
+    let ragDataForMessage = {
+        relevantDocs: [],
+        knowledge_graphs: null // Initialize knowledge_graphs for the message payload
+    };
 
-        if (isRagEnabled) {
-            setIsRagLoading(true);
-            try {
-                console.log("RAG Enabled: Querying backend /rag endpoint...");
-                // Interceptor adds user ID header
-                const ragResponse = await queryRagService({ message: textToSend });
-                relevantDocs = ragResponse.data.relevantDocs || [];
-                console.log(`RAG Query returned ${relevantDocs.length} documents.`);
-            } catch (err) {
-                console.error("RAG Query Error:", err.response || err);
-                ragError = err.response?.data?.message || "Failed to retrieve documents for RAG.";
-                if (err.response?.status === 401) {
-                     console.warn("Received 401 during RAG query, logging out.");
-                     handleLogout(true);
-                     setIsRagLoading(false); // Stop loading before returning
-                     return; // Stop processing if auth failed
-                }
-            } finally {
-                setIsRagLoading(false);
-            }
-        } else {
-            console.log("RAG Disabled: Skipping RAG query.");
-        }
-
-        setIsLoading(true);
-        const historyForAPI = previousMessages;
-        const systemPromptToSend = editableSystemPromptText;
-
+    if (isRagEnabled) {
+        setIsRagLoading(true);
         try {
-            if (ragError) {
-                 setError(prev => prev ? `${prev} | RAG Error: ${ragError}` : `RAG Error: ${ragError}`);
-            }
-
-            console.log(`Sending message to backend /message. RAG Enabled: ${isRagEnabled}, Docs Found: ${relevantDocs.length}`);
-            // Interceptor adds user ID header
-            const sendMessageResponse = await sendMessage({
-                message: textToSend,
-                history: historyForAPI,
-                sessionId: currentSessionId,
-                systemPrompt: systemPromptToSend,
-                isRagEnabled: isRagEnabled,
-                relevantDocs: relevantDocs
-            });
-
-            const modelReply = sendMessageResponse.data.reply;
-            if (modelReply?.role && modelReply?.parts?.length > 0) {
-                setMessages(prev => [...prev, modelReply]);
-            } else {
-                throw new Error("Invalid reply structure received from backend.");
-            }
-            setError(prev => prev && (prev.includes("Session invalid") || prev.includes("Critical Error")) ? prev : '');
+            console.log("RAG Enabled: Querying backend /api/chat/rag endpoint...");
+            // Fetch RAG data (Qdrant docs + KGs)
+            // The filter for RAG query can be constructed based on current context if needed.
+            // For simplicity, let's assume a general query or a filter you might already have.
+            const ragApiResponse = await queryRagService({ message: textToSend /*, filter: yourOptionalFilter */ });
+            
+            ragDataForMessage.relevantDocs = ragApiResponse.data.relevantDocs || [];
+            ragDataForMessage.knowledge_graphs = ragApiResponse.data.knowledge_graphs || null; // Store the fetched KGs
+            
+            console.log(`RAG Query returned ${ragDataForMessage.relevantDocs.length} text documents and KGs for ${Object.keys(ragDataForMessage.knowledge_graphs || {}).length} docs.`);
+            // You might want to set currentKnowledgeGraphs state here if needed for UI display
+            // setCurrentKnowledgeGraphs(ragDataForMessage.knowledge_graphs);
 
         } catch (err) {
-            const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
-            setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
-            console.error("Send Message Error:", err.response || err);
-            setMessages(previousMessages); // Rollback UI
-            if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
-                 console.warn("Received 401 sending message, logging out.");
+            // ... (existing RAG error handling) ...
+            console.error("RAG Query Error (ChatPage):", err.response || err);
+            const ragErrorMessage = err.response?.data?.message || "Failed to retrieve documents/KGs for RAG.";
+            setError(prev => prev ? `${prev} | RAG Error: ${ragErrorMessage}` : `RAG Error: ${ragErrorMessage}`);
+            if (err.response?.status === 401) {
                  handleLogout(true);
+                 setIsRagLoading(false);
+                 return;
             }
         } finally {
-            setIsLoading(false);
+            setIsRagLoading(false);
         }
-    }, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout]); // Removed sessionId/userId state deps
+    } else {
+        console.log("RAG Disabled: Skipping RAG query.");
+    }
+
+    setIsLoading(true);
+    const historyForAPI = previousMessages;
+    const systemPromptToSend = editableSystemPromptText;
+
+    try {
+        // If there was a RAG error that didn't lead to a return, it might still be in the error state
+        // You might want to clear non-critical RAG errors or show them differently
+
+        console.log(`Sending message to backend /api/chat/message. RAG Enabled: ${isRagEnabled}, Docs Count: ${ragDataForMessage.relevantDocs.length}`);
+        
+        const sendMessagePayload = {
+            message: textToSend,
+            history: historyForAPI,
+            sessionId: currentSessionId,
+            systemPrompt: systemPromptToSend,
+            isRagEnabled: isRagEnabled,
+            relevantDocs: ragDataForMessage.relevantDocs, // Text documents
+            knowledge_graphs: isRagEnabled ? ragDataForMessage.knowledge_graphs : null // <<< SEND KG DATA
+        };
+
+        const sendMessageResponse = await sendMessage(sendMessagePayload); // sendMessage calls /api/chat/message
+
+        // ... (rest of your existing success/error handling for sendMessageResponse) ...
+        const modelReply = sendMessageResponse.data.reply;
+        if (modelReply?.role && modelReply?.parts?.length > 0) {
+            setMessages(prev => [...prev, modelReply]);
+            // Clear RAG-specific errors if the main chat message was successful
+            setError(prev => (prev && (prev.includes("Session invalid") || prev.includes("Critical Error"))) ? prev : '');
+        } else {
+            throw new Error("Invalid reply structure received from backend.");
+        }
+
+    } catch (err) {
+        // ... (existing error handling for send message) ...
+        const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
+        setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
+        console.error("Send Message Error (ChatPage):", err.response || err);
+        setMessages(previousMessages); // Rollback UI
+        if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
+             handleLogout(true);
+        }
+    } finally {
+        setIsLoading(false);
+    }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout, /* currentKnowledgeGraphs - if used directly */]);
+     // Removed sessionId/userId state deps
+
+    // const handleSendMessage = useCallback(async (e) => {
+    //     if (e) e.preventDefault();
+    //     const textToSend = inputText.trim();
+    //     const currentSessionId = localStorage.getItem('sessionId'); // Get fresh ID
+    //     const currentUserId = localStorage.getItem('userId'); // Get fresh ID
+
+    //     if (!textToSend || isLoading || isRagLoading || !currentSessionId || !currentUserId) {
+    //         if (!currentSessionId || !currentUserId) {
+    //              setError("Session invalid. Please refresh or log in again.");
+    //              // Optionally trigger logout if auth info is missing
+    //              if (!currentUserId) handleLogout(true);
+    //         }
+    //         return;
+    //     }
+
+    //     const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
+    //     const previousMessages = messages;
+    //     setMessages(prev => [...prev, newUserMessage]);
+    //     setInputText('');
+    //     setError('');
+
+    //     let relevantDocs = [];
+    //     let ragError = null;
+
+    //     if (isRagEnabled) {
+    //         setIsRagLoading(true);
+    //         try {
+    //             console.log("RAG Enabled: Querying backend /rag endpoint...");
+    //             // Interceptor adds user ID header
+    //             const ragResponse = await queryRagService({ message: textToSend });
+    //             relevantDocs = ragResponse.data.relevantDocs || [];
+    //             console.log(`RAG Query returned ${relevantDocs.length} documents.`);
+    //         } catch (err) {
+    //             console.error("RAG Query Error:", err.response || err);
+    //             ragError = err.response?.data?.message || "Failed to retrieve documents for RAG.";
+    //             if (err.response?.status === 401) {
+    //                  console.warn("Received 401 during RAG query, logging out.");
+    //                  handleLogout(true);
+    //                  setIsRagLoading(false); // Stop loading before returning
+    //                  return; // Stop processing if auth failed
+    //             }
+    //         } finally {
+    //             setIsRagLoading(false);
+    //         }
+    //     } else {
+    //         console.log("RAG Disabled: Skipping RAG query.");
+    //     }
+
+    //     setIsLoading(true);
+    //     const historyForAPI = previousMessages;
+    //     const systemPromptToSend = editableSystemPromptText;
+
+    //     try {
+    //         if (ragError) {
+    //              setError(prev => prev ? `${prev} | RAG Error: ${ragError}` : `RAG Error: ${ragError}`);
+    //         }
+
+    //         console.log(`Sending message to backend /message. RAG Enabled: ${isRagEnabled}, Docs Found: ${relevantDocs.length}`);
+    //         // Interceptor adds user ID header
+    //         const sendMessageResponse = await sendMessage({
+    //             message: textToSend,
+    //             history: historyForAPI,
+    //             sessionId: currentSessionId,
+    //             systemPrompt: systemPromptToSend,
+    //             isRagEnabled: isRagEnabled,
+    //             relevantDocs: relevantDocs
+    //         });
+
+    //         const modelReply = sendMessageResponse.data.reply;
+    //         if (modelReply?.role && modelReply?.parts?.length > 0) {
+    //             setMessages(prev => [...prev, modelReply]);
+    //         } else {
+    //             throw new Error("Invalid reply structure received from backend.");
+    //         }
+    //         setError(prev => prev && (prev.includes("Session invalid") || prev.includes("Critical Error")) ? prev : '');
+
+    //     } catch (err) {
+    //         const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
+    //         setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
+    //         console.error("Send Message Error:", err.response || err);
+    //         setMessages(previousMessages); // Rollback UI
+    //         if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
+    //              console.warn("Received 401 sending message, logging out.");
+    //              handleLogout(true);
+    //         }
+    //     } finally {
+    //         setIsLoading(false);
+    //     }
+    // }, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout]); // Removed sessionId/userId state deps
 
     const handleEnterKey = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1238,35 +1338,32 @@ const FileManagerWidget = ({ refreshTrigger }) => {
   const [error, setError] = useState('');
   const [renamingFile, setRenamingFile] = useState(null);
   const [newName, setNewName] = useState('');
+  const [statusMessage, setStatusMessage] = useState(''); // <<< ADDED: For success/general status
 
   const fetchUserFiles = useCallback(async () => {
-    // Ensure userId exists before fetching
     const currentUserId = localStorage.getItem('userId');
     if (!currentUserId) {
         console.log("FileManager: Skipping fetch, no userId.");
-        setUserFiles([]); // Clear files if no user
+        setUserFiles([]);
         return;
     }
-
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // Clear status message on fetch
     try {
-      // Interceptor adds user ID
       const response = await getUserFiles();
       setUserFiles(response.data || []);
     } catch (err) {
       console.error("Error fetching user files:", err);
       setError(err.response?.data?.message || 'Failed to load files.');
       setUserFiles([]);
-      // Handle potential logout if 401
       if (err.response?.status === 401) {
           console.warn("FileManager: Received 401, potential logout needed.");
-          // Consider calling a logout function passed via props or context
       }
     } finally {
       setIsLoading(false);
     }
-  }, []); // Removed userId dependency, check inside
+  }, []);
 
   useEffect(() => {
     fetchUserFiles();
@@ -1276,12 +1373,14 @@ const FileManagerWidget = ({ refreshTrigger }) => {
     setRenamingFile(file.serverFilename);
     setNewName(file.originalName);
     setError('');
+    setStatusMessage(''); // Clear status message
   };
 
   const handleRenameCancel = () => {
     setRenamingFile(null);
     setNewName('');
     setError('');
+    setStatusMessage(''); // Clear status message
   };
 
   const handleRenameSave = async () => {
@@ -1293,15 +1392,16 @@ const FileManagerWidget = ({ refreshTrigger }) => {
         setError('New name cannot contain slashes.');
         return;
     }
-
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // Clear status message
     try {
-      // Interceptor adds user ID
       await renameUserFile(renamingFile, newName.trim());
       setRenamingFile(null);
       setNewName('');
-      fetchUserFiles();
+      fetchUserFiles(); // Refreshes and clears messages
+      setStatusMessage('File renamed successfully!'); // <<< ADDED: Set success message
+      setTimeout(() => setStatusMessage(''), 5000); // Clear after 5 seconds
     } catch (err) {
       console.error("Error renaming file:", err);
       setError(err.response?.data?.message || 'Failed to rename file.');
@@ -1322,24 +1422,48 @@ const FileManagerWidget = ({ refreshTrigger }) => {
   };
 
   const handleDeleteFile = async (serverFilename, originalName) => {
-    if (!window.confirm(`Are you sure you want to delete "${originalName}"? This cannot be undone.`)) {
+    // <<< MODIFIED: Updated confirmation message
+    if (!window.confirm(`Are you sure you want to delete "${originalName}"? This will remove the file and all associated data (analysis, graph, vector embeddings). This cannot be undone.`)) {
       return;
     }
 
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // <<< ADDED: Clear previous messages
+
     try {
-      // Interceptor adds user ID
-      await deleteUserFile(serverFilename);
-      fetchUserFiles();
+      // <<< MODIFIED: deleteUserFile should return the full Axios response
+      const response = await deleteUserFile(serverFilename);
+
+      // <<< MODIFIED: Handle more informative backend responses
+      if (response.status === 200 || response.status === 207) {
+        setStatusMessage(response.data.message || `Deletion process for '${originalName}' completed.`);
+        console.log("Deletion API Response:", response.data);
+        fetchUserFiles(); // Refresh the file list
+      } else {
+        // This case might not be hit if axios throws for non-2xx, but good for robustness
+        setError(response.data.message || 'File deletion failed with an unexpected status.');
+      }
     } catch (err) {
-      console.error("Error deleting file:", err);
-      setError(err.response?.data?.message || 'Failed to delete file.');
+      console.error("Error deleting file:", err.response || err);
+      // <<< MODIFIED: Extract error message from backend response
+      const apiErrorMessage = err.response?.data?.message || 'Failed to delete file. Please try again.';
+      setError(apiErrorMessage);
+
+      if (err.response?.data?.details) { // Log backend details if available
+          console.log("Deletion attempt details from backend:", err.response.data.details);
+      }
+
        if (err.response?.status === 401) {
           console.warn("FileManager: Received 401 during delete.");
+          // Consider triggering logout or displaying specific auth error
       }
     } finally {
        setIsLoading(false);
+       // <<< MODIFIED: Clear status message after a delay only if it was a success/status message
+       if (statusMessage && !error) {
+           setTimeout(() => setStatusMessage(''), 7000);
+       }
     }
   };
 
@@ -1357,12 +1481,16 @@ const FileManagerWidget = ({ refreshTrigger }) => {
         </button>
       </div>
 
+      {/* <<< MODIFIED: Display status or error messages */}
+      {statusMessage && !error && <div className="fm-status-message">{statusMessage}</div>}
       {error && <div className="fm-error">{error}</div>}
 
+
       <div className="fm-file-list-container">
+        {/* <<< MODIFIED: Added !statusMessage to the condition for "No files uploaded yet" */}
         {isLoading && userFiles.length === 0 ? (
           <p className="fm-loading">Loading files...</p>
-        ) : userFiles.length === 0 && !isLoading ? (
+        ) : userFiles.length === 0 && !isLoading && !error && !statusMessage ? (
           <p className="fm-empty">No files uploaded yet.</p>
         ) : (
           <ul className="fm-file-list">
@@ -1430,9 +1558,30 @@ const FileManagerWidgetCSS = `
 .fm-refresh-btn { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; line-height: 1; transition: color 0.2s, border-color 0.2s, background-color 0.2s; }
 .fm-refresh-btn:hover:not(:disabled) { color: var(--text-primary); border-color: #555; background-color: #3a3a40; }
 .fm-refresh-btn:disabled { cursor: not-allowed; opacity: 0.5; }
-.fm-error, .fm-loading, .fm-empty { font-size: 0.85rem; padding: 10px 15px; border-radius: 4px; text-align: center; margin: 5px 20px 5px 0; flex-shrink: 0; }
-.fm-error { color: var(--error-color); border: 1px solid var(--error-color); background-color: var(--error-bg); }
+
+/* <<< MODIFIED: Consolidated message styling and added .fm-status-message */
+.fm-error, .fm-loading, .fm-empty, .fm-status-message { 
+  font-size: 0.85rem; 
+  padding: 10px 15px; 
+  border-radius: 4px; 
+  text-align: center; 
+  margin: 5px 20px 5px 0; 
+  flex-shrink: 0; 
+}
+.fm-error { 
+  color: var(--error-color, #f44336); /* Fallback to a default red */
+  border: 1px solid var(--error-color, #f44336); 
+  background-color: var(--error-bg, rgba(244, 67, 54, 0.1)); 
+}
+.fm-status-message { /* Styling for general status/success messages */
+  color: var(--success-color, #4CAF50); /* Fallback to a default green */
+  background-color: var(--success-bg, rgba(76, 175, 80, 0.1));
+  border: 1px solid var(--success-color-border, #c8e6c9);
+  font-style: normal; /* Not italic like loading/empty */
+}
 .fm-loading, .fm-empty { color: var(--text-secondary); font-style: italic; }
+/* End of modified message styling */
+
 .fm-loading-bottom { margin-top: auto; padding: 5px; }
 .fm-file-list-container { flex-grow: 1; overflow-y: auto; padding-right: 10px; margin-right: 10px; position: relative; }
 .fm-file-list-container::-webkit-scrollbar { width: 8px; }
@@ -1470,7 +1619,6 @@ if (!document.getElementById(styleTagFileManagerId)) {
 // --- End CSS Injection ---
 
 export default FileManagerWidget;
-
 ```
 
 `client/src/components/FileUploadWidget.js`
@@ -2324,7 +2472,10 @@ export const uploadFile = (formData) => api.post('/upload', formData);
 // File Management
 export const getUserFiles = () => api.get('/files');
 export const renameUserFile = (serverFilename, newOriginalName) => api.patch(`/files/${serverFilename}`, { newOriginalName });
-export const deleteUserFile = (serverFilename) => api.delete(`/files/${serverFilename}`);
+export const deleteUserFile = async (serverFilename) => {
+    const response = await api.delete(`/files/${serverFilename}`);
+    return response; // Return the full response object
+};
 
 
 // --- DEFAULT EXPORT ---
@@ -2463,7 +2614,7 @@ PORT=5001 # Port for the backend (make sure it's free)
 MONGO_URI = "mongodb://localhost:27017/chatbot_gemini" # Your MongoDB connection string
 JWT_SECRET = "your_super_strong_and_secret_jwt_key_12345" # A strong, random secret key for JWT
 GEMINI_API_KEY = "AIzaSyBiCYeCICXAuEEqVvwwaiOpO9gTg6mJLzw" # Your actual Gemini API Key
-DEFAULT_PYTHON_RAG_URL = "http://localhost:5002"
+DEFAULT_PYTHON_RAG_URL = "http://localhost:5000"
 ```
 
 `server/config/db.js`
@@ -3363,29 +3514,29 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 `server/rag_service/app.py`
 
 ```python
-# server/main_qdrant_app.py
+# server/rag_service/app.py
 
 import os
 import sys
-import traceback # For detailed error logging
+import traceback
 from flask import Flask, request, jsonify, current_app
 import logging
+import atexit # For graceful shutdown
 
 # --- Add server directory to sys.path ---
-# This allows us to import modules from the 'server' directory and sub-packages like 'rag_service'
-# Assumes this file (main_qdrant_app.py) is in the 'server/' directory.
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
-import config # Should pick up server/config.py
-config.setup_logging()
-
+import config
+config.setup_logging() # Initialize logging as per your config
 
 # --- Import configurations and services ---
 try:
-    from vector_db_service import VectorDBService # From server/vector_db_service.py
-    import ai_core # From server/rag_service/ai_core.py
+    from vector_db_service import VectorDBService
+    import ai_core
+    import neo4j_handler 
+    from neo4j import exceptions as neo4j_exceptions # For specific error handling
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}. Ensure all modules are correctly placed and server directory is in PYTHONPATH.")
     print("PYTHONPATH:", sys.path)
@@ -3394,30 +3545,46 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-# --- Initialize VectorDBService ---
+# --- Initialize VectorDBService (Qdrant) ---
 vector_service = None
 try:
     logger.info("Initializing VectorDBService for Qdrant...")
     vector_service = VectorDBService()
-    vector_service.setup_collection() # Create/validate Qdrant collection on startup
+    vector_service.setup_collection()
     app.vector_service = vector_service
-    logger.info("VectorDBService initialized and collection setup successfully.")
+    logger.info("VectorDBService initialized and Qdrant collection setup successfully.")
 except Exception as e:
     logger.critical(f"Failed to initialize VectorDBService or setup Qdrant collection: {e}", exc_info=True)
     app.vector_service = None
-    # Application might be non-functional, consider exiting or running in a degraded state
-    # For now, vector_service will be None, and endpoints will fail gracefully.
+
+# --- Initialize Neo4j Driver (via handler) ---
+try:
+    neo4j_handler.init_driver() # Initialize Neo4j driver on app start
+except Exception as e:
+    logger.critical(f"Neo4j driver failed to initialize on startup: {e}. KG endpoints will likely fail.")
+    # Depending on how critical Neo4j is, you might sys.exit(1) here.
+
+# Register Neo4j driver close function for app exit
+atexit.register(neo4j_handler.close_driver)
+
 
 # --- Helper for Error Responses ---
-def create_error_response(message, status_code=500):
-    current_app.logger.error(f"API Error ({status_code}): {message}")
-    return jsonify({"error": message}), status_code
+def create_error_response(message, status_code=500, details=None):
+    log_message = f"API Error ({status_code}): {message}"
+    if details:
+        log_message += f" | Details: {details}"
+    current_app.logger.error(log_message)
+    response_payload = {"error": message}
+    if details and status_code != 500:
+        response_payload["details"] = details
+    return jsonify(response_payload), status_code
 
 # === API Endpoints ===
 
 @app.route('/health', methods=['GET'])
 def health_check():
     current_app.logger.info("--- Health Check Request ---")
+    # ... (Qdrant health check part from your existing code) ...
     status_details = {
         "status": "error",
         "qdrant_service": "not_initialized",
@@ -3425,44 +3592,48 @@ def health_check():
         "qdrant_collection_status": "unknown",
         "document_embedding_model": config.DOCUMENT_EMBEDDING_MODEL_NAME,
         "query_embedding_model": config.QUERY_EMBEDDING_MODEL_NAME,
-        "expected_vector_dimension": config.QDRANT_COLLECTION_VECTOR_DIM,
+        "neo4j_service": "not_initialized_via_handler", # Updated message
+        "neo4j_connection": "unknown"
     }
     http_status_code = 503
 
+    # Qdrant Check
     if not vector_service:
         status_details["qdrant_service"] = "failed_to_initialize"
-        return jsonify(status_details), http_status_code
+    else:
+        status_details["qdrant_service"] = "initialized"
+        try:
+            vector_service.client.get_collection(collection_name=vector_service.collection_name)
+            status_details["qdrant_collection_status"] = "exists_and_accessible"
+        except Exception as e:
+            status_details["qdrant_collection_status"] = f"error_accessing_collection: {str(e)}"
+            current_app.logger.error(f"Health check: Error accessing Qdrant collection: {e}", exc_info=False)
+    
+    # Neo4j Check
+    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
+    if neo4j_ok:
+        status_details["neo4j_service"] = "initialized_via_handler"
+        status_details["neo4j_connection"] = "connected"
+    else:
+        status_details["neo4j_service"] = "initialization_failed_or_handler_error"
+        status_details["neo4j_connection"] = neo4j_conn_status
 
-    status_details["qdrant_service"] = "initialized"
-    try:
-        collection_info = vector_service.client.get_collection(collection_name=vector_service.collection_name)
-        status_details["qdrant_collection_status"] = "exists"
-        if hasattr(collection_info.config.params.vectors, 'size'): # Simple vector config
-             actual_dim = collection_info.config.params.vectors.size
-        elif isinstance(collection_info.config.params.vectors, dict): # Named vectors
-            default_vector_conf = collection_info.config.params.vectors.get('')
-            actual_dim = default_vector_conf.size if default_vector_conf else "multiple_named_not_checked"
-        else:
-            actual_dim = "unknown_format"
 
-        status_details["actual_vector_dimension"] = actual_dim
-        if actual_dim == config.QDRANT_COLLECTION_VECTOR_DIM:
-            status_details["status"] = "ok"
-            http_status_code = 200
-            current_app.logger.info("Health check successful.")
-        else:
-            status_details["qdrant_collection_status"] = f"exists_with_dimension_mismatch (Expected {config.QDRANT_COLLECTION_VECTOR_DIM}, Got {actual_dim})"
-            current_app.logger.warning(f"Health check: Qdrant dimension mismatch.")
-
-    except Exception as e:
-        status_details["qdrant_collection_status"] = f"error_accessing_collection: {str(e)}"
-        current_app.logger.error(f"Health check: Error accessing Qdrant collection: {e}", exc_info=True)
-
+    if status_details["qdrant_service"] == "initialized" and \
+       status_details["qdrant_collection_status"] == "exists_and_accessible" and \
+       neo4j_ok: # Check the boolean return from neo4j_handler
+        status_details["status"] = "ok"
+        http_status_code = 200
+        current_app.logger.info("Health check successful (Qdrant & Neo4j).")
+    else:
+        current_app.logger.warning(f"Health check issues found: Qdrant service: {status_details['qdrant_service']}, Qdrant collection: {status_details['qdrant_collection_status']}, Neo4j service: {status_details['neo4j_service']}, Neo4j connection: {status_details['neo4j_connection']}")
+        
     return jsonify(status_details), http_status_code
-
 
 @app.route('/add_document', methods=['POST'])
 def add_document_qdrant():
+    # ... (your existing /add_document endpoint logic)
+    # This remains unchanged as it deals with Qdrant.
     current_app.logger.info("--- /add_document Request (Qdrant) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
@@ -3472,90 +3643,199 @@ def add_document_qdrant():
 
     data = request.get_json()
     user_id = data.get('user_id')
-    # file_path is path ON THE SERVER where Flask can access it.
-    # In a real system, this often comes from a file upload process that saves the file first.
     file_path = data.get('file_path')
-    original_name = data.get('original_name') # Original filename from client
+    original_name = data.get('original_name')
 
     if not all([user_id, file_path, original_name]):
         return create_error_response("Missing required fields: user_id, file_path, original_name", 400)
 
-    current_app.logger.info(f"Processing file: '{original_name}' (Path: '{file_path}') for user: '{user_id}'")
+    current_app.logger.info(f"Processing file: '{original_name}' (Path: '{file_path}') for user: '{user_id}' for Qdrant")
 
     if not os.path.exists(file_path):
         current_app.logger.error(f"File not found at server path: {file_path}")
         return create_error_response(f"File not found at server path: {file_path}", 404)
 
     try:
-        # Assuming ai_core.process_document_for_embeddings is updated to return two values,
-        # or you have a new function like ai_core.process_document_for_qdrant
-        current_app.logger.info(f"Calling ai_core to process document: '{original_name}'")
-        processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata = ai_core.process_document_for_qdrant(
+        current_app.logger.info(f"Calling ai_core to process document: '{original_name}' for Qdrant")
+        # ai_core.process_document_for_qdrant returns: processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata
+        processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata_for_kg = ai_core.process_document_for_qdrant(
             file_path=file_path,
             original_name=original_name,
             user_id=user_id
         )
-        # If you kept the old function name and just changed its return:
-        # processed_chunks_with_embeddings, raw_text_for_node_analysis = ai_core.process_document_for_embeddings(...)
-
+        
         num_chunks_added_to_qdrant = 0
-        processing_status = "processed_no_content"
+        processing_status = "processed_no_content_for_qdrant"
 
-        # Check if chunks were generated before trying to add them
         if processed_chunks_with_embeddings:
             current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} chunks for '{original_name}'. Adding to Qdrant.")
-            # Ensure vector_service is used correctly here
-            num_chunks_added_to_qdrant = current_app.vector_service.add_processed_chunks(processed_chunks_with_embeddings)
+            num_chunks_added_to_qdrant = app.vector_service.add_processed_chunks(processed_chunks_with_embeddings)
             if num_chunks_added_to_qdrant > 0:
-                processing_status = "added"
-                current_app.logger.info(f"Successfully added {num_chunks_added_to_qdrant} chunks from '{original_name}' to Qdrant.")
+                processing_status = "added_to_qdrant"
             else:
-                processing_status = "processed_chunks_not_added"
-        elif raw_text_for_node_analysis: # If no chunks, but raw text was extracted
-            current_app.logger.info(f"ai_core produced no processable RAG chunks for '{original_name}', but raw text was extracted.")
-            processing_status = "processed_for_analysis_only" # No RAG chunks, but text for analysis
-        else: # No chunks and no raw text (e.g., empty or unparseable file)
-            current_app.logger.warning(f"ai_core produced no RAG chunks and no raw text for '{original_name}'.")
-            # Return a specific response indicating nothing useful was extracted
+                processing_status = "processed_qdrant_chunks_not_added"
+        elif raw_text_for_node_analysis:
+             current_app.logger.info(f"ai_core produced no processable Qdrant chunks for '{original_name}', but raw text was extracted.")
+             processing_status = "processed_for_analysis_only_no_qdrant"
+        else:
+            current_app.logger.warning(f"ai_core produced no Qdrant chunks and no raw text for '{original_name}'.")
             return jsonify({
-                "message": f"Processed '{original_name}' but no content was extracted for RAG or analysis.",
+                "message": f"Processed '{original_name}' but no content was extracted for Qdrant or analysis.",
                 "status": "no_content_extracted",
                 "filename": original_name,
                 "user_id": user_id,
                 "num_chunks_added_to_qdrant": 0,
-                "raw_text_for_analysis": "" # Empty string
-            }), 200 # 200 OK as the processing attempt itself didn't fail
+                "raw_text_for_analysis": ""
+            }), 200
 
-        # Construct the success response for Node.js
         response_payload = {
-            "message": f"Successfully processed '{original_name}'. Embeddings operation completed.",
-            "status": processing_status,
+            "message": f"Successfully processed '{original_name}' for Qdrant. Status: {processing_status}.",
+            "status": "added",
             "filename": original_name,
             "user_id": user_id,
             "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
-            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "", # Ensure it's always a string
-            "chunks_with_metadata": chunks_with_metadata
+            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "",
+            "chunks_with_metadata": chunks_with_metadata_for_kg # Pass this to Node.js for KG worker
         }
-        current_app.logger.info(f"Successfully processed '{original_name}'. Returning raw text and Qdrant status.")
-        return jsonify(response_payload), 201 # 201 Created if resources (chunks) were made
+        current_app.logger.info(f"Successfully processed '{original_name}' for Qdrant. Returning raw text and Qdrant status.")
+        return jsonify(response_payload), 201
 
     except FileNotFoundError as e:
-        current_app.logger.error(f"Add Document Error for '{original_name}' - FileNotFoundError: {e}", exc_info=True)
-        return create_error_response(f"File not found during processing: {str(e)}", 404)
-    except config.TESSERACT_ERROR: # Make sure config is imported and TESSERACT_ERROR is defined
-        current_app.logger.critical(f"Add Document Error for '{original_name}' - Tesseract (OCR) not found.")
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - FileNotFoundError: {e}", exc_info=True)
+        return create_error_response(f"File not found during Qdrant processing: {str(e)}", 404)
+    except config.TESSERACT_ERROR:
+        current_app.logger.critical(f"Add Document (Qdrant) Error for '{original_name}' - Tesseract (OCR) not found.")
         return create_error_response("OCR engine (Tesseract) not found or not configured correctly on the server.", 500)
-    except ValueError as e: # e.g., vector dimension mismatch from add_processed_chunks
-        current_app.logger.error(f"Add Document Error for '{original_name}' - ValueError: {e}", exc_info=True)
-        return create_error_response(f"Configuration or data error: {str(e)}", 400)
+    except ValueError as e:
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - ValueError: {e}", exc_info=True)
+        return create_error_response(f"Configuration or data error for Qdrant: {str(e)}", 400)
     except Exception as e:
-        current_app.logger.error(f"Add Document Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}", exc_info=True) # Ensure traceback is imported
-        return create_error_response(f"Failed to process document '{original_name}' due to an internal error.", 500)
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to process document '{original_name}' for Qdrant due to an internal error.", 500)
+
+@app.route('/query', methods=['POST'])
+def search_qdrant_documents_and_get_kg(): # Renamed for clarity
+    current_app.logger.info("--- /query Request (Qdrant Search + KG Retrieval) ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
+
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
+    
+    # Also check Neo4j driver availability for KG retrieval
+    try:
+        neo4j_handler.get_driver_instance() # Will raise ConnectionError if not available
+    except ConnectionError:
+        return create_error_response("Knowledge Graph service (Neo4j) is not available.", 503)
 
 
-@app.route('/query', methods=['POST']) # Changed from /query to /search for Qdrant context
-def search_qdrant_documents():
-    current_app.logger.info("--- /search Request (Qdrant) ---")
+    data = request.get_json()
+    query_text = data.get('query')
+    user_id_from_request = data.get('user_id') # <<< NEW: Expect user_id
+    k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K)
+    filter_payload_from_request = data.get('filter') # This is the Qdrant filter
+    
+    qdrant_filters = None
+
+    if not query_text:
+        return create_error_response("Missing 'query' field in request body", 400)
+    if not user_id_from_request: # <<< NEW: Validate user_id
+        return create_error_response("Missing 'user_id' field in request body", 400)
+
+    # --- Qdrant Filter Setup ---
+    # The filter_payload_from_request is for Qdrant. It might contain user_id and original_name.
+    # It's important that if a filter is used for Qdrant, it's consistent with the user_id
+    # we'll use for KG retrieval. The client (Node.js) should ensure this consistency.
+    if filter_payload_from_request and isinstance(filter_payload_from_request, dict):
+        from qdrant_client import models as qdrant_models # Import here for safety
+        conditions = []
+        for key, value in filter_payload_from_request.items():
+            conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
+        if conditions:
+            qdrant_filters = qdrant_models.Filter(must=conditions)
+            current_app.logger.info(f"Applying Qdrant filter: {filter_payload_from_request}")
+    else:
+        current_app.logger.info("No Qdrant filter explicitly provided by client in this query.")
+
+
+    try:
+        k = int(k)
+    except ValueError:
+        return create_error_response("'k' must be an integer", 400)
+
+    current_app.logger.info(f"Performing Qdrant search for user '{user_id_from_request}', query (first 50): '{query_text[:50]}...' with k={k}")
+
+    try:
+        # 1. Perform Qdrant Search
+        # `docs` is List[Document], `formatted_context` is str, `docs_map` is Dict
+        qdrant_retrieved_docs, formatted_context_snippet, qdrant_docs_map = vector_service.search_documents(
+            query=query_text,
+            k=k,
+            filter_conditions=qdrant_filters # Use the filter passed from client
+        )
+
+        # 2. Prepare KG Retrieval based on Qdrant results
+        knowledge_graphs_data = {} # To store KGs, mapping documentName to KG object
+        
+        if qdrant_retrieved_docs:
+            unique_doc_names_for_kg = set()
+            for doc_obj in qdrant_retrieved_docs:
+                # We need 'documentName' or 'original_name' from the Qdrant doc metadata
+                # to identify which KG to fetch.
+                doc_meta = doc_obj.metadata
+                doc_name_for_kg = doc_meta.get('documentName', doc_meta.get('original_name', doc_meta.get('file_name')))
+                
+                if doc_name_for_kg:
+                    unique_doc_names_for_kg.add(doc_name_for_kg)
+                else:
+                    current_app.logger.warning(f"Qdrant doc metadata missing document identifier (documentName/original_name/file_name) for chunk ID {doc_meta.get('qdrant_id', 'N/A')}. Cannot fetch KG for this chunk's document.")
+            
+            current_app.logger.info(f"Found {len(unique_doc_names_for_kg)} unique document(s) in Qdrant results to fetch KGs for: {list(unique_doc_names_for_kg)}")
+
+            for doc_name in unique_doc_names_for_kg:
+                try:
+                    current_app.logger.info(f"Fetching KG for document '{doc_name}' (User: {user_id_from_request})")
+                    kg_content = neo4j_handler.get_knowledge_graph(user_id_from_request, doc_name)
+                    if kg_content: # get_knowledge_graph returns None if not found
+                        knowledge_graphs_data[doc_name] = kg_content
+                        current_app.logger.info(f"Successfully retrieved KG for '{doc_name}'. Nodes: {len(kg_content.get('nodes',[]))}, Edges: {len(kg_content.get('edges',[]))}")
+                    else:
+                        current_app.logger.info(f"No KG found in Neo4j for document '{doc_name}' (User: {user_id_from_request}).")
+                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found"} # Indicate not found
+                except Exception as kg_err:
+                    current_app.logger.error(f"Error retrieving KG for document '{doc_name}': {kg_err}", exc_info=True)
+                    knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "error": f"Failed to retrieve KG: {str(kg_err)}"}
+
+
+        # 3. Construct Final Response Payload
+        response_payload = {
+            "query": query_text,
+            "k_requested": k,
+            "user_id_processed": user_id_from_request, # Echo back user_id
+            "qdrant_filter_applied": filter_payload_from_request, # Show Qdrant filter used
+            "qdrant_results_count": len(qdrant_retrieved_docs),
+            "formatted_context_snippet": formatted_context_snippet,
+            "retrieved_documents_map": qdrant_docs_map, # From Qdrant vector_service
+            "retrieved_documents_list": [doc.to_dict() for doc in qdrant_retrieved_docs], # From Qdrant vector_service
+            "knowledge_graphs": knowledge_graphs_data # <<< NEW: KG data
+        }
+        
+        current_app.logger.info(f"Qdrant search and KG retrieval successful. Returning {len(qdrant_retrieved_docs)} Qdrant docs and KGs for {len(knowledge_graphs_data)} documents.")
+        return jsonify(response_payload), 200
+
+    except ConnectionError as ce: # Catch Neo4j or Qdrant connection errors
+        current_app.logger.error(f"Service connection error during /query processing: {ce}", exc_info=True)
+        return create_error_response(f"A dependent service is unavailable: {str(ce)}", 503)
+    except neo4j_exceptions.Neo4jError as ne: # Catch specific Neo4j errors
+        current_app.logger.error(f"Neo4j database error during /query processing: {ne}", exc_info=True)
+        return create_error_response(f"Neo4j database operation failed: {ne.message}", 500)
+    except Exception as e:
+        current_app.logger.error(f"/query processing failed: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Error during query processing: {str(e)}", 500)
+
+@app.route('/delete_qdrant_document_data', methods=['DELETE']) # Ensure this route is defined
+def delete_qdrant_data_route():
+    current_app.logger.info("--- DELETE /delete_qdrant_document_data Request ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
@@ -3563,75 +3843,151 @@ def search_qdrant_documents():
         return create_error_response("VectorDBService (Qdrant) is not available.", 503)
 
     data = request.get_json()
-    query_text = data.get('query')
-    k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K) # Use default from config
-    
-    # Optional: Allow passing filter conditions in the request body
-    # Example filter: {"user_id": "some_user", "original_name": "some_doc.pdf"}
-    filter_payload = data.get('filter') 
-    qdrant_filters = None
+    user_id = data.get('user_id')
+    document_name = data.get('document_name') 
 
-    if filter_payload and isinstance(filter_payload, dict):
-        from qdrant_client import models as qdrant_models # Import here to keep it local
-        conditions = []
-        for key, value in filter_payload.items():
-            # Ensure key is a valid payload key you store (e.g., user_id, original_name, page_number)
-            # This simple example assumes exact match for string values.
-            # For numerical ranges or other conditions, qdrant_models.Range, etc. would be used.
-            conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
-        
-        if conditions:
-            qdrant_filters = qdrant_models.Filter(must=conditions)
-            current_app.logger.info(f"Applying Qdrant filter: {filter_payload}")
-
-
-    if not query_text:
-        return create_error_response("Missing 'query' field in request body", 400)
+    if not user_id or not document_name:
+        return create_error_response("Missing 'user_id' or 'document_name' in request body.", 400)
 
     try:
-        k = int(k)
-    except ValueError:
-        return create_error_response("'k' must be an integer", 400)
-
-    current_app.logger.info(f"Performing Qdrant search for query (first 100 chars): '{query_text[:100]}...' with k={k}")
-
-    try:
-        # `search_documents` returns: docs_list, formatted_context_string, context_map
-        docs, formatted_context, docs_map = vector_service.search_documents(
-            query=query_text,
-            k=k,
-            filter_conditions=qdrant_filters
-        )
-
-        # The response from your original /query endpoint was `{"relevantDocs": [...]}`
-        # Let's adapt to return something similar, but with more Qdrant-style info.
-        # `docs` is a list of `Document` objects from `vector_db_service`.
+        # This assumes you have a method 'delete_document_vectors' in your vector_service
+        result = vector_service.delete_document_vectors(user_id, document_name) 
         
-        response_payload = {
-            "query": query_text,
-            "k_requested": k,
-            "filter_applied": filter_payload, # Show what filter was used
-            "results_count": len(docs),
-            "formatted_context_snippet": formatted_context, # The RAG-style formatted string
-            "retrieved_documents_map": docs_map, # The map with citation index as key
-            "retrieved_documents_list": [doc.to_dict() for doc in docs] # List of Document objects as dicts
-        }
-        current_app.logger.info(f"Qdrant search successful. Returning {len(docs)} results.")
-        return jsonify(response_payload), 200
-
+        if result.get("success"):
+            return jsonify({"message": result.get("message", "Qdrant vectors for document processed for deletion.")}), 200
+        else:
+            return create_error_response(result.get("message", "Failed to delete Qdrant vectors."), 500) # Or a more specific code
+            
+    except ConnectionError as ce:
+        current_app.logger.error(f"Qdrant connection error during /delete_qdrant_document_data for user {user_id}, doc {document_name}: {ce}", exc_info=True)
+        return create_error_response(f"Qdrant service connection error: {str(ce)}", 503)
     except Exception as e:
-        current_app.logger.error(f"Qdrant search failed: {e}\n{traceback.format_exc()}")
-        return create_error_response(f"Error during Qdrant search: {str(e)}", 500)
+        current_app.logger.error(f"/delete_qdrant_document_data for user {user_id}, doc {document_name} failed: {e}", exc_info=True)
+        return create_error_response(f"Error during Qdrant data deletion: {str(e)}", 500)
+
+# === KG (Neo4j) Endpoints ===
+
+@app.route('/kg', methods=['POST'])
+def add_or_update_kg_route():
+    current_app.logger.info("--- POST /kg Request (Neo4j Ingestion) ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
+
+    data = request.get_json()
+    user_id = data.get('userId') # Key from Node.js
+    original_name = data.get('originalName') # Key from Node.js
+    nodes = data.get('nodes')
+    edges = data.get('edges')
+
+    if not all([user_id, original_name, isinstance(nodes, list), isinstance(edges, list)]):
+        missing_fields = []
+        if not user_id: missing_fields.append("userId")
+        if not original_name: missing_fields.append("originalName")
+        if not isinstance(nodes, list): missing_fields.append("nodes (must be a list)")
+        if not isinstance(edges, list): missing_fields.append("edges (must be a list)")
+        return create_error_response(f"Missing or invalid fields: {', '.join(missing_fields)}", 400,
+                                     details=f"Received: userId type {type(user_id)}, originalName type {type(original_name)}, nodes type {type(nodes)}, edges type {type(edges)}")
+
+    logger.info(f"Attempting to ingest KG for user '{user_id}', document '{original_name}'. Nodes: {len(nodes)}, Edges: {len(edges)}")
+
+    try:
+        result = neo4j_handler.ingest_knowledge_graph(user_id, original_name, nodes, edges)
+        if result["success"]:
+            return jsonify({
+                "message": result["message"],
+                "userId": user_id,
+                "documentName": original_name, # Consistent key name
+                "nodes_affected": result["nodes_affected"],
+                "edges_affected": result["edges_affected"],
+                "status": "completed" # Status field as expected by Node.js
+            }), 201
+        else: # Should not happen if ingest_knowledge_graph raises on error
+            return create_error_response(result.get("message", "KG ingestion failed."), 500)
+            
+    except ConnectionError as e:
+        logger.error(f"Neo4j connection error during KG ingestion for '{original_name}': {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
+    except neo4j_exceptions.Neo4jError as e:
+        logger.error(f"Neo4jError during KG ingestion for '{original_name}': {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
+    except Exception as e:
+        logger.error(f"Unexpected error during KG ingestion for '{original_name}': {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to ingest Knowledge Graph: {str(e)}", 500)
+
+
+@app.route('/kg/<user_id>/<path:document_name>', methods=['GET']) # Use <path:document_name> to allow slashes
+def get_kg_route(user_id, document_name):
+    current_app.logger.info(f"--- GET /kg/{user_id}/{document_name} Request (Neo4j Retrieval) ---")
+
+    # Basic sanitization (you might want more robust URL segment sanitization if needed)
+    sanitized_user_id = user_id.replace("..","").strip()
+    sanitized_document_name = document_name.replace("..","").strip()
+
+    if not sanitized_user_id or not sanitized_document_name:
+        return create_error_response("User ID and Document Name URL parameters are required and cannot be empty.", 400)
+
+    logger.info(f"Retrieving KG for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+
+    try:
+        kg_data = neo4j_handler.get_knowledge_graph(sanitized_user_id, sanitized_document_name)
+
+        if kg_data is None: # Handler returns None if not found
+            logger.info(f"No KG data found for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+            return create_error_response("Knowledge Graph not found for the specified user and document.", 404)
+
+        logger.info(f"Successfully retrieved KG for document '{sanitized_document_name}'. Nodes: {len(kg_data.get('nodes',[]))}, Edges: {len(kg_data.get('edges',[]))}")
+        return jsonify(kg_data), 200
+
+    except ConnectionError as e:
+        logger.error(f"Neo4j connection error during KG retrieval: {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
+    except neo4j_exceptions.Neo4jError as e:
+        logger.error(f"Neo4jError during KG retrieval: {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
+    except Exception as e:
+        logger.error(f"Unexpected error during KG retrieval: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to retrieve Knowledge Graph: {str(e)}", 500)
+
+
+@app.route('/kg/<user_id>/<path:document_name>', methods=['DELETE']) # Use <path:document_name>
+def delete_kg_route(user_id, document_name):
+    current_app.logger.info(f"--- DELETE /kg/{user_id}/{document_name} Request (Neo4j Deletion) ---")
+
+    sanitized_user_id = user_id.replace("..","").strip()
+    sanitized_document_name = document_name.replace("..","").strip()
+
+    if not sanitized_user_id or not sanitized_document_name:
+        return create_error_response("User ID and Document Name URL parameters are required and cannot be empty.", 400)
+
+    logger.info(f"Attempting to delete KG for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+
+    try:
+        deleted = neo4j_handler.delete_knowledge_graph(sanitized_user_id, sanitized_document_name)
+        if deleted:
+            logger.info(f"Knowledge Graph for document '{sanitized_document_name}' (User: {sanitized_user_id}) deleted successfully.")
+            return jsonify({"message": "Knowledge Graph deleted successfully."}), 200
+        else:
+            logger.info(f"No Knowledge Graph found for document '{sanitized_document_name}' (User: {sanitized_user_id}) to delete.")
+            return create_error_response("Knowledge Graph not found for deletion.", 404)
+
+    except ConnectionError as e:
+        logger.error(f"Neo4j connection error during KG deletion: {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
+    except neo4j_exceptions.Neo4jError as e:
+        logger.error(f"Neo4jError during KG deletion: {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
+    except Exception as e:
+        logger.error(f"Unexpected error during KG deletion: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to delete Knowledge Graph: {str(e)}", 500)
 
 
 if __name__ == '__main__':
-    logger.info(f"--- Starting Qdrant RAG API Service on port {config.API_PORT} ---")
+    logger.info(f"--- Starting RAG API Service (with KG) on port {config.API_PORT} ---")
+    logger.info(f"Qdrant Host: {config.QDRANT_HOST}, Port: {config.QDRANT_PORT}, Collection: {config.QDRANT_COLLECTION_NAME}")
+    logger.info(f"Neo4j URI: {config.NEO4J_URI}, User: {config.NEO4J_USERNAME}, DB: {config.NEO4J_DATABASE}")
     logger.info(f"Document Embedding Model (ai_core): {config.DOCUMENT_EMBEDDING_MODEL_NAME} (Dim: {config.DOCUMENT_VECTOR_DIMENSION})")
     logger.info(f"Query Embedding Model (vector_db_service): {config.QUERY_EMBEDDING_MODEL_NAME} (Dim: {config.QUERY_VECTOR_DIMENSION})")
-    logger.info(f"Qdrant Collection: {config.QDRANT_COLLECTION_NAME} (Expected Dim: {config.QDRANT_COLLECTION_VECTOR_DIM})")
     
-    # For production, use a proper WSGI server like gunicorn or waitress
-    # Example: gunicorn --workers 4 --bind 0.0.0.0:5000 main_qdrant_app:app
     app.run(host='0.0.0.0', port=config.API_PORT, debug=True) # debug=True for development
 ```
 
@@ -27809,6 +28165,10 @@ def setup_logging():
     logging.getLogger("faiss.loader").setLevel(logging.WARNING)
     logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
 
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password") # IMPORTANT: Change this default or use ENV VAR!
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 # === Embedding Model Configuration ===
 DEFAULT_DOC_EMBED_MODEL = 'mixedbread-ai/mxbai-embed-large-v1'
 DOCUMENT_EMBEDDING_MODEL_NAME = os.getenv('DOCUMENT_EMBEDDING_MODEL_NAME', DEFAULT_DOC_EMBED_MODEL)
@@ -28156,6 +28516,278 @@ def chunk_text(text, file_name, user_id):
 
 ```
 
+`server/rag_service/neo4j_handler.py`
+
+```python
+# server/rag_service/neo4j_handler.py
+
+import logging
+from neo4j import GraphDatabase, exceptions as neo4j_exceptions
+import config # Assumes config.py is in the same directory or python path is set correctly
+
+logger = logging.getLogger(__name__)
+
+# --- Neo4j Driver Management ---
+_neo4j_driver = None
+
+def init_driver():
+    """Initializes the Neo4j driver instance."""
+    global _neo4j_driver
+    if _neo4j_driver is not None:
+        try: # Check if existing driver is still connected
+            _neo4j_driver.verify_connectivity()
+            logger.info("Neo4j driver already initialized and connected.")
+            return
+        except Exception:
+            logger.warning("Existing Neo4j driver lost connection or failed verification. Re-initializing.")
+            if _neo4j_driver:
+                _neo4j_driver.close()
+            _neo4j_driver = None # Force re-initialization
+
+    try:
+        _neo4j_driver = GraphDatabase.driver(
+            config.NEO4J_URI,
+            auth=(config.NEO4J_USERNAME, config.NEO4J_PASSWORD)
+        )
+        _neo4j_driver.verify_connectivity()
+        logger.info(f"Neo4j driver initialized. Connected to: {config.NEO4J_URI} (DB: {config.NEO4J_DATABASE})")
+    except neo4j_exceptions.ServiceUnavailable:
+        logger.critical(f"Failed to connect to Neo4j at {config.NEO4J_URI}. Ensure Neo4j is running and accessible.")
+        _neo4j_driver = None
+    except neo4j_exceptions.AuthError:
+        logger.critical(f"Neo4j authentication failed for user '{config.NEO4J_USERNAME}'. Check credentials.")
+        _neo4j_driver = None
+    except Exception as e:
+        logger.critical(f"An unexpected error occurred while initializing Neo4j driver: {e}", exc_info=True)
+        _neo4j_driver = None
+
+def get_driver_instance():
+    """Returns the active Neo4j driver instance, initializing if necessary."""
+    if _neo4j_driver is None:
+        init_driver()
+    if _neo4j_driver is None: # Check again after trying to init
+        raise ConnectionError("Neo4j driver is not available. Initialization failed.")
+    return _neo4j_driver
+
+def close_driver():
+    """Closes the Neo4j driver instance if it exists."""
+    global _neo4j_driver
+    if _neo4j_driver:
+        _neo4j_driver.close()
+        _neo4j_driver = None
+        logger.info("Neo4j driver closed.")
+
+def check_neo4j_connectivity():
+    """Checks if the Neo4j driver can connect."""
+    try:
+        driver = get_driver_instance() # This will try to init if not already
+        driver.verify_connectivity()
+        return True, "connected"
+    except Exception as e:
+        logger.warning(f"Neo4j connectivity check failed: {str(e)}")
+        return False, f"disconnected_or_error: {str(e)}"
+
+# --- Private Transaction Helper Functions ---
+def _execute_read_tx(tx_function, *args, **kwargs):
+    driver = get_driver_instance()
+    with driver.session(database=config.NEO4J_DATABASE) as session:
+        return session.execute_read(tx_function, *args, **kwargs)
+
+def _execute_write_tx(tx_function, *args, **kwargs):
+    driver = get_driver_instance()
+    with driver.session(database=config.NEO4J_DATABASE) as session:
+        return session.execute_write(tx_function, *args, **kwargs)
+
+# --- Private Transactional Cypher Functions ---
+def _delete_kg_transactional(tx, user_id, document_name):
+    logger.info(f"Neo4j TX: Deleting KG for user '{user_id}', document '{document_name}'")
+    query = (
+        "MATCH (n:KnowledgeNode {userId: $userId, documentName: $documentName}) "
+        "DETACH DELETE n"
+    )
+    result = tx.run(query, userId=user_id, documentName=document_name)
+    summary = result.consume()
+    deleted_count = summary.counters.nodes_deleted + summary.counters.relationships_deleted
+    logger.info(f"Neo4j TX: Deleted {summary.counters.nodes_deleted} nodes and {summary.counters.relationships_deleted} relationships for '{document_name}'.")
+    return deleted_count > 0
+
+def _add_nodes_transactional(tx, nodes_param, user_id, document_name):
+    logger.info(f"Neo4j TX: Adding/merging {len(nodes_param)} nodes for user '{user_id}', document '{document_name}'")
+    # Ensure nodes have a type, default to "concept" if not provided
+    # And llm_parent_id for parent from LLM's perspective
+    processed_nodes = []
+    for node_data in nodes_param:
+        # Ensure ID is a string and not empty
+        if not isinstance(node_data.get("id"), str) or not node_data.get("id").strip():
+            logger.warning(f"Skipping node with invalid or missing ID: {node_data}")
+            continue
+        
+        processed_node = {
+            "id": node_data["id"].strip(), # Use the LLM's 'id' as 'nodeId'
+            "type": node_data.get("type", "concept"), # Default type
+            "description": node_data.get("description", ""),
+            "llm_parent_id": node_data.get("parent", None) # Store the 'parent' from LLM
+        }
+        processed_nodes.append(processed_node)
+
+    if not processed_nodes:
+        logger.warning("No valid nodes to process after filtering.")
+        return 0
+
+    query = (
+        "UNWIND $nodes_data as node_props "
+        "MERGE (n:KnowledgeNode {nodeId: node_props.id, userId: $userId, documentName: $documentName}) "
+        "ON CREATE SET n.type = node_props.type, "
+        "              n.description = node_props.description, "
+        "              n.llm_parent_id = node_props.llm_parent_id, "
+        "              n.userId = $userId, " # Ensure userId is set on create
+        "              n.documentName = $documentName " # Ensure documentName is set on create
+        "ON MATCH SET n.type = node_props.type, " # Update existing nodes too
+        "             n.description = node_props.description, "
+        "             n.llm_parent_id = node_props.llm_parent_id "
+        "RETURN count(n) as nodes_affected"
+    )
+    result = tx.run(query, nodes_data=processed_nodes, userId=user_id, documentName=document_name)
+    count = result.single()[0] if result.peek() else 0
+    logger.info(f"Neo4j TX: Affected (created or merged) {count} nodes for '{document_name}'.")
+    return count
+
+def _add_edges_transactional(tx, edges_param, user_id, document_name):
+    logger.info(f"Neo4j TX: Adding/merging {len(edges_param)} edges for user '{user_id}', document '{document_name}'")
+    if not edges_param:
+        logger.info("Neo4j TX: No edges provided to add.")
+        return 0
+        
+    # Filter out invalid edges
+    valid_edges = []
+    for edge_data in edges_param:
+        if not (isinstance(edge_data.get("from"), str) and edge_data.get("from").strip() and
+                isinstance(edge_data.get("to"), str) and edge_data.get("to").strip() and
+                isinstance(edge_data.get("relationship"), str) and edge_data.get("relationship").strip()):
+            logger.warning(f"Skipping invalid edge data: {edge_data}")
+            continue
+        valid_edges.append({
+            "from": edge_data["from"].strip(),
+            "to": edge_data["to"].strip(),
+            "relationship": edge_data["relationship"].strip().upper().replace(" ", "_") # Sanitize relationship type
+        })
+
+    if not valid_edges:
+        logger.warning("No valid edges to process after filtering.")
+        return 0
+
+    # Cypher query to create relationships. Note: relationship type is dynamic using brackets.
+    # We use MERGE to avoid duplicate relationships with the same type between the same nodes.
+    # Relationship properties are set using SET.
+    query = (
+        "UNWIND $edges_data as edge_props "
+        "MATCH (startNode:KnowledgeNode {nodeId: edge_props.from, userId: $userId, documentName: $documentName}) "
+        "MATCH (endNode:KnowledgeNode {nodeId: edge_props.to, userId: $userId, documentName: $documentName}) "
+        "CALL apoc.merge.relationship(startNode, edge_props.relationship, {}, {type: edge_props.relationship}, endNode) YIELD rel "
+        # MERGE (startNode)-[r:HAS_RELATIONSHIP]->(endNode) " # Simpler, but cannot set type dynamically easily.
+        # "SET r.type = edge_props.relationship "
+        "RETURN count(rel) as edges_affected"
+    )
+    # Note: The above MERGE using apoc.merge.relationship is more robust for dynamic relationship types.
+    # If APOC is not available, a simpler MERGE (startNode)-[r:REL {type:edge_props.relationship}]->(endNode) would work.
+    # Or create relationships with a generic type like :RELATED_TO and store the specific type as a property.
+    # For this example, assuming APOC for dynamic relationship types. If not, adjust the query.
+    # Simpler, if APOC is not available (relationship type becomes a property of a generic :RELATED_TO relationship):
+    simple_query = (
+        "UNWIND $edges_data as edge_props "
+        "MATCH (startNode:KnowledgeNode {nodeId: edge_props.from, userId: $userId, documentName: $documentName}) "
+        "MATCH (endNode:KnowledgeNode {nodeId: edge_props.to, userId: $userId, documentName: $documentName}) "
+        "MERGE (startNode)-[r:RELATED_TO {type: edge_props.relationship}]->(endNode) "
+        "RETURN count(r) as edges_affected"
+    )
+    # Let's use the simpler query for broader compatibility without APOC.
+    
+    result = tx.run(simple_query, edges_data=valid_edges, userId=user_id, documentName=document_name)
+    count = result.single()[0] if result.peek() else 0
+    logger.info(f"Neo4j TX: Affected (created or merged) {count} relationships for '{document_name}'.")
+    return count
+
+def _get_kg_transactional(tx, user_id, document_name):
+    logger.info(f"Neo4j TX: Retrieving KG for user '{user_id}', document '{document_name}'")
+    nodes_query = (
+        "MATCH (n:KnowledgeNode {userId: $userId, documentName: $documentName}) "
+        "RETURN n.nodeId AS id, n.type AS type, n.description AS description, n.llm_parent_id AS parent"
+    )
+    nodes_result = tx.run(nodes_query, userId=user_id, documentName=document_name)
+    # Convert Neo4j records to dictionaries
+    nodes_data = [dict(record) for record in nodes_result]
+
+    edges_query = (
+        "MATCH (startNode:KnowledgeNode {userId: $userId, documentName: $documentName})"
+        "-[r:RELATED_TO]->" # Using the generic relationship type from the simple_query
+        "(endNode:KnowledgeNode {userId: $userId, documentName: $documentName}) "
+        "RETURN startNode.nodeId AS from, endNode.nodeId AS to, r.type AS relationship"
+    )
+    edges_result = tx.run(edges_query, userId=user_id, documentName=document_name)
+    edges_data = [dict(record) for record in edges_result]
+
+    logger.info(f"Neo4j TX: Retrieved {len(nodes_data)} nodes and {len(edges_data)} edges for '{document_name}'.")
+    return {"nodes": nodes_data, "edges": edges_data}
+
+
+# --- Public Service Functions ---
+def ingest_knowledge_graph(user_id: str, document_name: str, nodes: list, edges: list) -> dict:
+    """
+    Deletes existing KG for the document and ingests new nodes and edges.
+    Returns a summary of operations.
+    """
+    try:
+        logger.info(f"Attempting to delete old KG (if any) for document '{document_name}' (User: {user_id}).")
+        _execute_write_tx(_delete_kg_transactional, user_id, document_name)
+        logger.info(f"Old KG (if any) deleted for '{document_name}'. Proceeding with ingestion.")
+
+        nodes_affected = 0
+        if nodes and len(nodes) > 0:
+            nodes_affected = _execute_write_tx(_add_nodes_transactional, nodes, user_id, document_name)
+        
+        edges_affected = 0
+        if edges and len(edges) > 0:
+            edges_affected = _execute_write_tx(_add_edges_transactional, edges, user_id, document_name)
+
+        message = "Knowledge Graph successfully ingested/updated."
+        logger.info(f"{message} Doc: '{document_name}', User: '{user_id}'. Nodes: {nodes_affected}, Edges: {edges_affected}")
+        return {
+            "success": True,
+            "message": message,
+            "nodes_affected": nodes_affected,
+            "edges_affected": edges_affected
+        }
+    except Exception as e:
+        logger.error(f"Error during KG ingestion for document '{document_name}', user '{user_id}': {e}", exc_info=True)
+        raise # Re-raise to be caught by the route handler
+
+def get_knowledge_graph(user_id: str, document_name: str) -> dict:
+    """
+    Retrieves the knowledge graph for a given user and document name.
+    """
+    try:
+        kg_data = _execute_read_tx(_get_kg_transactional, user_id, document_name)
+        if not kg_data["nodes"] and not kg_data["edges"]:
+            logger.info(f"No KG data found for user '{user_id}', document '{document_name}'.")
+            return None # Indicate not found
+        return kg_data
+    except Exception as e:
+        logger.error(f"Error retrieving KG for document '{document_name}', user '{user_id}': {e}", exc_info=True)
+        raise
+
+def delete_knowledge_graph(user_id: str, document_name: str) -> bool:
+    """
+    Deletes the knowledge graph for a given user and document name.
+    Returns True if data was deleted, False otherwise.
+    """
+    try:
+        was_deleted = _execute_write_tx(_delete_kg_transactional, user_id, document_name)
+        return was_deleted
+    except Exception as e:
+        logger.error(f"Error deleting KG for document '{document_name}', user '{user_id}': {e}", exc_info=True)
+        raise
+```
+
 `server/rag_service/Readne.txt`
 
 ```
@@ -28490,6 +29122,60 @@ class VectorDBService:
             formatted_context_text = "Error retrieving context due to an internal server error."
 
         return context_docs, formatted_context_text, context_docs_map
+    
+    # Add this method to the VectorDBService class in vector_db_service.py
+
+    def delete_document_vectors(self, user_id: str, document_name: str) -> Dict[str, Any]:
+        logger.info(f"Attempting to delete vectors for document: '{document_name}', user: '{user_id}' from Qdrant collection '{self.collection_name}'.")
+        
+        # These metadata keys must match what's stored during ingestion from ai_core.py
+        # 'processing_user' was the user_id passed to ai_core
+        # 'file_name' was the original_name passed to ai_core
+        qdrant_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="processing_user", # The metadata field storing the user ID
+                    match=models.MatchValue(value=user_id)
+                ),
+                models.FieldCondition(
+                    key="file_name", # The metadata field storing the original document name
+                    match=models.MatchValue(value=document_name)
+                )
+            ]
+        )
+        
+        try:
+            # Optional: Count points before deleting for logging/confirmation
+            # count_response = self.client.count(collection_name=self.collection_name, count_filter=qdrant_filter)
+            # num_to_delete = count_response.count
+            # logger.info(f"Qdrant: Found {num_to_delete} points matching criteria for document '{document_name}', user '{user_id}'.")
+
+            # if num_to_delete == 0:
+            #     logger.info(f"Qdrant: No points found to delete for document '{document_name}', user '{user_id}'.")
+            #     return {"success": True, "message": "No matching vectors found in Qdrant to delete.", "deleted_count": 0}
+
+            delete_result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+                wait=True # Make it synchronous
+            )
+            
+            # Check the status of the delete operation
+            # delete_result should be an UpdateResult object
+            if delete_result.status == models.UpdateStatus.COMPLETED or delete_result.status == models.UpdateStatus.ACKNOWLEDGED:
+                # The actual number of deleted points isn't directly returned by filter-based delete.
+                # We can infer it was successful if no error.
+                # For a precise count, you'd need to list IDs by filter, then delete by IDs.
+                logger.info(f"Qdrant delete operation for document '{document_name}', user '{user_id}' acknowledged/completed. Status: {delete_result.status}")
+                return {"success": True, "message": f"Qdrant vector deletion for document '{document_name}' completed. Status: {delete_result.status}."}
+            else:
+                logger.warning(f"Qdrant delete operation for document '{document_name}', user '{user_id}' returned status: {delete_result.status}")
+                return {"success": False, "message": f"Qdrant delete operation status: {delete_result.status}"}
+
+        except Exception as e:
+            logger.error(f"Error deleting document vectors from Qdrant for document '{document_name}', user '{user_id}': {e}", exc_info=True)
+            # Check for specific Qdrant client errors if possible, e.g., if the collection doesn't exist.
+            return {"success": False, "message": f"Failed to delete Qdrant vectors: {str(e)}"}
 
     def close(self):
         logger.info("VectorDBService close called.")
@@ -28637,26 +29323,27 @@ const { generateContentWithHistory } = require('../services/geminiService');
 const router = express.Router();
 
 // --- Helper to call Python RAG Query Endpoint ---
-async function queryPythonRagService(userId, query, k = 5, filter = null) { // Added filter parameter
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+async function queryPythonRagService(userId, query, k = 5, filter = null) { // userId is already a param
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL; // Ensure one is set
     if (!pythonServiceUrl) {
-        console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot query RAG service.");
-        throw new Error("RAG service configuration error."); // Throw error to be caught by caller
+        console.error("PYTHON_RAG_SERVICE_URL or DEFAULT_PYTHON_RAG_URL is not set in environment. Cannot query RAG service.");
+        throw new Error("RAG service configuration error.");
     }
-    const searchUrl = `${pythonServiceUrl}/query`; // <<<--- CORRECTED TO /query ---
+    const searchUrl = `${pythonServiceUrl.replace(/\/$/, '')}/query`; // Ensure no trailing slash before adding /query
 
     console.log(`Querying Python RAG service for User ${userId} at ${searchUrl} with query (first 50): "${query.substring(0,50)}...", k=${k}`);
     
     const payload = {
         query: query,
+        user_id: userId, // <<< ADDED user_id to the payload for Python service
         k: k
     };
 
     if (filter && typeof filter === 'object' && Object.keys(filter).length > 0) {
-        payload.filter = filter;
-        console.log(`  Applying filter to Python RAG search:`, filter);
+        payload.filter = filter; // This filter is for Qdrant
+        console.log(`  Applying Qdrant filter to Python RAG search:`, filter);
     } else {
-        console.log(`  No filter applied to Python RAG search.`);
+        console.log(`  No Qdrant filter applied to Python RAG search.`);
     }
 
     try {
@@ -28665,33 +29352,32 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) { // A
             timeout: 30000 
         });
 
-        // Python /search returns: { ..., retrieved_documents_list: [{ page_content: "...", metadata: {...} }], ... }
+        // Python /query now returns:
+        // { ..., retrieved_documents_list: [...], knowledge_graphs: { "docName1": kg1, ... } }
         if (response.data && Array.isArray(response.data.retrieved_documents_list)) {
-            console.log(`Python RAG service /search returned ${response.data.results_count} results.`);
+            console.log(`Python RAG service /query returned ${response.data.qdrant_results_count} Qdrant results.`);
             
-            // Adapt to the structure expected by the Node.js /api/chat/rag and /api/chat/message routes
             const adaptedDocs = response.data.retrieved_documents_list.map(doc => {
                 const metadata = doc.metadata || {};
                 return {
-                    // The /api/chat/message route expects 'documentName' and 'content'
                     documentName: metadata.original_name || metadata.file_name || metadata.title || 'Unknown Document',
                     content: doc.page_content || "", 
-                    score: metadata.score, // Pass along the score
-                    // Include any other metadata if needed by the Gemini prompt construction
-                    // e.g., page_chunk_info: metadata.page_chunk_info || metadata.chunk_index,
-                    // e.g., qdrant_id: metadata.qdrant_id 
+                    score: metadata.score,
                 };
             });
             
             console.log(`  Adapted ${adaptedDocs.length} documents for Node.js service.`);
-            return adaptedDocs; 
+            return { // Return an object now
+                relevantDocs: adaptedDocs,
+                knowledge_graphs: response.data.knowledge_graphs || {} // Pass through the KG data
+            };
 
         } else {
-             console.warn(`Python RAG service /search returned unexpected data structure:`, response.data);
-             // Throw an error or return empty if the structure is critical
-             throw new Error("Received unexpected data structure from RAG search service.");
+             console.warn(`Python RAG service /query returned unexpected data structure:`, response.data);
+             throw new Error("Received unexpected data structure from RAG query service.");
         }
     } catch (error) {
+        // ... (your existing error handling for queryPythonRagService) ...
         const errorStatus = error.response?.status;
         const errorData = error.response?.data;
         let errorMsg = "Unknown RAG search error";
@@ -28699,25 +29385,22 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) { // A
         if (errorData) {
             if (typeof errorData === 'string' && errorData.toLowerCase().includes("<!doctype html>")) {
                 errorMsg = `HTML error page received from Python RAG service (Status: ${errorStatus}). URL (${searchUrl}) might be incorrect or Python service has an issue.`;
-                console.error(`Error querying Python RAG service: Received HTML error page. URL: ${searchUrl}, Status: ${errorStatus}`);
             } else {
                 errorMsg = errorData?.error || error.message || "Error response from RAG service had no specific message.";
-                console.error(`Error querying Python RAG service at ${searchUrl}. Status: ${errorStatus}, Python Error: ${errorMsg}`, errorData);
             }
         } else if (error.request) {
             errorMsg = `No response received from Python RAG service at ${searchUrl}. It might be down or unreachable.`;
-            console.error(`Error querying Python RAG service at ${searchUrl}: No response received. ${error.message}`);
         } else {
             errorMsg = error.message;
-            console.error(`Error setting up or sending request to Python RAG service at ${searchUrl}: ${error.message}`);
         }
-        throw new Error(`RAG Search Failed: ${errorMsg}`); // Propagate error
+        console.error(`Error querying Python RAG service at ${searchUrl}. Details: ${errorMsg}`, error.response ? error.response.data : error);
+        throw new Error(`RAG Query Failed: ${errorMsg}`);
     }
 }
 
 // --- @route   POST /api/chat/rag ---
 router.post('/rag', tempAuth, async (req, res) => {
-    const { message, filter } = req.body; 
+    const { message, filter } = req.body; // 'filter' here is the Qdrant filter if provided by client
     const userId = req.user._id.toString(); 
 
     if (!message || typeof message !== 'string' || message.trim() === '') {
@@ -28728,58 +29411,127 @@ router.post('/rag', tempAuth, async (req, res) => {
 
     try {
         const kValue = parseInt(process.env.RAG_DEFAULT_K) || 5; 
-        const clientFilter = filter && typeof filter === 'object' ? filter : null; 
+        const clientFilterForQdrant = filter && typeof filter === 'object' ? filter : null; 
         
-        const relevantDocs = await queryPythonRagService(userId, message.trim(), kValue, clientFilter); 
+        // queryPythonRagService now returns an object: { relevantDocs, knowledge_graphs }
+        const ragQueryResult = await queryPythonRagService(userId, message.trim(), kValue, clientFilterForQdrant); 
         
-        console.log(`<<< POST /api/chat/rag successful for User ${userId}. Found ${relevantDocs.length} docs.`);
-        res.status(200).json({ relevantDocs }); // `relevantDocs` is now an array of { documentName, content, score }
+        console.log(`<<< POST /api/chat/rag successful for User ${userId}. Found ${ragQueryResult.relevantDocs.length} Qdrant docs and KGs for ${Object.keys(ragQueryResult.knowledge_graphs || {}).length} docs.`);
+        
+        // Send both relevantDocs (for context string) and knowledge_graphs to the client
+        res.status(200).json({ 
+            relevantDocs: ragQueryResult.relevantDocs, // For RAG context
+            knowledge_graphs: ragQueryResult.knowledge_graphs // For client-side display/use
+        });
 
     } catch (error) { 
         console.error(`!!! Error processing RAG query for User ${userId}:`, error.message);
-        res.status(500).json({ message: error.message || "Failed to retrieve relevant documents." });
+        res.status(500).json({ message: error.message || "Failed to retrieve relevant documents and/or knowledge graphs." });
     }
 });
 
-// --- @route   POST /api/chat/message ---
-// (This route should now work correctly with the adapted `relevantDocs` structure)
+function formatKnowledgeGraphForLLM(knowledgeGraphs) {
+    if (!knowledgeGraphs || typeof knowledgeGraphs !== 'object' || Object.keys(knowledgeGraphs).length === 0) {
+        return ""; // Return empty string if no KG data
+    }
+
+    let kgString = "\n\n--- Retrieved Knowledge Graph Information ---\n";
+    let kgCitationHints = [];
+
+    Object.entries(knowledgeGraphs).forEach(([docName, kgData]) => {
+        if (!kgData || (!Array.isArray(kgData.nodes) || kgData.nodes.length === 0) && (!Array.isArray(kgData.edges) || kgData.edges.length === 0)) {
+            if(kgData.message === "KG not found" || kgData.error) {
+                kgString += `For document "${docName}": ${kgData.message || kgData.error}\n`;
+            } else {
+                kgString += `For document "${docName}": No specific KG data was extracted or found.\n`;
+            }
+            return;
+        }
+        
+        kgString += `\nKnowledge Graph for document: "${docName}":\n`;
+        kgCitationHints.push(docName); // Add doc name to citation hints
+
+        // Format Nodes
+        if (kgData.nodes && kgData.nodes.length > 0) {
+            kgString += "Key Concepts (Nodes):\n";
+            kgData.nodes.forEach(node => {
+                // Example: "Concept A (Type: major): Description of A. Parent: None."
+                // Example: "Sub-concept A1 (Type: subnode): Description of A1. Parent: Concept A."
+                const parentInfo = node.parent ? ` (Parent: ${node.parent})` : '';
+                kgString += `- ${node.id} (Type: ${node.type || 'N/A'})${parentInfo}: ${node.description || 'No description.'}\n`;
+            });
+        }
+
+        // Format Edges
+        if (kgData.edges && kgData.edges.length > 0) {
+            kgString += "Relationships (Edges):\n";
+            kgData.edges.forEach(edge => {
+                // Example: "Sub-concept A1 --[subtopic_of]--> Concept A"
+                kgString += `- ${edge.from} --[${edge.relationship}]--> ${edge.to}\n`;
+            });
+        }
+        kgString += "---\n";
+    });
+    
+    kgString += "--- End of Knowledge Graph Information ---\n";
+    return { kgFormattedString: kgString, kgCitationHints: kgCitationHints };
+}
+
+
 router.post('/message', tempAuth, async (req, res) => {
-    const { message, history, sessionId, systemPrompt, isRagEnabled, relevantDocs } = req.body;
-    const userId = req.user._id.toString(); 
+    // Now expecting knowledge_graphs in the payload
+    const { message, history, sessionId, systemPrompt, isRagEnabled, relevantDocs, knowledge_graphs } = req.body;
+    const userId = req.user._id.toString();
 
-    if (!message || typeof message !== 'string' || message.trim() === '') return res.status(400).json({ message: 'Message text required.' });
-    if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ message: 'Session ID required.' });
-    if (!Array.isArray(history)) return res.status(400).json({ message: 'Invalid history format.'});
-    const useRAG = !!isRagEnabled; 
+    // ... (existing validations for message, sessionId, history) ...
+    const useRAG = !!isRagEnabled;
 
-    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRAG}. Query: "${message.substring(0,50)}..."`);
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRAG}. KG data received: ${!!knowledge_graphs}`);
 
-    let contextString = "";
-    let citationHints = []; 
+    let textualContextString = ""; // For text docs
+    let textCitationHints = [];
+    let kgContextString = ""; // For KG data
+    let kgCitationHints = [];
 
     try {
-        // `relevantDocs` is now an array of {documentName, content, score} from queryPythonRagService
+        // 1. Process text-based relevantDocs (Qdrant results)
         if (useRAG && Array.isArray(relevantDocs) && relevantDocs.length > 0) {
-            console.log(`   RAG Enabled: Processing ${relevantDocs.length} relevant documents provided by client.`);
-            contextString = "Answer the user's question based primarily on the following context documents.\nIf the context documents do not contain the necessary information to answer the question fully, clearly state what information is missing from the context *before* potentially providing an answer based on your general knowledge.\n\n--- Context Documents ---\n";
+            console.log(`   RAG Text: Processing ${relevantDocs.length} text documents for context.`);
+            textualContextString = "Answer the user's question based primarily on the following context documents and knowledge graph information.\nIf the context documents do not contain the necessary information to answer the question fully, clearly state what information is missing from the context *before* potentially providing an answer based on your general knowledge.\n\n--- Context Documents ---\n";
             
             relevantDocs.forEach((doc, index) => {
+                // ... (your existing logic for formatting relevantDocs into textualContextString) ...
                 if (!doc || typeof doc.documentName !== 'string' || typeof doc.content !== 'string') {
-                    console.warn("   Skipping invalid/incomplete document in relevantDocs (missing 'documentName' or 'content'):", doc);
-                    return; 
+                    console.warn("   Skipping invalid/incomplete document in relevantDocs:", doc); return;
                 }
                 const docName = doc.documentName;
-                const scoreDisplay = doc.score !== undefined ? `(Rel. Score: ${doc.score.toFixed(4)})` : ''; 
-                const fullContent = doc.content; 
-
-                contextString += `\n[${index + 1}] Source: ${docName} ${scoreDisplay}\nContent:\n${fullContent}\n---\n`;
-                citationHints.push(`[${index + 1}] ${docName}`);
+                const scoreDisplay = doc.score !== undefined ? `(Rel. Score: ${doc.score.toFixed(4)})` : '';
+                textualContextString += `\n[D${index + 1}] Source: ${docName} ${scoreDisplay}\nContent:\n${doc.content}\n---\n`;
+                textCitationHints.push(`[D${index + 1}] ${docName}`);
             });
-            contextString += "\n--- End of Context ---\n\n";
-            console.log(`   Constructed context string. ${citationHints.length} valid docs used.`);
-        } else {
-            console.log(`   RAG Disabled or no relevant documents provided by client.`);
+            textualContextString += "\n--- End of Context Documents ---\n";
+            console.log(`   Constructed text context string. ${textCitationHints.length} valid text docs used.`);
+        } else if (useRAG) {
+            console.log(`   RAG Text: No relevant text documents provided or RAG disabled for text.`);
         }
+
+        // 2. Process knowledge_graphs (Neo4j results)
+        if (useRAG && knowledge_graphs) {
+            console.log(`   RAG KG: Processing knowledge graph data.`);
+            const { kgFormattedString: formattedKgStr, kgCitationHints: retrievedKgCitations } = formatKnowledgeGraphForLLM(knowledge_graphs);
+            kgContextString = formattedKgStr;
+            kgCitationHints = retrievedKgCitations; // These are just document names from KG
+            if (kgContextString) {
+                console.log(`   Constructed KG context string. KG sources: ${kgCitationHints.join(', ')}`);
+            }
+        } else if (useRAG) {
+            console.log(`   RAG KG: No knowledge graph data provided or RAG disabled for KG.`);
+        }
+        
+        // Combine all context
+        let combinedContext = "";
+        if (textualContextString) combinedContext += textualContextString;
+        if (kgContextString) combinedContext += kgContextString; // Append KG info
 
         const historyForGeminiAPI = history.map(msg => ({
              role: msg.role,
@@ -28787,9 +29539,18 @@ router.post('/message', tempAuth, async (req, res) => {
         })).filter(msg => msg && msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
 
         let finalUserQueryText = "";
-        if (contextString) { 
-            const citationInstruction = `When referencing information ONLY from the context documents provided above, please cite the source using the format [Number] Document Name (e.g., ${citationHints.slice(0, Math.min(3, citationHints.length)).join(', ')}).`;
-            finalUserQueryText = `CONTEXT:\n${contextString}\nINSTRUCTIONS: ${citationInstruction}\n\nUSER QUESTION: ${message.trim()}`;
+        if (combinedContext) {
+            // Update citation instruction to include both types of sources
+            let allCitationExamples = [];
+            if (textCitationHints.length > 0) allCitationExamples.push(...textCitationHints.slice(0, 2));
+            if (kgCitationHints.length > 0) {
+                // For KG, citations might be just document names if not more specific node IDs are used in formatting
+                kgCitationHints.slice(0,1).forEach(name => allCitationExamples.push(`[KG - ${name}]`));
+            }
+            const citationExampleString = allCitationExamples.length > 0 ? `(e.g., ${allCitationExamples.join(', ')})` : "(e.g., [D1] Source Document, [KG - Another Document Name])";
+            
+            const citationInstruction = `When referencing information ONLY from the context documents or knowledge graphs provided above, please cite the source using the format [D-Number] Document Name for text documents, or [KG - Document Name] for knowledge graph information ${citationExampleString}.`;
+            finalUserQueryText = `CONTEXT:\n${combinedContext}\nINSTRUCTIONS: ${citationInstruction}\n\nUSER QUESTION: ${message.trim()}`;
         } else {
             finalUserQueryText = message.trim();
         }
@@ -28800,6 +29561,8 @@ router.post('/message', tempAuth, async (req, res) => {
         ];
 
         console.log(`   Calling Gemini API. History length for Gemini: ${finalHistoryForGemini.length}. System Prompt: ${!!systemPrompt}`);
+        // console.log("   Final User Query Text (first 300 chars):", finalUserQueryText.substring(0, 300) + "...");
+
 
         const geminiResponseText = await generateContentWithHistory(finalHistoryForGemini, systemPrompt);
 
@@ -28813,7 +29576,8 @@ router.post('/message', tempAuth, async (req, res) => {
         res.status(200).json({ reply: modelResponseMessage });
 
     } catch (error) {
-        console.error(`!!! Error processing chat message for session ${sessionId}:`, error);
+        // ... (your existing error handling for this route) ...
+        console.error(`!!! Error processing chat message for session ${sessionId}:`, error.message || error);
         let statusCode = error.status || error.response?.status || 500;
         let clientMessage = error.message || error.response?.data?.message || "Failed to get response from AI service.";
         
@@ -28824,6 +29588,98 @@ router.post('/message', tempAuth, async (req, res) => {
     }
 });
 
+// --- @route   POST /api/chat/message ---
+// router.post('/message', tempAuth, async (req, res) => {
+//     // `relevantDocs` from client is an array of {documentName, content, score}
+//     // `knowledge_graphs` would now also be part of the RAG step, but the Gemini prompt
+//     // primarily uses `relevantDocs` for text context.
+//     // The client might use `knowledge_graphs` for UI display.
+//     const { message, history, sessionId, systemPrompt, isRagEnabled, relevantDocs /*, knowledge_graphs - client doesn't send KGs back here, it got them from /rag */ } = req.body;
+//     const userId = req.user._id.toString();
+
+//     // ... (rest of your existing /api/chat/message logic)
+//     // The logic for constructing `contextString` from `relevantDocs` remains the same.
+//     // The `knowledge_graphs` retrieved in the `/api/chat/rag` step are for the client to potentially use/display;
+//     // they are not directly re-fed into the Gemini prompt in this `/message` endpoint unless you design it that way.
+
+//     if (!message || typeof message !== 'string' || message.trim() === '') return res.status(400).json({ message: 'Message text required.' });
+//     if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ message: 'Session ID required.' });
+//     if (!Array.isArray(history)) return res.status(400).json({ message: 'Invalid history format.'});
+//     const useRAG = !!isRagEnabled; 
+
+//     console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRAG}. Query: "${message.substring(0,50)}..."`);
+
+//     let contextString = "";
+//     let citationHints = []; 
+
+//     try {
+//         if (useRAG && Array.isArray(relevantDocs) && relevantDocs.length > 0) {
+//             console.log(`   RAG Enabled: Processing ${relevantDocs.length} relevant documents provided by client for context.`);
+//             contextString = "Answer the user's question based primarily on the following context documents.\nIf the context documents do not contain the necessary information to answer the question fully, clearly state what information is missing from the context *before* potentially providing an answer based on your general knowledge.\n\n--- Context Documents ---\n";
+            
+//             relevantDocs.forEach((doc, index) => {
+//                 if (!doc || typeof doc.documentName !== 'string' || typeof doc.content !== 'string') {
+//                     console.warn("   Skipping invalid/incomplete document in relevantDocs (missing 'documentName' or 'content'):", doc);
+//                     return; 
+//                 }
+//                 const docName = doc.documentName;
+//                 const scoreDisplay = doc.score !== undefined ? `(Rel. Score: ${doc.score.toFixed(4)})` : ''; 
+//                 const fullContent = doc.content; 
+
+//                 contextString += `\n[${index + 1}] Source: ${docName} ${scoreDisplay}\nContent:\n${fullContent}\n---\n`;
+//                 citationHints.push(`[${index + 1}] ${docName}`);
+//             });
+//             contextString += "\n--- End of Context ---\n\n";
+//             console.log(`   Constructed context string. ${citationHints.length} valid docs used.`);
+//         } else {
+//             console.log(`   RAG Disabled or no relevant documents provided by client for context.`);
+//         }
+
+//         // ... (rest of your existing /api/chat/message logic for calling Gemini and sending response) ...
+//         const historyForGeminiAPI = history.map(msg => ({
+//              role: msg.role,
+//              parts: msg.parts.map(part => ({ text: part.text || '' }))
+//         })).filter(msg => msg && msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
+
+//         let finalUserQueryText = "";
+//         if (contextString) { 
+//             const citationInstruction = `When referencing information ONLY from the context documents provided above, please cite the source using the format [Number] Document Name (e.g., ${citationHints.slice(0, Math.min(3, citationHints.length)).join(', ')}).`;
+//             finalUserQueryText = `CONTEXT:\n${contextString}\nINSTRUCTIONS: ${citationInstruction}\n\nUSER QUESTION: ${message.trim()}`;
+//         } else {
+//             finalUserQueryText = message.trim();
+//         }
+
+//         const finalHistoryForGemini = [
+//             ...historyForGeminiAPI,
+//             { role: "user", parts: [{ text: finalUserQueryText }] }
+//         ];
+
+//         console.log(`   Calling Gemini API. History length for Gemini: ${finalHistoryForGemini.length}. System Prompt: ${!!systemPrompt}`);
+
+//         const geminiResponseText = await generateContentWithHistory(finalHistoryForGemini, systemPrompt);
+
+//         const modelResponseMessage = {
+//             role: 'model',
+//             parts: [{ text: geminiResponseText }],
+//             timestamp: new Date()
+//         };
+
+//         console.log(`<<< POST /api/chat/message successful for session ${sessionId}.`);
+//         res.status(200).json({ reply: modelResponseMessage });
+
+//     } catch (error) {
+//         console.error(`!!! Error processing chat message for session ${sessionId}:`, error.message || error);
+//         let statusCode = error.status || error.response?.status || 500;
+//         let clientMessage = error.message || error.response?.data?.message || "Failed to get response from AI service.";
+        
+//         if (statusCode === 500 && !error.response?.data?.message) { 
+//             clientMessage = "An internal server error occurred while processing the AI response.";
+//         }
+//         res.status(statusCode).json({ message: clientMessage });
+//     }
+// });
+
+// ... (rest of your chat.js: /history, /sessions, /session/:sessionId) ...
 // --- @route POST /api/chat/history --- (Keep your existing implementation)
 router.post('/history', tempAuth, async (req, res) => {
     const { sessionId, messages } = req.body;
@@ -28942,6 +29798,7 @@ router.get('/session/:sessionId', tempAuth, async (req, res) => {
     }
 });
 
+
 module.exports = router;
 ```
 
@@ -28952,42 +29809,85 @@ module.exports = router;
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
+const axios = require('axios'); // For calling Python service
 const { tempAuth } = require('../middleware/authMiddleware');
+const User = require('../models/User'); // Import User model
 
 const router = express.Router();
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const BACKUP_DIR = path.join(__dirname, '..', 'backup_assets');
 
-// --- Helper functions ---
+// --- Helper functions (sanitizeUsernameForDir, parseServerFilename, ensureDirExists are existing) ---
 const sanitizeUsernameForDir = (username) => {
     if (!username) return '';
     return username.replace(/[^a-zA-Z0-9_-]/g, '_');
 };
+
 const parseServerFilename = (filename) => {
-    const match = filename.match(/^(\d+)-(.*?)(\.\w+)$/);
+    // Matches "timestamp-originalName.ext"
+    // Allows originalName to contain dots now.
+    const match = filename.match(/^(\d+)-(.+?)(\.\w+)$/);
     if (match && match.length === 4) {
         return { timestamp: match[1], originalName: `${match[2]}${match[3]}`, extension: match[3] };
     }
-     // Handle cases where the original name might not have an extension or parsing fails
+    // Fallback for names that might not perfectly fit the new pattern, or originalName without extension before timestamp
     const ext = path.extname(filename);
-    const base = filename.substring(0, filename.length - ext.length);
-    const tsMatch = base.match(/^(\d+)-(.*)$/);
+    const baseWithoutExt = filename.substring(0, filename.length - ext.length);
+    const tsMatch = baseWithoutExt.match(/^(\d+)-(.*)$/);
     if (tsMatch) {
         return { timestamp: tsMatch[1], originalName: `${tsMatch[2]}${ext}`, extension: ext };
     }
-    // Fallback if no timestamp prefix found (less ideal)
+    // Final fallback if no timestamp prefix is reliably parsed
     return { timestamp: null, originalName: filename, extension: path.extname(filename) };
 };
+
 const ensureDirExists = async (dirPath) => {
     try { await fs.mkdir(dirPath, { recursive: true }); }
     catch (error) { if (error.code !== 'EEXIST') { console.error(`Error creating dir ${dirPath}:`, error); throw error; } }
 };
-// --- End Helper Functions ---
+
+// --- New Helper Function to call Python Service for Deletions ---
+async function callPythonDeletionEndpoint(method, endpointPath, userId, originalName, logContext) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Fallback if not set
+    if (!pythonServiceUrl) {
+        console.error(`Python Service Deletion Error for ${logContext}: PYTHON_RAG_SERVICE_URL not set.`);
+        return { success: false, message: "Python service URL not configured." };
+    }
+
+    const deleteUrl = `${pythonServiceUrl.replace(/\/$/, '')}${endpointPath}`;
+
+    try {
+        console.log(`Calling Python Service (${method.toUpperCase()}) for deletion: ${deleteUrl} (Doc: ${originalName}, User: ${userId})`);
+        let response;
+        if (method.toUpperCase() === 'DELETE') {
+            // For DELETE, data is often in query params or path, but axios allows a 'data' field for body
+            response = await axios.delete(deleteUrl, {
+                data: { // For Python endpoints that expect a body (like a new Qdrant delete one)
+                    user_id: userId,
+                    document_name: originalName
+                },
+                timeout: 30000 // 30s timeout
+            });
+        } else {
+            throw new Error(`Unsupported method for Python deletion: ${method}`);
+        }
+
+        if (response.status === 200 || response.status === 204) { // 204 No Content is also success
+            return { success: true, message: response.data?.message || `Successfully deleted from ${endpointPath}` };
+        } else {
+            return { success: false, message: response.data?.message || `Python service returned ${response.status} for ${endpointPath}` };
+        }
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || `Unknown error deleting from ${endpointPath}`;
+        console.error(`Error calling Python Service for deletion (${deleteUrl}) for ${originalName} (User: ${userId}): ${errorMsg}`, error.response ? { status: error.response.status, data: error.response.data } : error);
+        return { success: false, message: `Python service call failed for ${endpointPath}: ${errorMsg}` };
+    }
+}
 
 
 // --- @route   GET /api/files ---
-// Use tempAuth middleware
+// (Keep your existing GET /api/files route as is)
 router.get('/', tempAuth, async (req, res) => {
     // req.user is guaranteed to exist here because of tempAuth middleware
     const sanitizedUsername = sanitizeUsernameForDir(req.user.username);
@@ -29001,14 +29901,12 @@ router.get('/', tempAuth, async (req, res) => {
     const userFiles = [];
 
     try {
-        // Check if user directory exists
         try { await fs.access(userAssetsDir); }
         catch (e) {
-             if (e.code === 'ENOENT') { return res.status(200).json([]); } // No dir, no files
-             throw e; // Other error
+             if (e.code === 'ENOENT') { return res.status(200).json([]); }
+             throw e;
         }
 
-        // Scan subdirectories
         for (const type of fileTypes) {
             const typeDir = path.join(userAssetsDir, type);
             try {
@@ -29029,24 +29927,22 @@ router.get('/', tempAuth, async (req, res) => {
                 }
             } catch (err) { if (err.code !== 'ENOENT') { console.warn(`GET /api/files: Read failed for ${typeDir}:`, err.message); } }
         }
-
         userFiles.sort((a, b) => a.originalName.localeCompare(b.originalName));
         res.status(200).json(userFiles);
-
     } catch (error) {
         console.error(`!!! Error in GET /api/files for user ${sanitizedUsername}:`, error);
         res.status(500).json({ message: 'Failed to retrieve file list.' });
     }
 });
 
+
 // --- @route   PATCH /api/files/:serverFilename ---
-// Use tempAuth middleware
+// (Keep your existing PATCH /api/files/:serverFilename route as is)
 router.patch('/:serverFilename', tempAuth, async (req, res) => {
     const { serverFilename } = req.params;
     const { newOriginalName } = req.body;
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by tempAuth
+    const sanitizedUsername = sanitizeUsernameForDir(req.user.username);
 
-    // Validations
     if (!sanitizedUsername) return res.status(400).json({ message: 'Invalid user identifier.' });
     if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
     if (!newOriginalName || typeof newOriginalName !== 'string' || newOriginalName.trim() === '') return res.status(400).json({ message: 'New file name is required.' });
@@ -29056,7 +29952,6 @@ router.patch('/:serverFilename', tempAuth, async (req, res) => {
         const parsedOld = parseServerFilename(serverFilename);
         if (!parsedOld.timestamp) return res.status(400).json({ message: 'Invalid server filename format (missing timestamp prefix).' });
 
-        // Find current file path
         let currentPath = null; let fileType = '';
         const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
         for (const type of fileTypesToSearch) {
@@ -29066,22 +29961,18 @@ router.patch('/:serverFilename', tempAuth, async (req, res) => {
         }
         if (!currentPath) return res.status(404).json({ message: 'File not found or access denied.' });
 
-        // Construct new path
-        const newExt = path.extname(newOriginalName) || parsedOld.extension; // Preserve original ext if new one is missing
-        const newBaseName = path.basename(newOriginalName, path.extname(newOriginalName)); // Get base name without extension
-        const sanitizedNewBase = newBaseName.replace(/[^a-zA-Z0-9._-]/g, '_'); // Sanitize only the base name
-        const finalNewOriginalName = `${sanitizedNewBase}${newExt}`; // Reconstruct original name
-        const newServerFilename = `${parsedOld.timestamp}-${finalNewOriginalName}`; // Keep timestamp, use sanitized original name
+        const newExt = path.extname(newOriginalName) || parsedOld.extension;
+        const newBaseName = path.basename(newOriginalName, path.extname(newOriginalName));
+        const sanitizedNewBase = newBaseName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const finalNewOriginalName = `${sanitizedNewBase}${newExt}`;
+        const newServerFilename = `${parsedOld.timestamp}-${finalNewOriginalName}`;
         const newPath = path.join(ASSETS_DIR, sanitizedUsername, fileType, newServerFilename);
 
-        // Perform rename
         await fs.rename(currentPath, newPath);
-
         res.status(200).json({
             message: 'File renamed successfully!', oldFilename: serverFilename,
             newFilename: newServerFilename, newOriginalName: finalNewOriginalName,
         });
-
     } catch (error) {
         console.error(`!!! Error in PATCH /api/files/${serverFilename} for user ${sanitizedUsername}:`, error);
         res.status(500).json({ message: 'Failed to rename the file.' });
@@ -29090,44 +29981,173 @@ router.patch('/:serverFilename', tempAuth, async (req, res) => {
 
 
 // --- @route   DELETE /api/files/:serverFilename ---
-// Use tempAuth middleware
+// --- @desc    Deletes file metadata from MongoDB, associated data from Qdrant & Neo4j (via Python),
+// ---           and moves physical file to backup. ---
+// --- @access  Private (requires auth) ---
 router.delete('/:serverFilename', tempAuth, async (req, res) => {
     const { serverFilename } = req.params;
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username); // req.user set by tempAuth
+    const userId = req.user._id.toString(); // Get userId from authenticated user
+    const usernameForLog = req.user.username;
 
-    // Validations
-    if (!sanitizedUsername) return res.status(400).json({ message: 'Invalid user identifier.' });
-    if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
+    if (!serverFilename) {
+        return res.status(400).json({ message: 'Server filename parameter is required.' });
+    }
+
+    const parsedFileDetails = parseServerFilename(serverFilename);
+    const originalName = parsedFileDetails.originalName;
+    if (!originalName) {
+        console.error(`DELETE /api/files: Could not parse originalName from serverFilename: ${serverFilename}`);
+        return res.status(400).json({ message: 'Invalid server filename format for deletion.' });
+    }
+    const logContext = `File: '${originalName}' (server: ${serverFilename}), User: ${usernameForLog} (${userId})`;
+    console.log(`Attempting to delete all data for ${logContext}`);
+
+    const results = {
+        mongodb: { success: false, message: "Not attempted" },
+        qdrant: { success: false, message: "Not attempted" },
+        neo4j: { success: false, message: "Not attempted" },
+        filesystem: { success: false, message: "Not attempted" },
+    };
+    let overallSuccess = true; // Assume success, set to false if any critical step fails
+    let httpStatus = 200;
+    let fileFoundInMongo = false;
+    let physicalFileFound = false;
 
     try {
-        // Find current path
-        let currentPath = null; let fileType = '';
-        const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
-        for (const type of fileTypesToSearch) {
-            const potentialPath = path.join(ASSETS_DIR, sanitizedUsername, type, serverFilename);
-            try { await fs.access(potentialPath); currentPath = potentialPath; fileType = type; break; }
-            catch (e) { if (e.code !== 'ENOENT') throw e; }
+        // 1. Delete from MongoDB
+        try {
+            const user = await User.findById(userId);
+            if (!user) {
+                results.mongodb.message = "User not found.";
+                // If user not found, we can't confirm if the file was theirs.
+                // Treat as if the file wasn't found for this user.
+            } else {
+                const docIndex = user.uploadedDocuments.findIndex(doc => doc.filename === originalName);
+                if (docIndex > -1) {
+                    fileFoundInMongo = true;
+                    user.uploadedDocuments.splice(docIndex, 1);
+                    await user.save();
+                    results.mongodb.success = true;
+                    results.mongodb.message = "Successfully removed from user's document list.";
+                    console.log(`MongoDB: Document entry '${originalName}' removed for user ${userId}.`);
+                } else {
+                    results.mongodb.message = "Document not found in user's list.";
+                    console.log(`MongoDB: Document entry '${originalName}' not found for user ${userId}.`);
+                }
+            }
+        } catch (mongoError) {
+            console.error(`MongoDB Deletion Error for ${logContext}:`, mongoError);
+            results.mongodb.message = `MongoDB deletion failed: ${mongoError.message}`;
+            overallSuccess = false; // DB error is critical
         }
-        if (!currentPath) return res.status(404).json({ message: 'File not found or access denied.' });
 
-        // Determine backup path
-        const backupUserDir = path.join(BACKUP_DIR, sanitizedUsername, fileType);
-        await ensureDirExists(backupUserDir);
-        const backupPath = path.join(backupUserDir, serverFilename);
+        // 2. Delete from Qdrant (via Python service)
+        // This endpoint will need to be created in Python: e.g., /delete_qdrant_document_data
+        // It should expect { user_id: userId, document_name: originalName } in the body
+        const qdrantDeleteResult = await callPythonDeletionEndpoint(
+            'DELETE',
+            `/delete_qdrant_document_data`,
+            userId,
+            originalName,
+            logContext
+        );
+        results.qdrant = qdrantDeleteResult;
+        if (!qdrantDeleteResult.success) {
+            console.warn(`Qdrant deletion failed or reported no data for ${logContext}. Message: ${qdrantDeleteResult.message}`);
+            // overallSuccess = false; // Non-critical for now, but log
+        }
 
-        // Perform move
-        await fs.rename(currentPath, backupPath);
+        // 3. Delete from Neo4j (via Python service)
+        // This uses the existing Python endpoint: /kg/<user_id>/<document_name>
+        const neo4jEndpointPath = `/kg/${userId}/${encodeURIComponent(originalName)}`;
+        const neo4jDeleteResult = await callPythonDeletionEndpoint(
+            'DELETE',
+            neo4jEndpointPath, // userId and originalName are in the path
+            userId, // still pass for logging consistency in helper
+            originalName, // still pass for logging consistency in helper
+            logContext
+        );
+        results.neo4j = neo4jDeleteResult;
+        if (!neo4jDeleteResult.success) {
+            console.warn(`Neo4j deletion failed or reported no data for ${logContext}. Message: ${neo4jDeleteResult.message}`);
+            // overallSuccess = false; // Non-critical for now, but log
+        }
 
-        res.status(200).json({ message: 'File deleted successfully (moved to backup).', filename: serverFilename });
+        // 4. Move physical file to backup (filesystem operation)
+        let currentPath = null;
+        let fileType = '';
+        const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
+        const sanitizedUsernameForPath = sanitizeUsernameForDir(usernameForLog);
+
+        for (const type of fileTypesToSearch) {
+            const potentialPath = path.join(ASSETS_DIR, sanitizedUsernameForPath, type, serverFilename);
+            try {
+                await fs.access(potentialPath); // Check if file exists
+                currentPath = potentialPath;
+                fileType = type;
+                physicalFileFound = true;
+                break;
+            } catch (e) {
+                if (e.code !== 'ENOENT') {
+                    console.warn(`Filesystem: Error accessing ${potentialPath} during delete scan: ${e.message}`);
+                }
+            }
+        }
+
+        if (currentPath) { // If physical file was found
+            const backupUserDir = path.join(BACKUP_DIR, sanitizedUsernameForPath, fileType);
+            await ensureDirExists(backupUserDir);
+            const backupPath = path.join(backupUserDir, serverFilename);
+            try {
+                await fs.rename(currentPath, backupPath);
+                results.filesystem = { success: true, message: "File moved to backup successfully." };
+                console.log(`Filesystem: Moved '${currentPath}' to '${backupPath}'.`);
+            } catch (fsError) {
+                console.error(`Filesystem: Error moving file ${currentPath} to backup for ${logContext}:`, fsError);
+                results.filesystem.message = `Filesystem move to backup failed: ${fsError.message}`;
+                // overallSuccess = false; // Decide if this is critical enough to mark overall failure
+            }
+        } else {
+            results.filesystem.message = "Physical file not found in assets, or already moved.";
+            console.log(`Filesystem: Physical file '${serverFilename}' not found for user ${usernameForLog}.`);
+        }
+
+        // Determine final status and message
+        const successfulDeletes = [results.mongodb.success, results.qdrant.success, results.neo4j.success, results.filesystem.success].filter(Boolean).length;
+
+        if (!fileFoundInMongo && !physicalFileFound) {
+            httpStatus = 404;
+            finalMessage = `File '${originalName}' not found for user.`;
+        } else if (results.mongodb.success) { // Primary record deleted
+            if (successfulDeletes === 4) {
+                finalMessage = `Successfully deleted all data associated with '${originalName}'.`;
+                httpStatus = 200;
+            } else {
+                finalMessage = `File '${originalName}' removed from your list. Some backend data cleanup attempts had issues. Check server logs for details.`;
+                httpStatus = 207; // Multi-Status
+            }
+        } else { // MongoDB deletion failed, but file might have existed
+            finalMessage = `Failed to remove '${originalName}' from your list. Some backend data cleanup may have also failed. Check server logs.`;
+            httpStatus = 500;
+        }
+
+        console.log(`Deletion outcome for ${logContext}: HTTP Status=${httpStatus}, Overall Success Flag (was pre-status logic)=${overallSuccess}`);
+        return res.status(httpStatus).json({
+            message: finalMessage,
+            details: results
+        });
 
     } catch (error) {
-        console.error(`!!! Error in DELETE /api/files/${serverFilename} for user ${sanitizedUsername}:`, error);
-        res.status(500).json({ message: 'Failed to delete the file.' });
+        console.error(`!!! UNEXPECTED Error in DELETE /api/files/${serverFilename} for user ${usernameForLog}:`, error);
+        return res.status(500).json({
+            message: 'An unexpected server error occurred during file deletion.',
+            details: results // Send partial results if any
+        });
     }
 });
 
-module.exports = router;
 
+module.exports = router;
 ```
 
 `server/routes/network.js`
@@ -30402,7 +31422,7 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
     
 
         // --- Determine and Call the KG Ingestion API ---
-    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002'; // Use default if not set
+    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Use default if not set
     const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`; // Ensure no double slash and append /kg
 
     if (!kgIngestionApiUrl.startsWith('http')) { // Basic check if a valid URL was formed

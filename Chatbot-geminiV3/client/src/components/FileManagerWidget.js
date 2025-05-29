@@ -28,35 +28,32 @@ const FileManagerWidget = ({ refreshTrigger }) => {
   const [error, setError] = useState('');
   const [renamingFile, setRenamingFile] = useState(null);
   const [newName, setNewName] = useState('');
+  const [statusMessage, setStatusMessage] = useState(''); // <<< ADDED: For success/general status
 
   const fetchUserFiles = useCallback(async () => {
-    // Ensure userId exists before fetching
     const currentUserId = localStorage.getItem('userId');
     if (!currentUserId) {
         console.log("FileManager: Skipping fetch, no userId.");
-        setUserFiles([]); // Clear files if no user
+        setUserFiles([]);
         return;
     }
-
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // Clear status message on fetch
     try {
-      // Interceptor adds user ID
       const response = await getUserFiles();
       setUserFiles(response.data || []);
     } catch (err) {
       console.error("Error fetching user files:", err);
       setError(err.response?.data?.message || 'Failed to load files.');
       setUserFiles([]);
-      // Handle potential logout if 401
       if (err.response?.status === 401) {
           console.warn("FileManager: Received 401, potential logout needed.");
-          // Consider calling a logout function passed via props or context
       }
     } finally {
       setIsLoading(false);
     }
-  }, []); // Removed userId dependency, check inside
+  }, []);
 
   useEffect(() => {
     fetchUserFiles();
@@ -66,12 +63,14 @@ const FileManagerWidget = ({ refreshTrigger }) => {
     setRenamingFile(file.serverFilename);
     setNewName(file.originalName);
     setError('');
+    setStatusMessage(''); // Clear status message
   };
 
   const handleRenameCancel = () => {
     setRenamingFile(null);
     setNewName('');
     setError('');
+    setStatusMessage(''); // Clear status message
   };
 
   const handleRenameSave = async () => {
@@ -83,15 +82,16 @@ const FileManagerWidget = ({ refreshTrigger }) => {
         setError('New name cannot contain slashes.');
         return;
     }
-
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // Clear status message
     try {
-      // Interceptor adds user ID
       await renameUserFile(renamingFile, newName.trim());
       setRenamingFile(null);
       setNewName('');
-      fetchUserFiles();
+      fetchUserFiles(); // Refreshes and clears messages
+      setStatusMessage('File renamed successfully!'); // <<< ADDED: Set success message
+      setTimeout(() => setStatusMessage(''), 5000); // Clear after 5 seconds
     } catch (err) {
       console.error("Error renaming file:", err);
       setError(err.response?.data?.message || 'Failed to rename file.');
@@ -112,24 +112,48 @@ const FileManagerWidget = ({ refreshTrigger }) => {
   };
 
   const handleDeleteFile = async (serverFilename, originalName) => {
-    if (!window.confirm(`Are you sure you want to delete "${originalName}"? This cannot be undone.`)) {
+    // <<< MODIFIED: Updated confirmation message
+    if (!window.confirm(`Are you sure you want to delete "${originalName}"? This will remove the file and all associated data (analysis, graph, vector embeddings). This cannot be undone.`)) {
       return;
     }
 
     setIsLoading(true);
     setError('');
+    setStatusMessage(''); // <<< ADDED: Clear previous messages
+
     try {
-      // Interceptor adds user ID
-      await deleteUserFile(serverFilename);
-      fetchUserFiles();
+      // <<< MODIFIED: deleteUserFile should return the full Axios response
+      const response = await deleteUserFile(serverFilename);
+
+      // <<< MODIFIED: Handle more informative backend responses
+      if (response.status === 200 || response.status === 207) {
+        setStatusMessage(response.data.message || `Deletion process for '${originalName}' completed.`);
+        console.log("Deletion API Response:", response.data);
+        fetchUserFiles(); // Refresh the file list
+      } else {
+        // This case might not be hit if axios throws for non-2xx, but good for robustness
+        setError(response.data.message || 'File deletion failed with an unexpected status.');
+      }
     } catch (err) {
-      console.error("Error deleting file:", err);
-      setError(err.response?.data?.message || 'Failed to delete file.');
+      console.error("Error deleting file:", err.response || err);
+      // <<< MODIFIED: Extract error message from backend response
+      const apiErrorMessage = err.response?.data?.message || 'Failed to delete file. Please try again.';
+      setError(apiErrorMessage);
+
+      if (err.response?.data?.details) { // Log backend details if available
+          console.log("Deletion attempt details from backend:", err.response.data.details);
+      }
+
        if (err.response?.status === 401) {
           console.warn("FileManager: Received 401 during delete.");
+          // Consider triggering logout or displaying specific auth error
       }
     } finally {
        setIsLoading(false);
+       // <<< MODIFIED: Clear status message after a delay only if it was a success/status message
+       if (statusMessage && !error) {
+           setTimeout(() => setStatusMessage(''), 7000);
+       }
     }
   };
 
@@ -147,12 +171,16 @@ const FileManagerWidget = ({ refreshTrigger }) => {
         </button>
       </div>
 
+      {/* <<< MODIFIED: Display status or error messages */}
+      {statusMessage && !error && <div className="fm-status-message">{statusMessage}</div>}
       {error && <div className="fm-error">{error}</div>}
 
+
       <div className="fm-file-list-container">
+        {/* <<< MODIFIED: Added !statusMessage to the condition for "No files uploaded yet" */}
         {isLoading && userFiles.length === 0 ? (
           <p className="fm-loading">Loading files...</p>
-        ) : userFiles.length === 0 && !isLoading ? (
+        ) : userFiles.length === 0 && !isLoading && !error && !statusMessage ? (
           <p className="fm-empty">No files uploaded yet.</p>
         ) : (
           <ul className="fm-file-list">
@@ -220,9 +248,30 @@ const FileManagerWidgetCSS = `
 .fm-refresh-btn { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; line-height: 1; transition: color 0.2s, border-color 0.2s, background-color 0.2s; }
 .fm-refresh-btn:hover:not(:disabled) { color: var(--text-primary); border-color: #555; background-color: #3a3a40; }
 .fm-refresh-btn:disabled { cursor: not-allowed; opacity: 0.5; }
-.fm-error, .fm-loading, .fm-empty { font-size: 0.85rem; padding: 10px 15px; border-radius: 4px; text-align: center; margin: 5px 20px 5px 0; flex-shrink: 0; }
-.fm-error { color: var(--error-color); border: 1px solid var(--error-color); background-color: var(--error-bg); }
+
+/* <<< MODIFIED: Consolidated message styling and added .fm-status-message */
+.fm-error, .fm-loading, .fm-empty, .fm-status-message { 
+  font-size: 0.85rem; 
+  padding: 10px 15px; 
+  border-radius: 4px; 
+  text-align: center; 
+  margin: 5px 20px 5px 0; 
+  flex-shrink: 0; 
+}
+.fm-error { 
+  color: var(--error-color, #f44336); /* Fallback to a default red */
+  border: 1px solid var(--error-color, #f44336); 
+  background-color: var(--error-bg, rgba(244, 67, 54, 0.1)); 
+}
+.fm-status-message { /* Styling for general status/success messages */
+  color: var(--success-color, #4CAF50); /* Fallback to a default green */
+  background-color: var(--success-bg, rgba(76, 175, 80, 0.1));
+  border: 1px solid var(--success-color-border, #c8e6c9);
+  font-style: normal; /* Not italic like loading/empty */
+}
 .fm-loading, .fm-empty { color: var(--text-secondary); font-style: italic; }
+/* End of modified message styling */
+
 .fm-loading-bottom { margin-top: auto; padding: 5px; }
 .fm-file-list-container { flex-grow: 1; overflow-y: auto; padding-right: 10px; margin-right: 10px; position: relative; }
 .fm-file-list-container::-webkit-scrollbar { width: 8px; }
