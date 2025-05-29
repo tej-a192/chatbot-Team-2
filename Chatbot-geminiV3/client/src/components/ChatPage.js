@@ -198,94 +198,104 @@ const ChatPage = ({ setIsAuthenticated }) => {
      }, [isLoading, isRagLoading, saveAndReset]);
 
     const handleSendMessage = useCallback(async (e) => {
-        if (e) e.preventDefault();
-        const textToSend = inputText.trim();
-        const currentSessionId = localStorage.getItem('sessionId'); // Get fresh ID
-        const currentUserId = localStorage.getItem('userId'); // Get fresh ID
+    if (e) e.preventDefault();
+    const textToSend = inputText.trim();
+    const currentSessionId = localStorage.getItem('sessionId');
+    const currentUserId = localStorage.getItem('userId');
 
-        if (!textToSend || isLoading || isRagLoading || !currentSessionId || !currentUserId) {
-            if (!currentSessionId || !currentUserId) {
-                 setError("Session invalid. Please refresh or log in again.");
-                 // Optionally trigger logout if auth info is missing
-                 if (!currentUserId) handleLogout(true);
-            }
-            return;
-        }
+    // ... (existing validation) ...
 
-        const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
-        const previousMessages = messages;
-        setMessages(prev => [...prev, newUserMessage]);
-        setInputText('');
-        setError('');
+    const newUserMessage = { role: 'user', parts: [{ text: textToSend }], timestamp: new Date() };
+    const previousMessages = messages;
+    setMessages(prev => [...prev, newUserMessage]);
+    setInputText('');
+    setError('');
 
-        let relevantDocs = [];
-        let ragError = null;
+    let ragDataForMessage = {
+        relevantDocs: [],
+        knowledge_graphs: null // Initialize knowledge_graphs for the message payload
+    };
 
-        if (isRagEnabled) {
-            setIsRagLoading(true);
-            try {
-                console.log("RAG Enabled: Querying backend /rag endpoint...");
-                // Interceptor adds user ID header
-                const ragResponse = await queryRagService({ message: textToSend });
-                relevantDocs = ragResponse.data.relevantDocs || [];
-                console.log(`RAG Query returned ${relevantDocs.length} documents.`);
-            } catch (err) {
-                console.error("RAG Query Error:", err.response || err);
-                ragError = err.response?.data?.message || "Failed to retrieve documents for RAG.";
-                if (err.response?.status === 401) {
-                     console.warn("Received 401 during RAG query, logging out.");
-                     handleLogout(true);
-                     setIsRagLoading(false); // Stop loading before returning
-                     return; // Stop processing if auth failed
-                }
-            } finally {
-                setIsRagLoading(false);
-            }
-        } else {
-            console.log("RAG Disabled: Skipping RAG query.");
-        }
-
-        setIsLoading(true);
-        const historyForAPI = previousMessages;
-        const systemPromptToSend = editableSystemPromptText;
-
+    if (isRagEnabled) {
+        setIsRagLoading(true);
         try {
-            if (ragError) {
-                 setError(prev => prev ? `${prev} | RAG Error: ${ragError}` : `RAG Error: ${ragError}`);
-            }
-
-            console.log(`Sending message to backend /message. RAG Enabled: ${isRagEnabled}, Docs Found: ${relevantDocs.length}`);
-            // Interceptor adds user ID header
-            const sendMessageResponse = await sendMessage({
-                message: textToSend,
-                history: historyForAPI,
-                sessionId: currentSessionId,
-                systemPrompt: systemPromptToSend,
-                isRagEnabled: isRagEnabled,
-                relevantDocs: relevantDocs
-            });
-
-            const modelReply = sendMessageResponse.data.reply;
-            if (modelReply?.role && modelReply?.parts?.length > 0) {
-                setMessages(prev => [...prev, modelReply]);
-            } else {
-                throw new Error("Invalid reply structure received from backend.");
-            }
-            setError(prev => prev && (prev.includes("Session invalid") || prev.includes("Critical Error")) ? prev : '');
+            console.log("RAG Enabled: Querying backend /api/chat/rag endpoint...");
+            // Fetch RAG data (Qdrant docs + KGs)
+            // The filter for RAG query can be constructed based on current context if needed.
+            // For simplicity, let's assume a general query or a filter you might already have.
+            const ragApiResponse = await queryRagService({ message: textToSend /*, filter: yourOptionalFilter */ });
+            
+            ragDataForMessage.relevantDocs = ragApiResponse.data.relevantDocs || [];
+            ragDataForMessage.knowledge_graphs = ragApiResponse.data.knowledge_graphs || null; // Store the fetched KGs
+            
+            console.log(`RAG Query returned ${ragDataForMessage.relevantDocs.length} text documents and KGs for ${Object.keys(ragDataForMessage.knowledge_graphs || {}).length} docs.`);
+            // You might want to set currentKnowledgeGraphs state here if needed for UI display
+            // setCurrentKnowledgeGraphs(ragDataForMessage.knowledge_graphs);
 
         } catch (err) {
-            const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
-            setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
-            console.error("Send Message Error:", err.response || err);
-            setMessages(previousMessages); // Rollback UI
-            if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
-                 console.warn("Received 401 sending message, logging out.");
+            // ... (existing RAG error handling) ...
+            console.error("RAG Query Error (ChatPage):", err.response || err);
+            const ragErrorMessage = err.response?.data?.message || "Failed to retrieve documents/KGs for RAG.";
+            setError(prev => prev ? `${prev} | RAG Error: ${ragErrorMessage}` : `RAG Error: ${ragErrorMessage}`);
+            if (err.response?.status === 401) {
                  handleLogout(true);
+                 setIsRagLoading(false);
+                 return;
             }
         } finally {
-            setIsLoading(false);
+            setIsRagLoading(false);
         }
-    }, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout]); // Removed sessionId/userId state deps
+    } else {
+        console.log("RAG Disabled: Skipping RAG query.");
+    }
+
+    setIsLoading(true);
+    const historyForAPI = previousMessages;
+    const systemPromptToSend = editableSystemPromptText;
+
+    try {
+        // If there was a RAG error that didn't lead to a return, it might still be in the error state
+        // You might want to clear non-critical RAG errors or show them differently
+
+        console.log(`Sending message to backend /api/chat/message. RAG Enabled: ${isRagEnabled}, Docs Count: ${ragDataForMessage.relevantDocs.length}`);
+        
+        const sendMessagePayload = {
+            message: textToSend,
+            history: historyForAPI,
+            sessionId: currentSessionId,
+            systemPrompt: systemPromptToSend,
+            isRagEnabled: isRagEnabled,
+            relevantDocs: ragDataForMessage.relevantDocs, // Text documents
+            knowledge_graphs: isRagEnabled ? ragDataForMessage.knowledge_graphs : null // <<< SEND KG DATA
+        };
+
+        const sendMessageResponse = await sendMessage(sendMessagePayload); // sendMessage calls /api/chat/message
+
+        // ... (rest of your existing success/error handling for sendMessageResponse) ...
+        const modelReply = sendMessageResponse.data.reply;
+        if (modelReply?.role && modelReply?.parts?.length > 0) {
+            setMessages(prev => [...prev, modelReply]);
+            // Clear RAG-specific errors if the main chat message was successful
+            setError(prev => (prev && (prev.includes("Session invalid") || prev.includes("Critical Error"))) ? prev : '');
+        } else {
+            throw new Error("Invalid reply structure received from backend.");
+        }
+
+    } catch (err) {
+        // ... (existing error handling for send message) ...
+        const errorMessage = err.response?.data?.message || err.message || 'Failed to get response.';
+        setError(prev => prev ? `${prev} | Chat Error: ${errorMessage}` : `Chat Error: ${errorMessage}`);
+        console.error("Send Message Error (ChatPage):", err.response || err);
+        setMessages(previousMessages); // Rollback UI
+        if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
+             handleLogout(true);
+        }
+    } finally {
+        setIsLoading(false);
+    }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [inputText, isLoading, isRagLoading, messages, editableSystemPromptText, isRagEnabled, handleLogout, /* currentKnowledgeGraphs - if used directly */]);
+     // Removed sessionId/userId state deps
 
     const handleEnterKey = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {

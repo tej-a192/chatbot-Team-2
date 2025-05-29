@@ -256,7 +256,7 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
     
 
         // --- Determine and Call the KG Ingestion API ---
-    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002'; // Use default if not set
+    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Use default if not set
     const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`; // Ensure no double slash and append /kg
 
     if (!kgIngestionApiUrl.startsWith('http')) { // Basic check if a valid URL was formed

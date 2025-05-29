@@ -20,12 +20,10 @@ spacy
 spacy-layout
 pandas
 numpy
-re
 typing
-PIL # For image processing
 pytesseract # OCR
 pillow
 qdrant-client
-
+neo4j
 
 
