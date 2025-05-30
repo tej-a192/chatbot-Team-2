@@ -63,15 +63,12 @@ app.use('/api/network', require('./routes/network'));
 app.use('/api/auth', require('./routes/auth'));
 
 // Protected routes
-app.use('/api/chat', authMiddleware, require('./routes/chat')); // Apply JWT auth here
+app.use('/api/chat', authMiddleware, require('./routes/chat'));
 app.use('/api/upload', authMiddleware, require('./routes/upload'));
 app.use('/api/files', authMiddleware, require('./routes/files'));
 app.use('/api/syllabus', authMiddleware, require('./routes/syllabus'));
 app.use('/api/mindmap', authMiddleware, require('./routes/mindmap'));
-// ...p'));
-// Add /api/analysis here if you implement it and it needs protection
-// app.use('/api/analysis', authMiddleware, require('./routes/analysis'));
-// Add /api/kg here if you implement it and it needs protection
+app.use('/api/analysis', authMiddleware, require('./routes/analysis')); 
 // app.use('/api/kg', authMiddleware, require('./routes/kg'));
 
 

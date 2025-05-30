@@ -42,11 +42,17 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename }) {
     const [thinking, setThinking] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [isFetchingStored, setIsFetchingStored] = useState(false); // For fetching stored data
+
 
     // Dynamically select icon component based on iconName prop
     const IconComponent = LucideIcons[iconName] || LucideIcons.HelpCircle; // Default to HelpCircle if not found
     console.log('selectedDocumentFilename :::: ', selectedDocumentFilename);
     
+
+    
+
+
     const handleRunAnalysis = async () => {
         if (!selectedDocumentFilename) {
             toast.error("Please select a document from the left panel first.");

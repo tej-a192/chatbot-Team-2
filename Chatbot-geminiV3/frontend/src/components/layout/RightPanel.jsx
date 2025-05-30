@@ -10,8 +10,7 @@ function RightPanel() {
     const { setIsRightPanelOpen, selectedDocumentForAnalysis } = useAppState();
     const [isAnalyzerOpen, setIsAnalyzerOpen] = useState(true);
 
-    const currentSelectedDocFilename = selectedDocumentForAnalysis?.originalName || null;
-
+    const currentSelectedDocFilename = selectedDocumentForAnalysis || null;
 
     return (
         <div className="flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar">
