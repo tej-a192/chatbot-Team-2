@@ -1,9 +1,10 @@
-// frontend/src/components/layout/RightPanel.jsx
-import React, { useEffect, useState } from 'react';
+// src/components/layout/RightPanel.jsx
+import React, { useState } from 'react'; // Removed useEffect if not used
 import { useAppState } from '../../contexts/AppStateContext';
-import AnalysisTool from '../analysis/AnalysisTool.jsx'; // Added .jsx
+// import AnalysisTool from '../analysis/AnalysisTool.jsx'; // Comment out or remove old import
+import AnalysisToolRunner from '../analysis/AnalysisToolRunner.jsx'; // <-- NEW IMPORT
 import { PanelRightClose, ChevronDown, ChevronUp, Telescope } from 'lucide-react';
-import IconButton from '../core/IconButton.jsx'; // Added .jsx
+import IconButton from '../core/IconButton.jsx';
 import { motion } from 'framer-motion';
 
 function RightPanel() {
@@ -47,9 +48,10 @@ function RightPanel() {
                             <p>Select a document from the left panel to enable analysis tools.</p>
                         </div>
                     )}
-                    <AnalysisTool toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} />
-                    <AnalysisTool toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} />
-                    <AnalysisTool toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} />
+                    {/* Replace AnalysisTool with AnalysisToolRunner */}
+                    <AnalysisToolRunner toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} />
+                    <AnalysisToolRunner toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} />
+                    <AnalysisToolRunner toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} />
                 </motion.div>
             )}
         </div>

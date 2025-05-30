@@ -1,0 +1,1 @@
+// This file is used for the response handling of thinking and result
