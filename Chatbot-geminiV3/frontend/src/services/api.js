@@ -1,5 +1,6 @@
 // frontend/src/services/api.js
 import axios from "axios";
+import toast from "react-hot-toast";
 
 // --- CENTRAL CONTROL FLAG FOR MOCKING ---
 const DEV_MODE_MOCK_API = false; // <--- SET THIS TO false
@@ -45,7 +46,101 @@ apiClient.interceptors.response.use(
 
 // --- API Definition Object ---
 const api = {
-  // --- Auth ---
+  
+    // --- Helper to fetch stored analysis (can be internal to this module) ---
+  _getStoredDocumentAnalysis: async (documentFilename) => {
+    try {
+      // This GET request fetches the whole analysis object { faq, topics, mindmap }
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.info(`No stored analysis found for document: ${documentFilename}`);
+        return null; // Return null if no analysis record exists for the document
+      }
+      console.error(`Error fetching stored analysis for ${documentFilename}:`, error);
+      throw error; // Re-throw other errors to be handled by the caller
+    }
+  },
+
+  // --- Unified and Intelligent requestAnalysis function ---
+  // This function is called by AnalysisTool.jsx's "Run" button.
+  requestAnalysis: async (payload) => {
+    // payload will be like { filename: "doc.pdf", analysis_type: "faq" }
+    const { filename, analysis_type } = payload;
+
+    if (!filename || !analysis_type) {
+      toast.error("Filename and analysis type are required.");
+      throw new Error("Filename and analysis_type are required for requestAnalysis.");
+    }
+
+    const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
+
+    try {
+      // 1. Attempt to fetch existing analysis data from MongoDB via our backend
+      const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
+
+      if (storedAnalysisData && 
+          storedAnalysisData[analysis_type] && 
+          typeof storedAnalysisData[analysis_type] === 'string' &&
+          storedAnalysisData[analysis_type].trim() !== "") {
+        // Real data found for the specific analysis_type
+        toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
+        return {
+          content: storedAnalysisData[analysis_type],
+          thinking: `Retrieved stored ${analysis_type} data from the database.`
+        };
+      } else {
+        // No stored data, or the specific field is empty. Proceed to mock generation.
+        toast.dismiss(toastId); // Dismiss the "checking" toast
+        const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
+        console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
+
+        // --- MOCK GENERATION LOGIC (as per your original AnalysisTool's expectation) ---
+        // This part simulates what would happen in V2 if you hit a backend endpoint
+        // to *generate* new analysis, which would then save it to MongoDB.
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // Simulate delay
+
+        let mockContent = "";
+        const thinkingMessage = `Mock generation for ${analysis_type} on "${filename}". In a real scenario, this would involve AI processing and database updates.`;
+
+        switch (analysis_type) {
+          case 'faq':
+            mockContent = `## Mock FAQs for ${filename}\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            break;
+          case 'topics':
+            mockContent = `### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            break;
+          case 'mindmap':
+            mockContent = `mindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            break;
+          default:
+            mockContent = `Mock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+        }
+        // In a real V2, the backend endpoint responsible for *generating* this analysis
+        // would save `mockContent` (the real generated content) to the database:
+        // User.uploadedDocuments.find(doc => doc.filename === filename).analysis[analysis_type] = realGeneratedContent;
+        // await user.save();
+        // For V1, this frontend mock doesn't save.
+        toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
+        return {
+          content: mockContent,
+          thinking: thinkingMessage
+        };
+        // --- END MOCK GENERATION LOGIC ---
+      }
+    } catch (error) {
+      toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
+      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
+      // Return a structure that AnalysisTool can handle to display an error
+      return {
+        content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
+        thinking: "An error occurred during the analysis process."
+      };
+    }
+  },
+  // ------------------------------------------------- Auth --------------------------------------------------
+ 
   // Completed✅
   login: async (credentials) => {
     const response = await apiClient.post("/auth/signin", credentials);
@@ -64,7 +159,7 @@ const api = {
     return response.data; // Expects { _id, username, ... }
   },
 
-  // --- Chat ---
+  // ------------------------------------------------ Chat -----------------------------------------------
   
   // Not completed yet❌
   sendMessage: async (payload) => {
@@ -104,7 +199,9 @@ const api = {
     return response.data; // Expects { message, savedSessionId, newSessionId }
   },
 
-  // --- Files ---
+ 
+  // -------------------------------------------------- Files ------------------------------------------------------
+  
   // Completed✅
   uploadFile: async (formData, onUploadProgress) => {
     const response = await apiClient.post("/upload", formData, {
@@ -128,11 +225,10 @@ const api = {
     const response = await apiClient.delete(`/files/${serverFilename}`);
     return response.data;
   },
-
- 
   
-  // --- User LLM Config ---
-  // Not completed yet❌
+  // -------------------------------------------- User LLM Config ---------------------------------------------------
+  
+  // Not completed yet❌-
   updateUserLLMConfig: async (configData) => {
     // For V2, if backend stores user LLM preferences:
     // const response = await apiClient.post('/user/config/llm', configData);
@@ -157,7 +253,8 @@ const api = {
     }, 50));
   },
 
-  // --- Status & Syllabus ---
+
+  // ----------------------------------------------- Status & Syllabus -------------------------------------------
   
   // Not completed yet❌
   getOrchestratorStatus: async () => {
