@@ -276,6 +276,60 @@ class VectorDBService:
             formatted_context_text = "Error retrieving context due to an internal server error."
 
         return context_docs, formatted_context_text, context_docs_map
+    
+    # Add this method to the VectorDBService class in vector_db_service.py
+
+    def delete_document_vectors(self, user_id: str, document_name: str) -> Dict[str, Any]:
+        logger.info(f"Attempting to delete vectors for document: '{document_name}', user: '{user_id}' from Qdrant collection '{self.collection_name}'.")
+        
+        # These metadata keys must match what's stored during ingestion from ai_core.py
+        # 'processing_user' was the user_id passed to ai_core
+        # 'file_name' was the original_name passed to ai_core
+        qdrant_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="processing_user", # The metadata field storing the user ID
+                    match=models.MatchValue(value=user_id)
+                ),
+                models.FieldCondition(
+                    key="file_name", # The metadata field storing the original document name
+                    match=models.MatchValue(value=document_name)
+                )
+            ]
+        )
+        
+        try:
+            # Optional: Count points before deleting for logging/confirmation
+            # count_response = self.client.count(collection_name=self.collection_name, count_filter=qdrant_filter)
+            # num_to_delete = count_response.count
+            # logger.info(f"Qdrant: Found {num_to_delete} points matching criteria for document '{document_name}', user '{user_id}'.")
+
+            # if num_to_delete == 0:
+            #     logger.info(f"Qdrant: No points found to delete for document '{document_name}', user '{user_id}'.")
+            #     return {"success": True, "message": "No matching vectors found in Qdrant to delete.", "deleted_count": 0}
+
+            delete_result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+                wait=True # Make it synchronous
+            )
+            
+            # Check the status of the delete operation
+            # delete_result should be an UpdateResult object
+            if delete_result.status == models.UpdateStatus.COMPLETED or delete_result.status == models.UpdateStatus.ACKNOWLEDGED:
+                # The actual number of deleted points isn't directly returned by filter-based delete.
+                # We can infer it was successful if no error.
+                # For a precise count, you'd need to list IDs by filter, then delete by IDs.
+                logger.info(f"Qdrant delete operation for document '{document_name}', user '{user_id}' acknowledged/completed. Status: {delete_result.status}")
+                return {"success": True, "message": f"Qdrant vector deletion for document '{document_name}' completed. Status: {delete_result.status}."}
+            else:
+                logger.warning(f"Qdrant delete operation for document '{document_name}', user '{user_id}' returned status: {delete_result.status}")
+                return {"success": False, "message": f"Qdrant delete operation status: {delete_result.status}"}
+
+        except Exception as e:
+            logger.error(f"Error deleting document vectors from Qdrant for document '{document_name}', user '{user_id}': {e}", exc_info=True)
+            # Check for specific Qdrant client errors if possible, e.g., if the collection doesn't exist.
+            return {"success": False, "message": f"Failed to delete Qdrant vectors: {str(e)}"}
 
     def close(self):
         logger.info("VectorDBService close called.")

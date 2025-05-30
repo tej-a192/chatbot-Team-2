@@ -29,6 +29,10 @@ def setup_logging():
     logging.getLogger("faiss.loader").setLevel(logging.WARNING)
     logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
 
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password") # IMPORTANT: Change this default or use ENV VAR!
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 # === Embedding Model Configuration ===
 DEFAULT_DOC_EMBED_MODEL = 'mixedbread-ai/mxbai-embed-large-v1'
 DOCUMENT_EMBEDDING_MODEL_NAME = os.getenv('DOCUMENT_EMBEDDING_MODEL_NAME', DEFAULT_DOC_EMBED_MODEL)

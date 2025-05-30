@@ -4,13 +4,10 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { tempAuth } = require('../middleware/authMiddleware');
+const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User'); // Import the User model
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); 
 const geminiService = require('../services/geminiService');
-const { threadId } = require('worker_threads');
-const { log } = require('console');
-const { Worker } = require('worker_threads');
 
 const router = express.Router();
 
@@ -55,9 +52,9 @@ const allowedExtensions = [
 // --- Multer Config ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        // tempAuth middleware ensures req.user exists here
+        // authMiddleware middleware ensures req.user exists here
         if (!req.user || !req.user.username) {
-            // This should ideally not happen if tempAuth works correctly
+            // This should ideally not happen if authMiddleware works correctly
             console.error("Multer Destination Error: User context missing after auth middleware.");
             return cb(new Error("Authentication error: User context not found."));
         }
@@ -91,7 +88,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    // tempAuth middleware should run before this, ensuring req.user exists
+    // authMiddleware middleware should run before this, ensuring req.user exists
     if (!req.user) {
          console.warn(`Upload Rejected (File Filter): User context missing.`);
          const error = new multer.MulterError('UNAUTHENTICATED'); // Custom code?
@@ -133,49 +130,94 @@ const upload = multer({
 
 // --- Function to call Python RAG service ---
 async function triggerPythonRagProcessing(userId, filePath, originalName) {
+    // Read URL from environment variable set during startup
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
-        console.error("PYTHON_RAG_SERVICE_URL is not set.");
-        return { success: false, message: "RAG service URL not configured.", text: null, chunksForKg: [], status: null };
+        console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot trigger processing.");
+        // Optionally: Delete the uploaded file if processing can't be triggered?
+        // await fs.promises.unlink(filePath).catch(e => console.error(`Failed to delete unprocessed file ${filePath}: ${e}`));
+        return { success: false, message: "RAG service URL not configured." }; // Indicate failure
     }
     const addDocumentUrl = `${pythonServiceUrl}/add_document`;
-    // console.log(`RAG Trigger: Calling Python for ${originalName} (User: ${userId}) at ${addDocumentUrl}`);
-
+    console.log(`Triggering Python RAG processing for ${originalName} (User: ${userId}) at ${addDocumentUrl}`);
     try {
+        // Send absolute path
         const response = await axios.post(addDocumentUrl, {
             user_id: userId,
-            file_path: filePath,
+            file_path: filePath, // Send the absolute path
             original_name: originalName
-        }, { timeout: 300000 }); // 5 min timeout
+        }, { timeout: 300000 }); // 5 minute timeout for processing
 
-        const pythonData = response.data;
-        // console.log(`RAG Trigger: Raw Python response for ${originalName}:`, pythonData);
+        console.log(`Python RAG service response for ${originalName}:`, response.data);
 
-        const text = pythonData?.raw_text_for_analysis || null;
-        const chunksForKg = pythonData?.chunks_with_metadata || [];
-        const pythonStatus = pythonData?.status;
-        const pythonMessage = pythonData?.message || "No message from Python RAG service.";
+        const text = response.data?.raw_text_for_analysis || ""; // This is initial_extracted_text
 
-        if (pythonStatus === 'added' || pythonStatus === 'skipped') {
-            return {
-                success: true,
-                status: pythonStatus,
-                message: pythonMessage,
-                text: text,
-                chunksForKg: chunksForKg,
-            };
-        } else {
-            console.warn(`RAG Trigger: Unexpected status '${pythonStatus}' from Python for ${originalName}.`);
-            return {
-                success: false,
-                message: `Unexpected RAG status: ${pythonStatus}. ${pythonMessage}`,
-                text: text, chunksForKg: chunksForKg, status: pythonStatus,
-            };
+        if (response.data?.status === "added" && originalName && userId) {
+            try {
+                const newDocumentEntry = {
+                    filename: originalName,
+                    text: text, // Raw text from Python for storage and later re-analysis if needed
+                    analysis: { // Initialize analysis object matching schema defaults
+                        faq: "",
+                        topics: "",
+                        mindmap: ""
+                    }
+                };
+
+                const updatedUser = await User.findByIdAndUpdate(
+                    userId,
+                    { $push: { uploadedDocuments: newDocumentEntry } },
+                    { new: true, runValidators: true }
+                );
+
+                if (!updatedUser) {
+                    console.error(`Failed to find user with ID ${userId} to save document info for ${originalName}.`);
+                    return {
+                        success: false,
+                        message: `User not found for saving document metadata. Status: ${response.data?.status}`,
+                        Text: text, 
+                        Status: response.data?.status
+                    };
+                }
+                console.log(`Successfully saved document info ('${originalName}') and raw text to user ${userId}.`);
+
+            } catch (dbError) {
+                console.error(`Database error saving document info for ${originalName} (User: ${userId}):`, dbError);
+                return {
+                    success: false,
+                    message: `DB error saving document metadata: ${dbError.message}. Python processing status: ${response.data?.status}`,
+                    Text: text, // Still return text if Python provided it
+                    Status: response.data?.status
+                };
+            }
+        } 
+        else if (originalName && userId) { // If not saving, log why
+            console.warn(`Skipping DB update for ${originalName} (User: ${userId}). HTTP Status: ${response.status}, Python Custom Status: ${response.data?.status}.`);
+        } 
+        else {
+            console.warn(`Skipping DB update due to missing originalName or userId. Python Custom Status: ${response.data?.status}`);
         }
+
+        // --- END DATABASE UPDATE ---
+
+
+        // Check response.data.status ('added' or 'skipped')
+        if (response.data?.status === 'skipped') {
+             console.warn(`Python RAG service skipped processing ${originalName}: ${response.data.message}`);
+             return { success: true, status: 'skipped', message: response.data.message, text: text};
+        } else if (response.data?.status === 'added') {
+             return { success: true, status: 'added', message: response.data.message, text: text };
+        } else {
+             console.warn(`Unexpected response status from Python RAG service for ${originalName}: ${response.data?.status}`);
+             return { success: false, message: `Unexpected RAG status: ${response.data?.status}` };
+        }
+
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Unknown RAG service error";
-        console.error(`RAG Trigger: Error calling Python for ${originalName}:`, errorMsg);
-        return { success: false, message: `RAG service call failed: ${errorMsg}`, text: null, chunksForKg: [], status: 'error' };
+        console.error(`Error calling Python RAG service for ${originalName}:`, errorMsg);
+        // Maybe delete the file if the call fails? Depends on retry logic.
+        // await fs.promises.unlink(filePath).catch(e => console.error(`Failed to delete file ${filePath} after RAG call error: ${e}`));
+        return { success: false, message: `RAG service call failed: ${errorMsg}` }; // Indicate failure
     }
 }
 // --- End Function ---
@@ -272,146 +314,84 @@ async function triggerAnalysisGeneration(userId, originalName, textForAnalysis) 
 // --- End Analysis Generation Function ---
 
 
-
-router.post('/', tempAuth, (req, res) => {
+// --- Modified Upload Route ---
+router.post('/', authMiddleware, (req, res) => {
     const uploader = upload.single('file');
 
-    uploader(req, res, async function (err) {
+    uploader(req, res, async function (err) { // <<<< ASYNC HERE IS KEY
         if (!req.user) {
-            console.error("Upload: User context missing.");
-            return res.status(401).json({ message: "Authentication error." });
+             console.error("Upload handler: User context missing.");
+             return res.status(401).json({ message: "Authentication error." });
         }
         const userId = req.user._id.toString();
-        const username = req.user.username;
-
-        let absoluteFilePath = null;
-        let originalName = null;
-        let serverFilename = null;
 
         if (err) {
-            console.error(`Upload: Multer error for user '${username}': ${err.message}`);
-            if (err instanceof multer.MulterError) {
-                return res.status(400).json({ message: err.message });
-            }
+            // ... (your multer error handling - this part is fine)
+            console.error(`Multer error for user ${req.user.username}:`, err.message);
+            if (err instanceof multer.MulterError) { /* ... */ return res.status(400).json({ message: err.message || "File upload failed."}); }
             return res.status(500).json({ message: "Server error during upload prep." });
         }
-
         if (!req.file) {
-            console.warn(`Upload: No file received for user '${username}'.`);
-            return res.status(400).json({ message: "No file received." });
+            console.warn(`No file received for user ${req.user.username}.`);
+            return res.status(400).json({ message: "No file received or file type rejected." });
         }
 
-        absoluteFilePath = path.resolve(req.file.path);
-        originalName = req.file.originalname;
-        serverFilename = req.file.filename;
-        console.log(`Upload: Received for user '${username}', File: ${serverFilename}, Original: ${originalName}`);
+        const { path: filePath, originalname: originalName, filename: serverFilename } = req.file;
+        const absoluteFilePath = path.resolve(filePath);
+        console.log(`Upload received: User '${req.user.username}', File: ${serverFilename}, Original: ${originalName}`);
 
+        // --- Main Try-Catch for the entire RAG + Analysis process ---
         try {
-            // ----- STAGE 1: MongoDB Pre-check -----
+            // ----- STAGE 1: MongoDB Pre-check for existing originalName -----
             const userForPreCheck = await User.findById(userId).select('uploadedDocuments');
             if (!userForPreCheck) {
-                console.error(`Upload: User ${userId} ('${username}') not found. Deleting ${absoluteFilePath}`);
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload: Cleanup error (user not found): ${e.message}`));
-                return res.status(404).json({ message: "User not found." });
+                console.error(`Upload Aborted: User ${userId} not found (pre-check). Deleting ${absoluteFilePath}`);
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (user not found): ${e}`));
+                return res.status(404).json({ message: "User not found, cannot process upload." });
             }
             const existingDocument = userForPreCheck.uploadedDocuments.find(doc => doc.filename === originalName);
             if (existingDocument) {
-                console.log(`Upload: '${originalName}' already exists for '${username}'. Deleting ${absoluteFilePath}`);
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload: Cleanup error (duplicate): ${e.message}`));
+                console.log(`Upload Halted: '${originalName}' already exists for user ${userId}. Deleting ${absoluteFilePath}`);
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (duplicate): ${e}`));
                 return res.status(409).json({
-                    message: `File '${originalName}' already exists.`,
+                    message: `File '${originalName}' already exists. No new processing initiated.`,
                     filename: serverFilename, originalname: originalName,
                 });
             }
-            console.log(`Upload: Pre-check passed for '${originalName}' (User: '${username}').`);
+            console.log(`Pre-check passed for '${originalName}'. Proceeding to RAG.`);
+            // ----- END STAGE 1 -----
 
 
-            // ----- STAGE 2: RAG Processing (Get data from Python) -----
+            // ----- STAGE 2: RAG Processing -----
             const ragResult = await triggerPythonRagProcessing(userId, absoluteFilePath, originalName);
-            // ragResult now contains: { success, status, text, chunksForKg, message }
 
-            if (!ragResult.success || ragResult.status !== 'added' || !ragResult.text || ragResult.text.trim() === '') {
-                const errorMessage = (ragResult && ragResult.message) || "RAG processing failed or returned insufficient data from Python.";
-                console.error(`Upload Route Error: RAG failed for '${originalName}' (User: '${username}'): ${errorMessage}. Status: ${ragResult.status}. Deleting file.`);
-                if (absoluteFilePath) {
-                    await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route: Cleanup error (RAG fail): ${e.message}`));
-                }
-                return res.status(500).json({ message: errorMessage, filename: serverFilename, originalname: originalName });
+            if (!ragResult.success || !ragResult.text || ragResult.text.trim() === "") {
+                let message = `RAG processing failed or returned no text for '${originalName}'.`;
+                if (ragResult.message) message += ` Details: ${ragResult.message}`;
+                console.error(message + ` (User: ${userId})`);
+
+                // If RAG failed, the file text wasn't added to DB by triggerPythonRagProcessing
+                // (assuming triggerPythonRagProcessing only adds to DB on its own success).
+                // So, delete the physical file.
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (RAG fail/no text) for ${absoluteFilePath}: ${e}`));
+
+                return res.status(500).json({ // Or 422 if it's a content issue from RAG
+                    message: message,
+                    filename: serverFilename, originalname: originalName
+                });
             }
-            console.log(`RAG Stage: Python OK for '${originalName}'. Text obtained. Status: ${ragResult.status}.`);
-
-
-            // ----- STAGE 2.5: Initial MongoDB Save for the Document Entry -----
-            // This creates the document shell with the text from RAG.
-            const newDocumentEntryData = {
-                filename: originalName, // This is the key for future updates
-                text: ragResult.text, // Save the text obtained from RAG
-                // Initialize analysis object as per your schema
-                analysis: {
-                    faq: "",
-                    topics: "",
-                    mindmap: "",
-                },
-                // You might want to add uploadedAt, ragStatus, initial analysisStatus, kgStatus here
-                uploadedAt: new Date(),
-                ragStatus: ragResult.status,
-                analysisStatus: "pending",
-                kgStatus: "pending"
-            };
-
-            try {
-                const updateResult = await User.updateOne(
-                    { _id: userId },
-                    { $push: { uploadedDocuments: newDocumentEntryData } }
-                );
-
-                if (updateResult.modifiedCount === 0 && updateResult.matchedCount === 1) {
-                    // This could happen if the user doc was matched but $push didn't modify (e.g. arrayFilters condition failed, though not used here)
-                    // Or if the exact same subdocument was somehow pushed again without erroring (unlikely for $push without specific checks)
-                    console.warn(`DB Save: Initial document entry for '${originalName}' pushed, but modifiedCount is 0. This might indicate an issue or an idempotent push.`);
-                } else if (updateResult.matchedCount === 0) {
-                     throw new Error("User not found for saving initial document entry.");
-                }
-                console.log(`DB Save: Initial document entry for '${originalName}' added to user '${username}'.`);
-            } catch (dbError) {
-                console.error(`Upload Route Error: MongoDB error saving initial doc for '${originalName}': ${dbError.message}. Deleting file.`);
-                if (absoluteFilePath) {
-                    await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route: Cleanup error (initial DB save fail): ${e.message}`));
-                }
-                return res.status(500).json({ message: `Database error saving document: ${dbError.message}`, filename: serverFilename, originalname: originalName });
-            }
-            // At this point, the document shell with filename and text is in the DB.
-            // We don't need to retrieve its _id for this flow.
-
-            // Optional: Delete physical file now if content is in DB
-            // await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route: Cleanup error (post-initial save): ${e.message}`));
-            // absoluteFilePath = null;
-
-            console.log(`Initial DB Save: Completed for '${originalName}' (User: '${username}'). Proceeding to analysis.`);
-
+            console.log(`RAG processing completed with text for '${originalName}'. Proceeding to analysis.`);
+            // At this point, triggerPythonRagProcessing should have added the document with text to MongoDB.
+            // If it didn't, the logic in triggerPythonRagProcessing needs adjustment.
 
 
             // ----- STAGE 3: Analysis Generation -----
             const analysisOutcome = await triggerAnalysisGeneration(userId, originalName, ragResult.text);
 
+
             // ----- STAGE 4: Handle Analysis Outcome & DB Update -----
             if (analysisOutcome.success) {
-                // Use originalName for logging context now
-                console.log(`Analysis: Generated successfully for '${originalName}' (User: '${username}'). Storing.`);
-                await User.updateOne(
-                    // Query to find the user and the specific subdocument by filename
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    {
-                        $set: {
-                            "uploadedDocuments.$.analysis.faq": analysisOutcome.results.faq,
-                            "uploadedDocuments.$.analysis.topics": analysisOutcome.results.topics,
-                            "uploadedDocuments.$.analysis.mindmap": analysisOutcome.results.mindmap,
-                            "uploadedDocuments.$.analysisStatus": "completed"
-                        }
-                    }
-                );
-            } else {
-                console.warn(`Analysis: Failed for '${originalName}' (User: '${username}'). Storing partial/error state.`);
+                console.log(`All analyses generated successfully for '${originalName}'. Storing in DB.`);
                 await User.updateOne(
                     { _id: userId, "uploadedDocuments.filename": originalName },
                     {
@@ -419,67 +399,41 @@ router.post('/', tempAuth, (req, res) => {
                             "uploadedDocuments.$.analysis.faq": analysisOutcome.results.faq,
                             "uploadedDocuments.$.analysis.topics": analysisOutcome.results.topics,
                             "uploadedDocuments.$.analysis.mindmap": analysisOutcome.results.mindmap,
-                            "uploadedDocuments.$.analysisStatus": "failed"
                         }
                     }
                 );
-            }
-
-            // ----- STAGE 4: KG Worker Initiation -----
-            let kgWorkerInitiated = false;
-            // Condition for KG: RAG was successful (status 'added'), and chunks are available.
-            // The initial document entry is already saved in STAGE 2.5.
-            if (ragResult.status === "added" &&
-                ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
-
-                console.log(`KG Init: Conditions met for '${originalName}' (User: '${username}').`);
-                const workerScriptPath = path.resolve(__dirname, '../workers/kgWorker.js');
-
-                try {
-                    const worker = new Worker(workerScriptPath, {
-                        workerData: {
-                            chunksForKg: ragResult.chunksForKg,
-                            userId: userId,
-                            originalName: originalName,
-                            // documentIdInDb is no longer strictly needed if KG service uses userId/originalName to update DB
-                            // but can be passed as originalName for context if kgService expects a document identifier
-                        }
-                    });
-                    kgWorkerInitiated = true;
-                    worker.on('message', (msg) => console.log(`KG Worker [Context ${msg.documentId}]: ${msg.message || JSON.stringify(msg)}`));
-                    worker.on('error', (workerErr) => console.error(`KG Worker Error [Context ${originalName}]:`, workerErr));
-                    worker.on('exit', (code) => console.log(`KG Worker [Context ${originalName}] exited (code ${code}).`));
-                    console.log(`KG Init: Worker for '${originalName}' launched.`);
-                } catch (workerLaunchError) {
-                    kgWorkerInitiated = false;
-                    console.error(`KG Init: Failed to launch worker for '${originalName}':`, workerLaunchError);
-                }
+                console.log(`Successfully stored all analyses for '${originalName}' in MongoDB.`);
+                return res.status(200).json({
+                    message: "File uploaded and all analyses completed successfully.",
+                    filename: serverFilename, originalname: originalName,
+                    // analysis: analysisOutcome.results // Optionally send analysis back
+                });
             } else {
-                console.log(`KG Init: Not triggered for '${originalName}'. RAG Status: ${ragResult.status}, Chunks: ${ragResult.chunksForKg ? ragResult.chunksForKg.length : 'N/A'}`);
+                console.warn(`One or more analyses failed for '${originalName}'. No analysis data from this attempt will be stored in DB.`);
+                // The RAG text is already in the DB. This analysis attempt failed.
+                // Optionally update a status for this document in DB to indicate analysis failure
+                return res.status(422).json({
+                    message: "File uploaded and RAG processing complete, but content analysis generation failed. The document text is saved. You may not need to re-upload but can try to trigger analysis again later if such a feature exists, or contact support.",
+                    filename: serverFilename, originalname: originalName,
+                    // failedAnalysisDetails: analysisOutcome.results // For client-side debugging if needed
+                });
             }
-
-            // ----- Final Response to Client -----
-            const analysisMessage = analysisOutcome.success ? 'completed' : 'failed';
-            const kgMessage = kgWorkerInitiated ? 'initiated' : 'not triggered';
-            const finalUserMessage = `File processed. Analysis: ${analysisMessage}. KG generation: ${kgMessage}.`;
-
-            // We no longer have a specific subDocumentId to return from this main flow.
-            // The client can refer to the document by its originalName.
-            return res.status(analysisOutcome.success ? 200 : 422).json({
-                message: finalUserMessage,
-                filename: serverFilename, // The name on disk
-                originalname: originalName,     // The original name uploaded by user
-                analysisStatus: analysisMessage,
-                kgInitiated: kgWorkerInitiated
-            });
-
         } catch (processError) {
-            console.error(`Upload Route: !!! Overall error for ${originalName || 'unknown'} (User: '${username || 'unknown'}'):`, processError.message, processError.stack);
+            // Catch any unhandled errors from awaited promises or synchronous code
+            console.error(`!!! Overall processing error for ${originalName} (User: ${userId}):`, processError);
+            // Try to clean up the uploaded file if it exists and an error occurred.
+            // This is a bit tricky as RAG might have already added to DB.
+            // If processError is from RAG or before, file deletion is safer.
+            // If it's after RAG success but during analysis or DB update of analysis,
+            // the RAG text is already in DB.
             if (absoluteFilePath) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route: Cleanup error (overall fail): ${e.message}`));
+                 // Consider if an error after RAG success should still delete the physical file.
+                 // Usually, if the RAG text is in DB, the physical file on disk is secondary.
+                 // But if the entire transaction failed, deleting is fine.
+                 await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (overall fail) for ${absoluteFilePath}: ${e}`));
             }
             return res.status(500).json({
-                message: `Server error: ${processError.message || 'Unknown error.'}`,
+                message: `Server error during file processing: ${processError.message}`,
                 filename: serverFilename, originalname: originalName
             });
         }

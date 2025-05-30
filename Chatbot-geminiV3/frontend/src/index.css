@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background-dark text-text-dark transition-colors duration-300; 
+    font-family: theme('fontFamily.sans');
+  }
+  html.dark body { @apply bg-background-dark text-text-dark; }
+  html:not(.dark) body { @apply bg-background-light text-text-light; }
+
+  .custom-scrollbar {
+     @apply scrollbar-thin scrollbar-thumb-secondary dark:scrollbar-thumb-secondary-dark scrollbar-track-surface-light dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full;
+  }
+  .prose { @apply max-w-none text-text-light dark:text-text-dark; }
+  .prose code::before, .prose code::after { content: ''; }
+  .prose code { @apply px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded-sm text-xs font-mono text-primary dark:text-accent; }
+  .prose pre { @apply bg-gray-800 dark:bg-gray-900 p-4 rounded-md text-xs text-gray-200 overflow-x-auto custom-scrollbar; }
+  .prose pre code { @apply bg-transparent p-0 text-gray-200 font-mono; }
+  .prose blockquote { @apply border-l-4 border-primary dark:border-primary-light pl-4 italic text-text-muted-light dark:text-text-muted-dark; }
+  .prose a { @apply text-primary dark:text-primary-light hover:underline; }
+  .prose strong { @apply font-semibold text-text-light dark:text-text-dark; }
+  .prose ul, .prose ol { @apply pl-5; }
+  .prose li::marker { @apply text-text-muted-light dark:text-text-muted-dark; }
+}
+
+@layer components {
+  .btn { 
+    @apply font-semibold py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-opacity-75 transition-all duration-150 ease-in-out flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .dark .btn { focus-ring-offset-color: theme('colors.background-dark'); }
+  html:not(.dark) .btn { focus-ring-offset-color: theme('colors.background-light');}
+  
+  .btn-primary { 
+    @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary;
+  }
+  .btn-secondary {
+    @apply btn bg-secondary text-white hover:bg-secondary-dark focus:ring-secondary;
+  }
+   .btn-ghost { 
+    @apply btn text-text-muted-light dark:text-text-muted-dark hover:bg-gray-500 hover:bg-opacity-10 focus:ring-primary;
+  }
+  .input-field { 
+    @apply block w-full px-3 py-2 bg-surface-light dark:bg-gray-700 border border-border-light dark:border-border-dark rounded-md text-sm shadow-sm placeholder-text-muted-light dark:placeholder-text-muted-dark
+           focus:outline-none focus:border-primary dark:focus:border-primary-light focus:ring-1 focus:ring-primary dark:focus:ring-primary-light;
+  }
+  /* Ensuring @tailwindcss/forms classes use our themed input-field styles */
+  .form-input, .form-textarea, .form-select, .form-multiselect {
+    @apply input-field; 
+  }
+  .form-checkbox, .form-radio { 
+    @apply rounded shadow-sm border-border-light dark:border-border-dark text-primary focus:ring-primary dark:focus:ring-primary-light;
+    @apply bg-surface-light dark:bg-gray-700; 
+  }
+
+  .card-base { 
+    @apply border rounded-panel shadow-panel; 
+    @apply bg-surface-light dark:bg-surface-dark border-border-light dark:border-border-dark;
+  }
+  .card-header-base {
+    @apply px-4 py-3 text-sm font-semibold border-b;
+    @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
+  }
+}
