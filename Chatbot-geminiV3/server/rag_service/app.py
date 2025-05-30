@@ -1,469 +1,475 @@
-# server/app.py
+# server/rag_service/app.py
 
 import os
 import sys
 import traceback
 from flask import Flask, request, jsonify, current_app
 import logging
+import atexit # For graceful shutdown
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
-# config.py should call setup_logging() itself.
-import config # This executes config.py, including setup_logging()
+import config
+config.setup_logging() # Initialize logging as per your config
 
 # --- Import configurations and services ---
 try:
     from vector_db_service import VectorDBService
-    from neo4j_service import Neo4jService
-    from neo4j import exceptions as neo4j_exceptions # Official Neo4j driver exceptions (PLURAL ALIAS)
-    import ai_core # Your AI processing module
+    import ai_core
+    import neo4j_handler 
+    from neo4j import exceptions as neo4j_exceptions # For specific error handling
 except ImportError as e:
-    # Fallback basic logger for critical import errors
-    # Logging might not be fully configured if 'config' import itself failed.
-    logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - CRITICAL_IMPORT - %(message)s')
-    logging.critical(f"CRITICAL IMPORT ERROR: {e}. Ensure all modules are correctly placed. PYTHONPATH: {sys.path}", exc_info=True)
-    sys.exit(1) # Exit if essential components can't be imported
+    print(f"CRITICAL IMPORT ERROR: {e}. Ensure all modules are correctly placed and server directory is in PYTHONPATH.")
+    print("PYTHONPATH:", sys.path)
+    sys.exit(1)
 
-# Get the application logger, configured by config.setup_logging()
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-# --- Application-Scoped Service Initialization ---
-# These services are initialized once when the Flask app object is created.
-# They are stored on the 'app' object itself, making them available globally within the app context.
-
-# Initialize VectorDBService
+# --- Initialize VectorDBService (Qdrant) ---
+vector_service = None
 try:
-    logger.info("Initializing VectorDBService for the application...")
-    app.vector_service_instance = VectorDBService() # Assuming constructor handles setup
-    app.vector_service_instance.setup_collection() # Explicit setup call if needed
-    logger.info("VectorDBService initialized and attached to app successfully.")
+    logger.info("Initializing VectorDBService for Qdrant...")
+    vector_service = VectorDBService()
+    vector_service.setup_collection()
+    app.vector_service = vector_service
+    logger.info("VectorDBService initialized and Qdrant collection setup successfully.")
 except Exception as e:
-    logger.critical(f"Failed to initialize VectorDBService for the application: {e}", exc_info=True)
-    app.vector_service_instance = None # Mark as unavailable
+    logger.critical(f"Failed to initialize VectorDBService or setup Qdrant collection: {e}", exc_info=True)
+    app.vector_service = None
 
-# Initialize Neo4jService
+# --- Initialize Neo4j Driver (via handler) ---
 try:
-    logger.info("Initializing Neo4jService for the application...")
-    app.neo4j_service_instance = Neo4jService(
-        uri=config.NEO4J_URI,
-        user=config.NEO4J_USER,
-        password=config.NEO4J_PASSWORD
-    )
-    logger.info("Neo4jService initialized and attached to app successfully.")
-except ConnectionError as e: # Specific error from Neo4jService on connection failure
-    logger.critical(f"Failed to initialize Neo4jService (ConnectionError): {e}") # exc_info=False as ConnectionError is informative
-    app.neo4j_service_instance = None
-except Exception as e: # Other unexpected errors during Neo4jService init
-    logger.critical(f"Unexpected error during Neo4jService initialization: {e}", exc_info=True)
-    app.neo4j_service_instance = None
+    neo4j_handler.init_driver() # Initialize Neo4j driver on app start
+except Exception as e:
+    logger.critical(f"Neo4j driver failed to initialize on startup: {e}. KG endpoints will likely fail.")
+    # Depending on how critical Neo4j is, you might sys.exit(1) here.
+
+# Register Neo4j driver close function for app exit
+atexit.register(neo4j_handler.close_driver)
+
 
 # --- Helper for Error Responses ---
 def create_error_response(message, status_code=500, details=None):
-    response_data = {"error": message}
-    if details: response_data["details"] = str(details) # Ensure details are string
-    current_app.logger.error(f"API Error ({status_code}): {message}{(' - Details: ' + str(details)) if details else ''}")
-    return jsonify(response_data), status_code
-
-@app.teardown_appcontext # <--- CORRECT DECORATOR
-def shutdown_services(exception=None): # Renamed from teardown_services for clarity with previous usage
-    """Close resources when the Flask app context is torn down."""
-    # This will be called when the app context pops, which includes after requests
-    # and during app shutdown if a context was active.
-    # For truly app-scoped resources closed ONLY on app exit, atexit might be considered,
-    # but Flask's app context teardown is standard for such cleanups.
-
-    neo4j_svc = getattr(current_app, 'neo4j_service_instance', None) # Use current_app here
-    if neo4j_svc:
-        current_app.logger.info("Flask app context tearing down. Closing Neo4j driver.")
-        neo4j_svc.close()
-        # current_app.neo4j_service_instance = None # Avoid modifying current_app state in teardown like this directly
-                                                 # The instance on `app` will persist unless app is restarted.
-
-    qdrant_svc = getattr(current_app, 'vector_service_instance', None)
-    if qdrant_svc and hasattr(qdrant_svc, 'close'):
-        current_app.logger.info("Flask app context tearing down. Closing Qdrant client.")
-        qdrant_svc.close()
-
+    log_message = f"API Error ({status_code}): {message}"
+    if details:
+        log_message += f" | Details: {details}"
+    current_app.logger.error(log_message)
+    response_payload = {"error": message}
+    if details and status_code != 500:
+        response_payload["details"] = details
+    return jsonify(response_payload), status_code
 
 # === API Endpoints ===
-# Helper to get service instances within request context, ensuring they are initialized
-def get_qdrant_service_from_app():
-    svc = getattr(current_app, 'vector_service_instance', None)
-    if not svc:
-        logger.error("Qdrant service not initialized on app object.")
-        raise ConnectionError("Qdrant service is not available.")
-    return svc
-
-def get_neo4j_service_from_app():
-    svc = getattr(current_app, 'neo4j_service_instance', None)
-    if not svc:
-        logger.error("Neo4j service not initialized on app object.")
-        # Optionally, try to re-initialize, but for app-scoped, it should be there if init was successful
-        # current_app.neo4j_service_instance = Neo4jService(...)
-        raise ConnectionError("Neo4jService is not available.")
-    # Double check connectivity before use in a request
-    if not svc.check_connectivity():
-        logger.warning("Neo4j connectivity lost, attempting to re-establish for current request.")
-        svc._connect() # Attempt to re-establish connection
-        if not svc.check_connectivity(): # Check again
-            raise ConnectionError("Neo4jService lost connection and could not re-establish.")
-    return svc
-
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    # Logic from your provided app.py, adapted to use getattr for services
-    # ... (ensure to use get_qdrant_service_from_app and get_neo4j_service_from_app if needed,
-    # or directly check app.vector_service_instance and app.neo4j_service_instance)
     current_app.logger.info("--- Health Check Request ---")
-    overall_status = "ok"
-    http_status_code = 200
+    # ... (Qdrant health check part from your existing code) ...
     status_details = {
-        "status": overall_status,
-        "services": {
-            "qdrant": { "status": "error", "service_initialized": False, "collection_name": getattr(config, 'QDRANT_COLLECTION_NAME', 'N/A'), "collection_status": "unknown", "expected_vector_dimension": getattr(config, 'QDRANT_COLLECTION_VECTOR_DIM', 'N/A'), "actual_vector_dimension": "unknown" },
-            "neo4j": { "status": "error", "service_initialized": False, "connection_status": "disconnected" }
-        },
-        "embedding_models": { "document_embedding_model": getattr(config, 'DOCUMENT_EMBEDDING_MODEL_NAME', 'N/A'), "query_embedding_model": getattr(config, 'QUERY_EMBEDDING_MODEL_NAME', 'N/A'), }
+        "status": "error",
+        "qdrant_service": "not_initialized",
+        "qdrant_collection_name": config.QDRANT_COLLECTION_NAME,
+        "qdrant_collection_status": "unknown",
+        "document_embedding_model": config.DOCUMENT_EMBEDDING_MODEL_NAME,
+        "query_embedding_model": config.QUERY_EMBEDDING_MODEL_NAME,
+        "neo4j_service": "not_initialized_via_handler", # Updated message
+        "neo4j_connection": "unknown"
     }
-    qdrant_health = status_details["services"]["qdrant"]
-    qdrant_svc = getattr(app, 'vector_service_instance', None)
-    if not qdrant_svc:
-        qdrant_health["status"] = "failed_to_initialize"; overall_status = "error"
+    http_status_code = 503
+
+    # Qdrant Check
+    if not vector_service:
+        status_details["qdrant_service"] = "failed_to_initialize"
     else:
-        qdrant_health["service_initialized"] = True
+        status_details["qdrant_service"] = "initialized"
         try:
-            collection_info = qdrant_svc.client.get_collection(collection_name=qdrant_svc.collection_name)
-            qdrant_health["collection_status"] = "exists"
-            # ... (rest of your Qdrant health check logic) ...
-            actual_dim_val = "unknown"
-            if hasattr(collection_info.config.params.vectors, 'size'): actual_dim_val = collection_info.config.params.vectors.size
-            elif isinstance(collection_info.config.params.vectors, dict) and '' in collection_info.config.params.vectors : actual_dim_val = collection_info.config.params.vectors[''].size
-            qdrant_health["actual_vector_dimension"] = str(actual_dim_val)
-            if str(actual_dim_val) == str(config.QDRANT_COLLECTION_VECTOR_DIM): qdrant_health["status"] = "ok"
-            else: qdrant_health["status"] = "error_dimension_mismatch"; qdrant_health["collection_status"] += " (Dimension Mismatch)"; overall_status = "error"
-
-        except Exception as e: qdrant_health["status"] = "error_collection_access"; qdrant_health["collection_status"] = f"error: {e}"; overall_status = "error"
-
-    neo4j_health = status_details["services"]["neo4j"]
-    neo4j_svc = getattr(app, 'neo4j_service_instance', None)
-    if not neo4j_svc:
-        neo4j_health["status"] = "failed_to_initialize"; overall_status = "error"
+            vector_service.client.get_collection(collection_name=vector_service.collection_name)
+            status_details["qdrant_collection_status"] = "exists_and_accessible"
+        except Exception as e:
+            status_details["qdrant_collection_status"] = f"error_accessing_collection: {str(e)}"
+            current_app.logger.error(f"Health check: Error accessing Qdrant collection: {e}", exc_info=False)
+    
+    # Neo4j Check
+    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
+    if neo4j_ok:
+        status_details["neo4j_service"] = "initialized_via_handler"
+        status_details["neo4j_connection"] = "connected"
     else:
-        neo4j_health["service_initialized"] = True
-        if neo4j_svc.check_connectivity(): neo4j_health["status"] = "ok"; neo4j_health["connection_status"] = "connected"
-        else: neo4j_health["status"] = "error_connection"; neo4j_health["connection_status"] = "disconnected"; overall_status = "error"
-            
-    status_details["status"] = overall_status
-    if overall_status == "error": http_status_code = 503
-    current_app.logger.info(f"Health check completed: {overall_status}")
-    return jsonify(status_details), http_status_code
+        status_details["neo4j_service"] = "initialization_failed_or_handler_error"
+        status_details["neo4j_connection"] = neo4j_conn_status
 
+
+    if status_details["qdrant_service"] == "initialized" and \
+       status_details["qdrant_collection_status"] == "exists_and_accessible" and \
+       neo4j_ok: # Check the boolean return from neo4j_handler
+        status_details["status"] = "ok"
+        http_status_code = 200
+        current_app.logger.info("Health check successful (Qdrant & Neo4j).")
+    else:
+        current_app.logger.warning(f"Health check issues found: Qdrant service: {status_details['qdrant_service']}, Qdrant collection: {status_details['qdrant_collection_status']}, Neo4j service: {status_details['neo4j_service']}, Neo4j connection: {status_details['neo4j_connection']}")
+        
+    return jsonify(status_details), http_status_code
 
 @app.route('/add_document', methods=['POST'])
 def add_document_qdrant():
-    current_app.logger.info("--- /add_document Request (Qdrant & KG Prep) ---")
+    # ... (your existing /add_document endpoint logic)
+    # This remains unchanged as it deals with Qdrant.
+    current_app.logger.info("--- /add_document Request (Qdrant) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
-    try:
-        # Assuming get_qdrant_service_from_app is defined and handles service availability
-        qdrant_svc = get_qdrant_service_from_app() # Or your actual helper name
-    except ConnectionError as e: # If the helper raises ConnectionError when service is unavailable
-        current_app.logger.error(f"Failed to get Qdrant service: {e}")
-        return create_error_response(f"VectorDBService (Qdrant) is not available: {e}", 503)
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
 
     data = request.get_json()
     user_id = data.get('user_id')
-    file_path = data.get('file_path') # Path ON THE SERVER where Node.js has placed/uploaded the file
+    file_path = data.get('file_path')
     original_name = data.get('original_name')
 
     if not all([user_id, file_path, original_name]):
         return create_error_response("Missing required fields: user_id, file_path, original_name", 400)
 
-    current_app.logger.info(f"Processing document: '{original_name}' (Path: '{file_path}') for user: '{user_id}'")
+    current_app.logger.info(f"Processing file: '{original_name}' (Path: '{file_path}') for user: '{user_id}' for Qdrant")
 
-    if not os.path.exists(file_path): # Critical check for the file path received from Node.js
-        current_app.logger.error(f"File not found at server path: {file_path} for document '{original_name}'")
+    if not os.path.exists(file_path):
+        current_app.logger.error(f"File not found at server path: {file_path}")
         return create_error_response(f"File not found at server path: {file_path}", 404)
 
     try:
-        current_app.logger.info(f"Calling ai_core to process document: '{original_name}' for embedding and KG data extraction.")
-        # Expecting three return values from ai_core:
-        # 1. Chunks ready for Qdrant (with embeddings)
-        # 2. Raw text for general analysis/logging
-        # 3. Metadata structured for KG creation (this might be raw text chunks, entities, summaries, etc.)
+        current_app.logger.info(f"Calling ai_core to process document: '{original_name}' for Qdrant")
+        # ai_core.process_document_for_qdrant returns: processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata
         processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata_for_kg = ai_core.process_document_for_qdrant(
             file_path=file_path,
             original_name=original_name,
             user_id=user_id
-            # You might need to pass other config like chunk_size, overlap if ai_core doesn't get them from config
         )
         
         num_chunks_added_to_qdrant = 0
-        # Define a clear default status. This status means ai_core ran but produced nothing useful for Qdrant or KG.
-        processing_status = "processed_no_actionable_content" 
+        processing_status = "processed_no_content_for_qdrant"
 
         if processed_chunks_with_embeddings:
-            current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} embedding chunks for '{original_name}'. Adding to Qdrant.")
-            num_chunks_added_to_qdrant = qdrant_svc.add_processed_chunks(processed_chunks_with_embeddings)
-            
+            current_app.logger.info(f"ai_core generated {len(processed_chunks_with_embeddings)} chunks for '{original_name}'. Adding to Qdrant.")
+            num_chunks_added_to_qdrant = app.vector_service.add_processed_chunks(processed_chunks_with_embeddings)
             if num_chunks_added_to_qdrant > 0:
-                processing_status = "added" # Changed to match assumed Node.js expectation
-                current_app.logger.info(f"Successfully added {num_chunks_added_to_qdrant} chunks from '{original_name}' to Qdrant. Status: {processing_status}")
+                processing_status = "added_to_qdrant"
             else:
-                processing_status = "processed_qdrant_chunks_not_added" # If chunks were processed but 0 added (e.g., all duplicates)
-                current_app.logger.info(f"Processed embedding chunks for '{original_name}' but 0 were added to Qdrant (e.g., duplicates or filter). Status: {processing_status}")
-        
-        # This 'elif' condition is for cases where no embeddings were made for Qdrant,
-        # but other processing (like text extraction for KG or just logging) happened.
-        elif raw_text_for_node_analysis or chunks_with_metadata_for_kg:
-            processing_status = "processed_for_kg_or_analysis_only" # No Qdrant action, but other data produced
-            current_app.logger.info(f"No embedding chunks for Qdrant from '{original_name}', but other data (raw text/KG metadata) was extracted. Status: {processing_status}")
-        
-        # If after all processing, no useful output for Qdrant, KG, or raw text, it's effectively 'no_content_extracted'
-        if not processed_chunks_with_embeddings and not raw_text_for_node_analysis and not chunks_with_metadata_for_kg:
-            processing_status = "no_content_extracted"
-            current_app.logger.warning(f"ai_core produced no RAG chunks, no raw text, and no KG metadata for '{original_name}'. Status: {processing_status}")
-            # For this case, you might still return 200 or 201 but with a clear message.
-            # The current structure will fall through to the main response_payload.
+                processing_status = "processed_qdrant_chunks_not_added"
+        elif raw_text_for_node_analysis:
+             current_app.logger.info(f"ai_core produced no processable Qdrant chunks for '{original_name}', but raw text was extracted.")
+             processing_status = "processed_for_analysis_only_no_qdrant"
+        else:
+            current_app.logger.warning(f"ai_core produced no Qdrant chunks and no raw text for '{original_name}'.")
+            return jsonify({
+                "message": f"Processed '{original_name}' but no content was extracted for Qdrant or analysis.",
+                "status": "no_content_extracted",
+                "filename": original_name,
+                "user_id": user_id,
+                "num_chunks_added_to_qdrant": 0,
+                "raw_text_for_analysis": ""
+            }), 200
 
         response_payload = {
-            "message": f"Document processing for '{original_name}' completed.", # General message
-            "status": processing_status, # The determined status
+            "message": f"Successfully processed '{original_name}' for Qdrant. Status: {processing_status}.",
+            "status": "added",
             "filename": original_name,
             "user_id": user_id,
             "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
             "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "",
-            "chunks_with_metadata": chunks_with_metadata_for_kg if chunks_with_metadata_for_kg else [] # Corrected key
+            "chunks_with_metadata": chunks_with_metadata_for_kg # Pass this to Node.js for KG worker
         }
-        current_app.logger.info(f"Successfully processed '{original_name}'. Response payload: {response_payload}")
-        return jsonify(response_payload), 201 # 201 indicates resource (or its processed form) was created/updated
+        current_app.logger.info(f"Successfully processed '{original_name}' for Qdrant. Returning raw text and Qdrant status.")
+        return jsonify(response_payload), 201
 
-    except config.TESSERACT_ERROR as te: # Catch specific Tesseract error
-        current_app.logger.critical(f"/add_document Error - Tesseract OCR not found/configured for '{original_name}': {te}", exc_info=True)
-        return create_error_response("OCR engine (Tesseract) not found or not configured correctly on the server.", 500, details=str(te))
-    except ValueError as ve: # e.g., vector dimension mismatch from Qdrant or bad input to a function
-        current_app.logger.error(f"/add_document Error - ValueError for '{original_name}': {ve}", exc_info=True)
-        return create_error_response(f"Configuration or data processing error: {str(ve)}", 400, details=str(ve))
-    except Exception as e: # Catch-all for other unexpected errors during processing
-        current_app.logger.error(f"/add_document Error - Unexpected Exception for '{original_name}': {e}", exc_info=True)
-        return create_error_response(f"Failed to process document '{original_name}' due to an internal server error.", 500, details=str(e))
-
-
-# server/app.py
-
-# ... (other imports, get_qdrant_service_from_app helper) ...
+    except FileNotFoundError as e:
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - FileNotFoundError: {e}", exc_info=True)
+        return create_error_response(f"File not found during Qdrant processing: {str(e)}", 404)
+    except config.TESSERACT_ERROR:
+        current_app.logger.critical(f"Add Document (Qdrant) Error for '{original_name}' - Tesseract (OCR) not found.")
+        return create_error_response("OCR engine (Tesseract) not found or not configured correctly on the server.", 500)
+    except ValueError as e:
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - ValueError: {e}", exc_info=True)
+        return create_error_response(f"Configuration or data error for Qdrant: {str(e)}", 400)
+    except Exception as e:
+        current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to process document '{original_name}' for Qdrant due to an internal error.", 500)
 
 @app.route('/query', methods=['POST'])
-def search_qdrant_documents():
-    current_app.logger.info("--- /query Request (Qdrant) ---")
-    if not request.is_json: return create_error_response("Request must be JSON", 400)
-    try:
-        qdrant_svc = get_qdrant_service_from_app() # Your helper to get the service
-    except ConnectionError as e:
-        current_app.logger.error(f"Failed to get Qdrant service for /query: {e}")
-        return create_error_response(str(e), 503)
+def search_qdrant_documents_and_get_kg(): # Renamed for clarity
+    current_app.logger.info("--- /query Request (Qdrant Search + KG Retrieval) ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
+
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
     
+    # Also check Neo4j driver availability for KG retrieval
+    try:
+        neo4j_handler.get_driver_instance() # Will raise ConnectionError if not available
+    except ConnectionError:
+        return create_error_response("Knowledge Graph service (Neo4j) is not available.", 503)
+
+
     data = request.get_json()
     query_text = data.get('query')
+    user_id_from_request = data.get('user_id') # <<< NEW: Expect user_id
     k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K)
-    filter_payload = data.get('filter') # From Node.js: payload.filter = filter;
+    filter_payload_from_request = data.get('filter') # This is the Qdrant filter
+    
+    qdrant_filters = None
 
-    if not query_text: return create_error_response("Missing 'query' field", 400)
+    if not query_text:
+        return create_error_response("Missing 'query' field in request body", 400)
+    if not user_id_from_request: # <<< NEW: Validate user_id
+        return create_error_response("Missing 'user_id' field in request body", 400)
+
+    # --- Qdrant Filter Setup ---
+    # The filter_payload_from_request is for Qdrant. It might contain user_id and original_name.
+    # It's important that if a filter is used for Qdrant, it's consistent with the user_id
+    # we'll use for KG retrieval. The client (Node.js) should ensure this consistency.
+    if filter_payload_from_request and isinstance(filter_payload_from_request, dict):
+        from qdrant_client import models as qdrant_models # Import here for safety
+        conditions = []
+        for key, value in filter_payload_from_request.items():
+            conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
+        if conditions:
+            qdrant_filters = qdrant_models.Filter(must=conditions)
+            current_app.logger.info(f"Applying Qdrant filter: {filter_payload_from_request}")
+    else:
+        current_app.logger.info("No Qdrant filter explicitly provided by client in this query.")
+
+
     try:
         k = int(k)
-        if k <= 0: raise ValueError("'k' must be a positive integer.")
-    except ValueError as e:
-        return create_error_response(str(e), 400)
+    except ValueError:
+        return create_error_response("'k' must be an integer", 400)
 
-    qdrant_filters = None
-    if filter_payload and isinstance(filter_payload, dict) and len(filter_payload) > 0:
-        try:
-            from qdrant_client import models as qdrant_models # Keep import local
-            conditions = []
-            # Example: if filter_payload is {"must": [{"key": "city", "match": {"value": "London"}}]}
-            # Adapt this based on the actual structure of filter_payload sent by Node.js
-            # For now, assuming a simple key-value filter_payload like {"source_document": "tom.txt"}
-            for key, value in filter_payload.items():
-                 # Qdrant's MatchValue is for exact matches. Adjust if other match types are needed.
-                conditions.append(qdrant_models.FieldCondition(key=f"metadata.{key}", match=qdrant_models.MatchValue(value=value)))
-            
-            if conditions:
-                qdrant_filters = qdrant_models.Filter(must=conditions)
-                current_app.logger.info(f"Applying Qdrant filter from payload: {qdrant_filters.dict()}")
-        except Exception as e_filter:
-            current_app.logger.error(f"Error constructing Qdrant filter: {e_filter}", exc_info=True)
-            return create_error_response("Error processing filter conditions.", 400, details=str(e_filter))
-    else:
-        current_app.logger.info("No valid filter payload provided or filter is empty.")
-
+    current_app.logger.info(f"Performing Qdrant search for user '{user_id_from_request}', query (first 50): '{query_text[:50]}...' with k={k}")
 
     try:
-        # EXPECTATION: qdrant_svc.search_documents returns:
-        # 1. docs: A list of objects, where each object has at least 'id', 'score', and 'payload'
-        #          (and 'payload' is a dict containing 'page_content', 'original_name', etc.)
-        #          OR each object has 'id', 'score', 'page_content', and 'metadata' (where 'metadata' has 'original_name')
-        # 2. formatted_context: A string (not directly used by Node.js for adapting docs)
-        # 3. docs_map: A dictionary (not directly used by Node.js for adapting docs for Gemini context)
-
-        docs_from_service, formatted_context_snippet, docs_map_details = qdrant_svc.search_documents(
-            query=query_text, k=k, filter_conditions=qdrant_filters # Pass the qdrant_filters object
+        # 1. Perform Qdrant Search
+        # `docs` is List[Document], `formatted_context` is str, `docs_map` is Dict
+        qdrant_retrieved_docs, formatted_context_snippet, qdrant_docs_map = vector_service.search_documents(
+            query=query_text,
+            k=k,
+            filter_conditions=qdrant_filters # Use the filter passed from client
         )
 
-        # SERIALIZE for JSON response - this list will become `response.data.retrieved_documents_list` in Node.js
-        serialized_docs_for_list = []
-        if docs_from_service:
-            current_app.logger.debug(f"Serializing {len(docs_from_service)} docs from qdrant_svc.search_documents")
-            for point in docs_from_service:
-                # Standardize the structure for Node.js
-                # Node.js expects to find 'score' at the top level,
-                # and 'page_content' and 'original_name' (etc.) within a sub-object.
-                # Qdrant's ScoredPoint has 'id', 'version', 'score', 'payload', 'vector'.
-                # We will send 'id', 'score', and the 'payload'.
-                
-                if hasattr(point, 'payload') and hasattr(point, 'score') and hasattr(point, 'id'):
-                    # This looks like a Qdrant ScoredPoint or similar structure
-                    serialized_doc = {
-                        "id": str(point.id), # Qdrant ID (string or int, convert to string for safety)
-                        "score": float(point.score),
-                        "payload": point.payload if point.payload is not None else {} # Ensure payload is at least an empty dict
-                    }
-                    # Ensure page_content is in the payload for Node.js
-                    if 'page_content' not in serialized_doc['payload'] and serialized_doc['payload'].get('text_content'):
-                        serialized_doc['payload']['page_content'] = serialized_doc['payload']['text_content']
-                    elif 'page_content' not in serialized_doc['payload'] and serialized_doc['payload'].get('content'):
-                         serialized_doc['payload']['page_content'] = serialized_doc['payload']['content']
-
-                    serialized_docs_for_list.append(serialized_doc)
-                elif hasattr(point, 'model_dump'): # Pydantic v2+ model
-                    serialized_docs_for_list.append(point.model_dump())
-                elif hasattr(point, 'dict'): # Pydantic v1.x model
-                    serialized_docs_for_list.append(point.dict())
-                else:
-                    current_app.logger.warning(f"Document from qdrant_svc.search_documents has an unexpected type: {type(point)}. Converting to string as fallback.")
-                    serialized_docs_for_list.append(str(point)) # Fallback, Node.js will likely fail to parse this meaningfully
-
-        current_app.logger.info(f"Qdrant search successful. Returning {len(serialized_docs_for_list)} serialized documents in list.")
+        # 2. Prepare KG Retrieval based on Qdrant results
+        knowledge_graphs_data = {} # To store KGs, mapping documentName to KG object
         
-        return jsonify({
+        if qdrant_retrieved_docs:
+            unique_doc_names_for_kg = set()
+            for doc_obj in qdrant_retrieved_docs:
+                # We need 'documentName' or 'original_name' from the Qdrant doc metadata
+                # to identify which KG to fetch.
+                doc_meta = doc_obj.metadata
+                doc_name_for_kg = doc_meta.get('documentName', doc_meta.get('original_name', doc_meta.get('file_name')))
+                
+                if doc_name_for_kg:
+                    unique_doc_names_for_kg.add(doc_name_for_kg)
+                else:
+                    current_app.logger.warning(f"Qdrant doc metadata missing document identifier (documentName/original_name/file_name) for chunk ID {doc_meta.get('qdrant_id', 'N/A')}. Cannot fetch KG for this chunk's document.")
+            
+            current_app.logger.info(f"Found {len(unique_doc_names_for_kg)} unique document(s) in Qdrant results to fetch KGs for: {list(unique_doc_names_for_kg)}")
+
+            for doc_name in unique_doc_names_for_kg:
+                try:
+                    current_app.logger.info(f"Fetching KG for document '{doc_name}' (User: {user_id_from_request})")
+                    kg_content = neo4j_handler.get_knowledge_graph(user_id_from_request, doc_name)
+                    if kg_content: # get_knowledge_graph returns None if not found
+                        knowledge_graphs_data[doc_name] = kg_content
+                        current_app.logger.info(f"Successfully retrieved KG for '{doc_name}'. Nodes: {len(kg_content.get('nodes',[]))}, Edges: {len(kg_content.get('edges',[]))}")
+                    else:
+                        current_app.logger.info(f"No KG found in Neo4j for document '{doc_name}' (User: {user_id_from_request}).")
+                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found"} # Indicate not found
+                except Exception as kg_err:
+                    current_app.logger.error(f"Error retrieving KG for document '{doc_name}': {kg_err}", exc_info=True)
+                    knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "error": f"Failed to retrieve KG: {str(kg_err)}"}
+
+
+        # 3. Construct Final Response Payload
+        response_payload = {
             "query": query_text,
             "k_requested": k,
-            "results_count": len(serialized_docs_for_list), # Count of docs successfully serialized
-            "formatted_context_snippet": formatted_context_snippet, # Keeping for potential direct use or debugging
-            "retrieved_documents_map": docs_map_details,         # Keeping for potential direct use or debugging
-            "retrieved_documents_list": serialized_docs_for_list # This is the key list for Node.js
-        }), 200
+            "user_id_processed": user_id_from_request, # Echo back user_id
+            "qdrant_filter_applied": filter_payload_from_request, # Show Qdrant filter used
+            "qdrant_results_count": len(qdrant_retrieved_docs),
+            "formatted_context_snippet": formatted_context_snippet,
+            "retrieved_documents_map": qdrant_docs_map, # From Qdrant vector_service
+            "retrieved_documents_list": [doc.to_dict() for doc in qdrant_retrieved_docs], # From Qdrant vector_service
+            "knowledge_graphs": knowledge_graphs_data # <<< NEW: KG data
+        }
         
-    except neo4j_exceptions.Neo4jError as ne: # If search_documents unexpectedly calls Neo4j
-        current_app.logger.error(f"Neo4jError during Qdrant search (unexpected): {ne}", exc_info=True)
-        return create_error_response("Unexpected Neo4j error during search.", 500, details=str(ne))
-    except ConnectionError as ce: # If get_qdrant_service_from_app fails within search_documents
-        current_app.logger.error(f"ConnectionError during Qdrant search: {ce}", exc_info=True)
-        return create_error_response("Qdrant connection error during search.", 503, details=str(ce))
+        current_app.logger.info(f"Qdrant search and KG retrieval successful. Returning {len(qdrant_retrieved_docs)} Qdrant docs and KGs for {len(knowledge_graphs_data)} documents.")
+        return jsonify(response_payload), 200
+
+    except ConnectionError as ce: # Catch Neo4j or Qdrant connection errors
+        current_app.logger.error(f"Service connection error during /query processing: {ce}", exc_info=True)
+        return create_error_response(f"A dependent service is unavailable: {str(ce)}", 503)
+    except neo4j_exceptions.Neo4jError as ne: # Catch specific Neo4j errors
+        current_app.logger.error(f"Neo4j database error during /query processing: {ne}", exc_info=True)
+        return create_error_response(f"Neo4j database operation failed: {ne.message}", 500)
     except Exception as e:
-        current_app.logger.error(f"General error during Qdrant search for query '{query_text}': {e}", exc_info=True)
-        return create_error_response("Error during Qdrant search.", 500, details=str(e))
+        current_app.logger.error(f"/query processing failed: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Error during query processing: {str(e)}", 500)
 
+@app.route('/delete_qdrant_document_data', methods=['DELETE']) # Ensure this route is defined
+def delete_qdrant_data_route():
+    current_app.logger.info("--- DELETE /delete_qdrant_document_data Request ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
 
-
-@app.route('/delete', methods=['POST'])
-def delete_document_embeddings_route():
-    current_app.logger.info("--- /delete Request (Qdrant) ---")
-    if not request.is_json: return create_error_response("Request must be JSON", 400)
-    try:
-        qdrant_svc = get_qdrant_service_from_app()
-    except ConnectionError as e:
-        return create_error_response(str(e), 503)
-        
-    data = request.get_json() # ... (rest of your delete logic using qdrant_svc)
-    user_id, original_name = data.get('user_id'), data.get('original_name')
-    if not all([user_id, original_name]): return create_error_response("Missing required fields", 400)
-    try:
-        deleted_count = qdrant_svc.delete_document_embeddings(user_id=user_id, original_name=original_name)
-        status_msg = "deleted" if deleted_count > 0 else "not_found_or_already_deleted"
-        return jsonify({"message": f"Embeddings for '{original_name}' by user '{user_id}'.", "deleted_count": deleted_count, "status": status_msg}), 200
-    except Exception as e:
-        current_app.logger.error(f"Error deleting Qdrant embeddings for '{original_name}': {e}", exc_info=True)
-        return create_error_response(f"Failed to delete embeddings for '{original_name}'.", 500, details=str(e))
-
-
-# --- Neo4j KG Endpoints ---
-@app.route("/kg", methods=["POST"])
-def add_kg_route():
-    current_app.logger.info("--- /kg POST Request (Neo4j) ---")
-    if not request.is_json: return create_error_response("Request must be JSON", 400)
-    try:
-        neo4j_svc = get_neo4j_service_from_app()
-    except ConnectionError as e:
-        return create_error_response(str(e), 503)
+    if not vector_service:
+        return create_error_response("VectorDBService (Qdrant) is not available.", 503)
 
     data = request.get_json()
-    user_id, original_name = data.get("user_id"), data.get("original_name")
-    nodes_data, edges_data = data.get("nodes", []), data.get("edges", [])
-    if not user_id or not original_name: return create_error_response("user_id and original_name are required", 400)
-    if not (isinstance(nodes_data, list) and isinstance(edges_data, list)): return create_error_response("'nodes' and 'edges' must be lists", 400)
-    current_app.logger.info(f"Adding/updating KG for user '{user_id}', doc '{original_name}' ({len(nodes_data)} nodes, {len(edges_data)} edges).")
-    try:
-        result = neo4j_svc.add_knowledge_graph(user_id, original_name, nodes_data, edges_data)
-        return jsonify(result), 201
-    except neo4j_exceptions.Neo4jError as e: # Catch specific Neo4j errors
-        return create_error_response("Neo4j database operation failed.", 500, details=str(e))
-    except ConnectionError as e: # Catch if get_driver in service fails after initial connect
-        return create_error_response(f"Neo4j connection issue: {str(e)}", 503, details=str(e))
-    except Exception as e:
-        return create_error_response("An unexpected error occurred during KG creation.", 500, details=str(e))
+    user_id = data.get('user_id')
+    document_name = data.get('document_name') 
 
-@app.route("/kg/<user_id>/<path:document_name>", methods=["GET"])
+    if not user_id or not document_name:
+        return create_error_response("Missing 'user_id' or 'document_name' in request body.", 400)
+
+    try:
+        # This assumes you have a method 'delete_document_vectors' in your vector_service
+        result = vector_service.delete_document_vectors(user_id, document_name) 
+        
+        if result.get("success"):
+            return jsonify({"message": result.get("message", "Qdrant vectors for document processed for deletion.")}), 200
+        else:
+            return create_error_response(result.get("message", "Failed to delete Qdrant vectors."), 500) # Or a more specific code
+            
+    except ConnectionError as ce:
+        current_app.logger.error(f"Qdrant connection error during /delete_qdrant_document_data for user {user_id}, doc {document_name}: {ce}", exc_info=True)
+        return create_error_response(f"Qdrant service connection error: {str(ce)}", 503)
+    except Exception as e:
+        current_app.logger.error(f"/delete_qdrant_document_data for user {user_id}, doc {document_name} failed: {e}", exc_info=True)
+        return create_error_response(f"Error during Qdrant data deletion: {str(e)}", 500)
+
+# === KG (Neo4j) Endpoints ===
+
+@app.route('/kg', methods=['POST'])
+def add_or_update_kg_route():
+    current_app.logger.info("--- POST /kg Request (Neo4j Ingestion) ---")
+    if not request.is_json:
+        return create_error_response("Request must be JSON", 400)
+
+    data = request.get_json()
+    user_id = data.get('userId') # Key from Node.js
+    original_name = data.get('originalName') # Key from Node.js
+    nodes = data.get('nodes')
+    edges = data.get('edges')
+
+    if not all([user_id, original_name, isinstance(nodes, list), isinstance(edges, list)]):
+        missing_fields = []
+        if not user_id: missing_fields.append("userId")
+        if not original_name: missing_fields.append("originalName")
+        if not isinstance(nodes, list): missing_fields.append("nodes (must be a list)")
+        if not isinstance(edges, list): missing_fields.append("edges (must be a list)")
+        return create_error_response(f"Missing or invalid fields: {', '.join(missing_fields)}", 400,
+                                     details=f"Received: userId type {type(user_id)}, originalName type {type(original_name)}, nodes type {type(nodes)}, edges type {type(edges)}")
+
+    logger.info(f"Attempting to ingest KG for user '{user_id}', document '{original_name}'. Nodes: {len(nodes)}, Edges: {len(edges)}")
+
+    try:
+        result = neo4j_handler.ingest_knowledge_graph(user_id, original_name, nodes, edges)
+        if result["success"]:
+            return jsonify({
+                "message": result["message"],
+                "userId": user_id,
+                "documentName": original_name, # Consistent key name
+                "nodes_affected": result["nodes_affected"],
+                "edges_affected": result["edges_affected"],
+                "status": "completed" # Status field as expected by Node.js
+            }), 201
+        else: # Should not happen if ingest_knowledge_graph raises on error
+            return create_error_response(result.get("message", "KG ingestion failed."), 500)
+            
+    except ConnectionError as e:
+        logger.error(f"Neo4j connection error during KG ingestion for '{original_name}': {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
+    except neo4j_exceptions.Neo4jError as e:
+        logger.error(f"Neo4jError during KG ingestion for '{original_name}': {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
+    except Exception as e:
+        logger.error(f"Unexpected error during KG ingestion for '{original_name}': {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to ingest Knowledge Graph: {str(e)}", 500)
+
+
+@app.route('/kg/<user_id>/<path:document_name>', methods=['GET']) # Use <path:document_name> to allow slashes
 def get_kg_route(user_id, document_name):
-    current_app.logger.info(f"--- /kg GET Request for user '{user_id}', doc '{document_name}' ---")
-    try:
-        neo4j_svc = get_neo4j_service_from_app()
-    except ConnectionError as e:
-        return create_error_response(str(e), 503)
-    try:
-        kg_data = neo4j_svc.get_knowledge_graph(user_id, document_name)
-        if kg_data: return jsonify(kg_data), 200
-        else: return create_error_response("Knowledge graph not found.", 404)
-    except neo4j_exceptions.Neo4jError as e:
-        return create_error_response("Neo4j database query failed.", 500, details=str(e))
-    except ConnectionError as e:
-        return create_error_response(f"Neo4j connection issue: {str(e)}", 503, details=str(e))
-    except Exception as e:
-        return create_error_response("An unexpected error occurred retrieving KG.", 500, details=str(e))
+    current_app.logger.info(f"--- GET /kg/{user_id}/{document_name} Request (Neo4j Retrieval) ---")
 
-@app.route("/kg/<user_id>/<path:document_name>", methods=["DELETE"])
+    # Basic sanitization (you might want more robust URL segment sanitization if needed)
+    sanitized_user_id = user_id.replace("..","").strip()
+    sanitized_document_name = document_name.replace("..","").strip()
+
+    if not sanitized_user_id or not sanitized_document_name:
+        return create_error_response("User ID and Document Name URL parameters are required and cannot be empty.", 400)
+
+    logger.info(f"Retrieving KG for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+
+    try:
+        kg_data = neo4j_handler.get_knowledge_graph(sanitized_user_id, sanitized_document_name)
+
+        if kg_data is None: # Handler returns None if not found
+            logger.info(f"No KG data found for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+            return create_error_response("Knowledge Graph not found for the specified user and document.", 404)
+
+        logger.info(f"Successfully retrieved KG for document '{sanitized_document_name}'. Nodes: {len(kg_data.get('nodes',[]))}, Edges: {len(kg_data.get('edges',[]))}")
+        return jsonify(kg_data), 200
+
+    except ConnectionError as e:
+        logger.error(f"Neo4j connection error during KG retrieval: {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
+    except neo4j_exceptions.Neo4jError as e:
+        logger.error(f"Neo4jError during KG retrieval: {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
+    except Exception as e:
+        logger.error(f"Unexpected error during KG retrieval: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to retrieve Knowledge Graph: {str(e)}", 500)
+
+
+@app.route('/kg/<user_id>/<path:document_name>', methods=['DELETE']) # Use <path:document_name>
 def delete_kg_route(user_id, document_name):
-    current_app.logger.info(f"--- /kg DELETE Request for user '{user_id}', doc '{document_name}' ---")
+    current_app.logger.info(f"--- DELETE /kg/{user_id}/{document_name} Request (Neo4j Deletion) ---")
+
+    sanitized_user_id = user_id.replace("..","").strip()
+    sanitized_document_name = document_name.replace("..","").strip()
+
+    if not sanitized_user_id or not sanitized_document_name:
+        return create_error_response("User ID and Document Name URL parameters are required and cannot be empty.", 400)
+
+    logger.info(f"Attempting to delete KG for user '{sanitized_user_id}', document '{sanitized_document_name}'.")
+
     try:
-        neo4j_svc = get_neo4j_service_from_app()
+        deleted = neo4j_handler.delete_knowledge_graph(sanitized_user_id, sanitized_document_name)
+        if deleted:
+            logger.info(f"Knowledge Graph for document '{sanitized_document_name}' (User: {sanitized_user_id}) deleted successfully.")
+            return jsonify({"message": "Knowledge Graph deleted successfully."}), 200
+        else:
+            logger.info(f"No Knowledge Graph found for document '{sanitized_document_name}' (User: {sanitized_user_id}) to delete.")
+            return create_error_response("Knowledge Graph not found for deletion.", 404)
+
     except ConnectionError as e:
-        return create_error_response(str(e), 503)
-    try:
-        result = neo4j_svc.delete_knowledge_graph(user_id, document_name)
-        if result.get("status") == "deleted": return jsonify(result), 200
-        elif result.get("status") == "not_found": return create_error_response(result.get("message"), 404)
-        else: return jsonify(result), 200 # Or handle unexpected status
+        logger.error(f"Neo4j connection error during KG deletion: {e}", exc_info=True)
+        return create_error_response(f"Neo4j connection error: {str(e)}. Please check service.", 503)
     except neo4j_exceptions.Neo4jError as e:
-        return create_error_response("Neo4j database deletion failed.", 500, details=str(e))
-    except ConnectionError as e:
-        return create_error_response(f"Neo4j connection issue: {str(e)}", 503, details=str(e))
+        logger.error(f"Neo4jError during KG deletion: {e}", exc_info=True)
+        return create_error_response(f"Neo4j database error: {e.message}", 500)
     except Exception as e:
-        return create_error_response("An unexpected error occurred deleting KG.", 500, details=str(e))
+        logger.error(f"Unexpected error during KG deletion: {e}\n{traceback.format_exc()}", exc_info=True)
+        return create_error_response(f"Failed to delete Knowledge Graph: {str(e)}", 500)
 
-# === Main Execution ===
+
 if __name__ == '__main__':
-    api_port = getattr(config, 'API_PORT', 5000)
-    logger.info(f"--- Starting RAG API Service on port {api_port} ---")
+    logger.info(f"--- Starting RAG API Service (with KG) on port {config.API_PORT} ---")
+    logger.info(f"Qdrant Host: {config.QDRANT_HOST}, Port: {config.QDRANT_PORT}, Collection: {config.QDRANT_COLLECTION_NAME}")
+    logger.info(f"Neo4j URI: {config.NEO4J_URI}, User: {config.NEO4J_USERNAME}, DB: {config.NEO4J_DATABASE}")
+    logger.info(f"Document Embedding Model (ai_core): {config.DOCUMENT_EMBEDDING_MODEL_NAME} (Dim: {config.DOCUMENT_VECTOR_DIMENSION})")
+    logger.info(f"Query Embedding Model (vector_db_service): {config.QUERY_EMBEDDING_MODEL_NAME} (Dim: {config.QUERY_VECTOR_DIMENSION})")
     
-    # Log status after initialization attempts
-    if getattr(app, 'vector_service_instance', None): logger.info("Qdrant Service: Initialized")
-    else: logger.warning("Qdrant Service: FAILED TO INITIALIZE / NOT AVAILABLE")
-    if getattr(app, 'neo4j_service_instance', None): logger.info(f"Neo4j Service: Initialized (URI: {config.NEO4J_URI})")
-    else: logger.warning("Neo4j Service: FAILED TO INITIALIZE / NOT AVAILABLE")
-
-    app.run(host='0.0.0.0', port=api_port, debug=True)
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=True) # debug=True for development

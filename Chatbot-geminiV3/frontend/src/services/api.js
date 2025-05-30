@@ -9,8 +9,12 @@ const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api",
 });
 
+
+
+
+
 // Axios Request Interceptor to add JWT token
-apiClient.interceptors.request.use(
+apiClient.interceptors.request.use( 
   (config) => {
     const token = localStorage.getItem("authToken");
     if (token) {
@@ -100,15 +104,14 @@ const api = {
     });
     return response.data; // Expects { message, filename (serverFilename), originalname }
   },
-
+  
+  // Completed✅
   getFiles: async () => {
+     
     const response = await apiClient.get("/files");
+    console.log("Response from /files ; ", response.data);
+    
     return response.data; // Expects array of file objects
-  },
-
-  renameFile: async (serverFilename, newOriginalName) => {
-    const response = await apiClient.patch(`/files/${serverFilename}`, { newOriginalName });
-    return response.data;
   },
 
   deleteFile: async (serverFilename) => {
@@ -186,3 +189,4 @@ const api = {
 };
 
 export default api;
+

@@ -1,5 +1,5 @@
 // frontend/src/components/layout/RightPanel.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useAppState } from '../../contexts/AppStateContext';
 import AnalysisTool from '../analysis/AnalysisTool.jsx'; // Added .jsx
 import { PanelRightClose, ChevronDown, ChevronUp, Telescope } from 'lucide-react';
@@ -11,7 +11,6 @@ function RightPanel() {
     const [isAnalyzerOpen, setIsAnalyzerOpen] = useState(true);
 
     const currentSelectedDocFilename = selectedDocumentForAnalysis?.originalName || null;
-
 
     return (
         <div className="flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar">

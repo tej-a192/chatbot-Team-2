@@ -45,7 +45,8 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename }) {
 
     // Dynamically select icon component based on iconName prop
     const IconComponent = LucideIcons[iconName] || LucideIcons.HelpCircle; // Default to HelpCircle if not found
-
+    console.log('selectedDocumentFilename :::: ', selectedDocumentFilename);
+    
     const handleRunAnalysis = async () => {
         if (!selectedDocumentFilename) {
             toast.error("Please select a document from the left panel first.");
@@ -58,6 +59,7 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename }) {
         const toastId = toast.loading(`Generating ${title} for ${selectedDocumentFilename}...`);
 
         try {
+            
             const payload = { filename: selectedDocumentFilename, analysis_type: toolType };
             const response = await api.requestAnalysis(payload); // Mocked in V1
             setResult(response.content);

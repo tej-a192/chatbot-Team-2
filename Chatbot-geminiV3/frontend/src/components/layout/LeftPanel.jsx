@@ -45,6 +45,7 @@ function LeftPanel() {
         setDocListKey(Date.now()); 
         toast.success("Document list refreshed after upload.");
     };
+    
 
     const SelectedPresetIcon = PROMPT_PRESETS.find(p => p.id === selectedPresetId)?.icon || Settings2;
 

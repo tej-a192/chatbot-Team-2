@@ -150,14 +150,18 @@ async function triggerPythonRagProcessing(userId, filePath, originalName) {
 
         console.log(`Python RAG service response for ${originalName}:`, response.data);
 
-        const text = response.data?.raw_text_for_analysis || "";
+        const text = response.data?.raw_text_for_analysis || ""; // This is initial_extracted_text
 
-        // --- DATABASE UPDATE | Filename & text ---
         if (response.data?.status === "added" && originalName && userId) {
             try {
                 const newDocumentEntry = {
                     filename: originalName,
-                    text: text,
+                    text: text, // Raw text from Python for storage and later re-analysis if needed
+                    analysis: { // Initialize analysis object matching schema defaults
+                        faq: "",
+                        topics: "",
+                        mindmap: ""
+                    }
                 };
 
                 const updatedUser = await User.findByIdAndUpdate(

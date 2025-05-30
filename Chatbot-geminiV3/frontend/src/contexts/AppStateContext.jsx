@@ -74,7 +74,7 @@ export const AppStateProvider = ({ children }) => {
 
     const selectDocumentForAnalysis = (documentFile) => {
         setSelectedDocumentForAnalysisState(documentFile);
-        // console.log("AppStateContext: Document selected for analysis:", documentFile?.originalName || null);
+        console.log("AppStateContext: Document selected for analysis:", documentFile?.originalName || null);
     };
 
     useEffect(() => {
