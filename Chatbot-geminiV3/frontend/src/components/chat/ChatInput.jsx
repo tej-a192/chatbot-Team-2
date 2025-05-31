@@ -1,6 +1,9 @@
+// src/components/chat/ChatInput.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, PlusCircle, Loader2, SearchCheck, SearchSlash } from 'lucide-react'; // SearchCheck for RAG on, SearchSlash for RAG off
-import { useWebSpeech } from '../../hooks/useWebSpeech'; // You'll need to create this hook
+import { Send, Mic, PlusCircle, Loader2, SearchCheck, SearchSlash } from 'lucide-react';
+import { useWebSpeech } from '../../hooks/useWebSpeech';
+import Button from '../core/Button.jsx'; // Assuming you might want to use your Button component
+import IconButton from '../core/IconButton.jsx';
 
 function ChatInput({ onSendMessage, isLoading, currentStatus, useRag, setUseRag }) {
     const [inputValue, setInputValue] = useState('');
@@ -10,41 +13,37 @@ function ChatInput({ onSendMessage, isLoading, currentStatus, useRag, setUseRag 
     useEffect(() => {
         if (transcript) {
             setInputValue(prev => prev + (prev ? " " : "") + transcript);
-            resetTranscript(); // Clear transcript after appending
+            resetTranscript(); 
         }
     }, [transcript, resetTranscript]);
     
-    // Auto-resize textarea
     useEffect(() => {
         if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto'; // Reset height
-            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`; // Set to scroll height
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`; // Max height 128px (max-h-32)
         }
     }, [inputValue]);
-
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (inputValue.trim() && !isLoading) {
-            onSendMessage(inputValue);
+            onSendMessage(inputValue.trim());
             setInputValue('');
         }
     };
 
-    const toggleVoiceInput = () => {
-        if (listening) {
-            stopListening();
-        } else {
-            startListening();
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
+            e.preventDefault(); // Prevent newline in textarea
+            handleSubmit(e);
         }
     };
 
     return (
-        <div className="p-2 sm:p-4 border-t border-gray-200 dark:border-gray-700 bg-surface-light dark:bg-surface-dark">
-            {/* Status Bar */}
+        <div className="p-2 sm:p-3 border-t border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark">
             <div className="text-xs text-text-muted-light dark:text-text-muted-dark mb-1.5 h-4 transition-opacity duration-300">
                 {isLoading ? (
-                    <span className="flex items-center gap-1 animate-pulse">
+                    <span className="flex items-center gap-1"> {/* Removed animate-pulse from span */}
                         <Loader2 size={12} className="animate-spin" /> {currentStatus || "Processing..."}
                     </span>
                 ) : (
@@ -53,68 +52,60 @@ function ChatInput({ onSendMessage, isLoading, currentStatus, useRag, setUseRag 
             </div>
 
             <form onSubmit={handleSubmit} className="flex items-end gap-2">
-                {/* Attachment/Plus Button - Placeholder */}
-                <button
-                    type="button"
+                <IconButton
+                    icon={PlusCircle}
                     title="Attach file (Coming Soon)"
-                    onClick={() => alert("Attachment feature coming soon!")}
-                    className="p-2.5 rounded-lg text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
-                >
-                    <PlusCircle size={22} />
-                </button>
+                    onClick={() => toast.info("Attachment feature coming soon!")}
+                    variant="ghost"
+                    size="md" // Standardize icon button size
+                    className="p-2 text-text-muted-light dark:text-text-muted-dark hover:text-primary"
+                    disabled={isLoading}
+                />
 
                 <textarea
                     ref={textareaRef}
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
-                            handleSubmit(e);
-                        }
-                    }}
-                    placeholder="DeepResearch... Type your message or ask a question"
-                    className="flex-1 p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-text-light dark:text-text-dark focus:ring-2 focus:ring-primary focus:border-transparent outline-none resize-none min-h-[44px] max-h-32 custom-scrollbar text-sm"
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type your message or ask a question..."
+                    className="input-field flex-1 p-2.5 resize-none min-h-[44px] max-h-32 custom-scrollbar text-sm" // Uses your global input-field
                     rows="1"
                     disabled={isLoading}
                 />
 
                 {isSpeechSupported && (
-                    <button
-                        type="button"
-                        onClick={toggleVoiceInput}
+                    <IconButton
+                        icon={Mic}
+                        onClick={() => listening ? stopListening() : startListening()}
                         title={listening ? "Stop listening" : "Start voice input"}
-                        className={`p-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary ${
-                            listening 
-                            ? 'bg-red-500 text-white animate-pulse' 
-                            : 'text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-600'
-                        }`}
-                    >
-                        <Mic size={20} />
-                    </button>
+                        variant={listening ? "danger" : "ghost"} // Example: use danger variant when listening
+                        size="md"
+                        className={`p-2 ${listening ? 'text-red-500 dark:text-red-400 animate-pulse' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
+                        disabled={isLoading}
+                    />
                 )}
                 
-                {/* RAG Toggle Button */}
-                <button
-                    type="button"
+                <IconButton
+                    icon={useRag ? SearchCheck : SearchSlash}
                     onClick={() => setUseRag(!useRag)}
                     title={useRag ? "Disable RAG (Chat with LLM directly)" : "Enable RAG (Use your documents)"}
-                    className={`p-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary ${
-                        useRag 
-                        ? 'bg-green-500 text-white' 
-                        : 'text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-600'
-                    }`}
+                    variant="ghost"
+                    size="md"
+                    className={`p-2 ${useRag ? 'text-green-500 dark:text-green-400' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
                     disabled={isLoading}
-                >
-                    {useRag ? <SearchCheck size={20} /> : <SearchSlash size={20} />}
-                </button>
+                />
 
-                <button
+                <Button // Using your Button component
                     type="submit"
-                    className="p-2.5 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-75 disabled:opacity-50"
+                    variant="primary"
+                    size="md" // Adjust size if needed, IconButton uses p-2 which is md for Button typically
+                    className="!p-2.5" // Override padding to match IconButton if desired
                     disabled={isLoading || !inputValue.trim()}
+                    isLoading={isLoading && inputValue.trim()} // Show loader on button only if it's this button causing load
+                    title="Send message"
                 >
-                    <Send size={20} />
-                </button>
+                    {!isLoading || !inputValue.trim() ? <Send size={20} /> : null}
+                </Button>
             </form>
         </div>
     );

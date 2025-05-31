@@ -449,6 +449,313 @@ function App() {
 export default App;
 ```
 
+`src/App2.jsx`
+
+```javascript
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from './hooks/useAuth.jsx';
+import { useAppState } from './contexts/AppStateContext.jsx';
+import AuthModal from './components/auth/AuthModal.jsx';
+import TopNav from './components/layout/TopNav.jsx';
+import LeftPanel from './components/layout/LeftPanel.jsx';
+import CenterPanel from './components/layout/CenterPanel.jsx';
+import RightPanel from './components/layout/RightPanel.jsx';
+import LeftCollapsedNav from './components/layout/LeftCollapsedNav.jsx';
+import RightCollapsedNav from './components/layout/RightCollapsedNav.jsx';
+import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
+import api from './services/api.js'; // This will use MOCKED API if api.js is set to DEV_MODE_MOCK_API = true
+import toast from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+
+function App() {
+    const { 
+        token, 
+        user, 
+        loading: authLoadingFromContext, // Renamed to avoid conflict with appInitializing
+        logout, 
+        setUser: setAuthUser, // From AuthContext, to update user details if login response has more
+    } = useAuth();
+
+    const { 
+        theme, 
+        isLeftPanelOpen, 
+        isRightPanelOpen, 
+        currentSessionId, 
+        setSessionId: setGlobalSessionId 
+    } = useAppState();
+    
+    // Local state for App.jsx's own initialization step AFTER AuthContext is ready
+    const [appInitializing, setAppInitializing] = useState(true); 
+    const [showAuthModal, setShowAuthModal] = useState(false); // Controls AuthModal visibility
+    const [messages, setMessages] = useState([]);
+    const [chatStatus, setChatStatus] = useState('Ready. Send a message to start!');
+    const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+    // Effect to apply Tailwind dark/light mode class to HTML element
+    useEffect(() => {
+        const rootHtmlElement = document.documentElement;
+        rootHtmlElement.classList.remove('light', 'dark'); // Clear previous
+        rootHtmlElement.classList.add(theme); // Add current
+        // Optional: If you have body-specific theme styles for elements not covered by Tailwind's dark: prefix
+        document.body.className = ''; 
+        document.body.classList.add(theme === 'dark' ? 'bg-background-dark' : 'bg-background-light');
+        console.log("App.jsx: Theme effect, theme is:", theme);
+    }, [theme]);
+
+    // Effect to handle initial authentication status and session setup
+    useEffect(() => {
+        console.log("App.jsx: Auth/Session useEffect. authLoading:", authLoadingFromContext, "Token:", token, "User:", user, "SessionId:", currentSessionId);
+        if (authLoadingFromContext) {
+            console.log("App.jsx: AuthContext is loading. App initializing...");
+            setAppInitializing(true); // Show app loader while AuthContext determines auth state
+            return;
+        }
+
+        // AuthContext has finished its loading
+        console.log("App.jsx: AuthContext finished loading. Token:", token);
+        if (!token) { // No token means user is not logged in
+            console.log("App.jsx: No token. Showing AuthModal.");
+            setShowAuthModal(true);
+            setAppInitializing(false); // Done with this phase of init, modal will show
+        } else { // Token exists, user is considered logged in
+            console.log("App.jsx: Token exists. Hiding AuthModal. User:", user);
+            setShowAuthModal(false); 
+            // If user is logged in (token exists, user object should be set by AuthContext soon if not already)
+            // AND there's no currentSessionId in AppStateContext, try to get/start one.
+            if (user && !currentSessionId) { 
+                console.log("App.jsx: User authenticated, but no currentSessionId. Starting new session via API.");
+                api.startNewSession() // This will be a MOCKED call in V1
+                    .then(data => {
+                        if (data && data.sessionId) {
+                            setGlobalSessionId(data.sessionId);
+                            console.log("App.jsx: New session started/set from API:", data.sessionId);
+                        } else {
+                            console.error("App.jsx: Mock api.startNewSession did not return sessionId.");
+                            toast.error("Could not initialize session (mock error).");
+                        }
+                    })
+                    .catch(err => {
+                        toast.error("Failed to start new session (mock error).");
+                        console.error("App.jsx: Error starting new session (mock):", err);
+                    });
+            } else if (!user && token) {
+                // This is an edge case: token present, but user object from AuthContext not yet propagated.
+                // AuthContext's useEffect should set the user. We can wait or re-check.
+                console.warn("App.jsx: Token exists, but user object is pending. Waiting for AuthContext to update user.");
+                setAppInitializing(true); // Remain in initializing state until user object is available
+                return; // Skip setting appInitializing to false yet
+            }
+            setAppInitializing(false); // Done with app-level init for authenticated user
+        }
+    }, [token, user, authLoadingFromContext, currentSessionId, setGlobalSessionId]);
+
+
+    // Effect to fetch orchestrator status (uses mocked API in V1)
+    useEffect(() => {
+        api.getOrchestratorStatus().then(statusData => {
+            setOrchestratorStatus(statusData);
+            console.log("App.jsx: Orchestrator status fetched (mocked):", statusData);
+        });
+        // Interval for status check can be added later for V2
+    }, []);
+
+    // Effect to fetch chat history when session ID or token changes
+    const fetchChatHistory = useCallback(async (sid) => {
+        if (!sid || !token) {
+            setMessages([]);
+            setChatStatus(token ? "Start or select a chat." : "Please login.");
+            return;
+        }
+        setChatStatus("Loading chat history (mocked)...");
+        try {
+            const historyData = await api.getChatHistory(sid); // Mocked call
+            const formattedMessages = (Array.isArray(historyData) ? historyData : []).map(msg => ({
+                id: msg.id || msg._id || String(Math.random() + Date.now()),
+                sender: msg.sender || (msg.role === 'model' ? 'bot' : 'user'),
+                text: msg.parts?.[0]?.text || msg.text || '',
+                thinking: msg.thinking, references: msg.references || [],
+                timestamp: msg.timestamp || new Date().toISOString(),
+                source_pipeline: msg.source_pipeline
+            }));
+            setMessages(formattedMessages);
+            setChatStatus(formattedMessages.length > 0 ? "Mock history loaded." : "Chat is empty (mock).");
+        } catch (error) {
+            toast.error(`Mock history load failed: ${error.message}`);
+            setChatStatus("Error loading mock history.");
+        }
+    }, [token]); 
+
+    useEffect(() => {
+        if (currentSessionId && token) {
+            fetchChatHistory(currentSessionId);
+        } else if (!token) { // If token becomes null (e.g., after logout)
+            setMessages([]);
+            setChatStatus("Please login.");
+        }
+    }, [currentSessionId, token, fetchChatHistory]);
+
+    // Callback for AuthModal upon successful login/signup (or dev login)
+    const handleAuthSuccess = (authData) => {
+        console.log("App.jsx: handleAuthSuccess called with data:", authData);
+        setShowAuthModal(false); // Close the modal
+        // AuthContext should have already set the token and user.
+        // App.jsx primarily needs to ensure the session ID is handled.
+        if (authData && authData.sessionId) {
+            setGlobalSessionId(authData.sessionId);
+        } else if (token && !currentSessionId) { // Fallback: if logged in but no session came from authData
+            api.startNewSession().then(data => setGlobalSessionId(data.sessionId));
+        }
+        // If authData (from backend login/signup) has more complete user info than what jwtDecode provided
+        if(authData && authData.username && authData._id){
+            setAuthUser({username: authData.username, id: authData._id}); 
+        }
+    };
+    
+    // Handler for logout action
+    const handleLogoutAndShowModal = () => {
+        logout(); // From AuthContext - clears token, user in context and localStorage
+        setGlobalSessionId(null); // Clear session in AppStateContext
+        localStorage.removeItem('aiTutorSessionId'); // Also clear from localStorage directly
+        setMessages([]);
+        setChatStatus("Logged out. Please login.");
+        setShowAuthModal(true); // Show AuthModal after logout
+        toast.success("Logged out successfully.");
+    };
+
+    // Handler for "New Chat" button
+    const handleNewChat = async () => {
+        try {
+            const data = await api.startNewSession(); // Mocked API call
+            setGlobalSessionId(data.sessionId);
+            setMessages([]); 
+            setChatStatus("New chat started (mock).");
+            toast.success("New mock chat started!");
+        } catch (error) {
+            toast.error("Failed to start new mock chat.");
+        }
+    };
+
+    // Handler for when a session is selected from ChatHistoryModal
+    const handleSelectSessionFromHistory = (sessionId) => {
+        if (sessionId && sessionId !== currentSessionId) {
+            setGlobalSessionId(sessionId); 
+            // fetchChatHistory will be called by its useEffect
+            toast.success(`Loading mock session...`);
+        } else if (sessionId === currentSessionId) {
+            toast.info("This session is already loaded.");
+        }
+        setIsHistoryModalOpen(false); 
+    };
+
+    // Render initial loading spinner if app or auth context is still initializing
+    if (appInitializing || authLoadingFromContext) { 
+        return (
+            <div className="fixed inset-0 flex flex-col items-center justify-center bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-primary mb-4"></div>
+                <p className="text-xl">Initializing AI Tutor...</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`flex flex-col h-screen overflow-hidden font-sans ${theme}`}>
+            <AnimatePresence>
+                {showAuthModal && !token && ( // Show AuthModal if flag is true AND user is not authenticated
+                    <AuthModal 
+                        isOpen={showAuthModal} 
+                        onClose={handleAuthSuccess} 
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Render main application UI if user is authenticated (token and user exist) */}
+            {(token && user) && (
+                <>
+                    <TopNav
+                        user={user}
+                        onLogout={handleLogoutAndShowModal}
+                        onNewChat={handleNewChat}
+                        onHistoryClick={() => setIsHistoryModalOpen(true)}
+                        orchestratorStatus={orchestratorStatus}
+                    />
+                    <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+                        {/* Left Panel Area */}
+                        <AnimatePresence mode="wait">
+                            {isLeftPanelOpen ? (
+                                <motion.aside 
+                                    key="left-panel-main"
+                                    initial={{ x: '-100%', opacity: 0 }}
+                                    animate={{ x: '0%', opacity: 1 }}
+                                    exit={{ x: '-100%', opacity: 0 }}
+                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                    className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar"
+                                >
+                                    <LeftPanel /> 
+                                </motion.aside>
+                            ) : (
+                                <LeftCollapsedNav /> // Shows icons and open button
+                            )}
+                        </AnimatePresence>
+                        
+                        {/* Center Panel */}
+                        <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 
+                                         transition-all duration-300 ease-in-out
+                                         ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} 
+                                         ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+                           <CenterPanel 
+                                messages={messages} 
+                                setMessages={setMessages} 
+                                currentSessionId={currentSessionId}
+                                chatStatus={chatStatus}
+                                setChatStatus={setChatStatus}
+                            />
+                        </main>
+
+                        {/* Right Panel Area */}
+                        <AnimatePresence mode="wait">
+                            {isRightPanelOpen ? (
+                                <motion.aside 
+                                    key="right-panel-main"
+                                    initial={{ x: '100%', opacity: 0 }}
+                                    animate={{ x: '0%', opacity: 1 }}
+                                    exit={{ x: '100%', opacity: 0 }}
+                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                    className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar"
+                                >
+                                    <RightPanel />
+                                </motion.aside>
+                            ) : (
+                                <RightCollapsedNav /> // Shows icons and open button
+                            )}
+                        </AnimatePresence>
+                    </div>
+                    
+                    {/* Chat History Modal */}
+                    <ChatHistoryModal
+                        isOpen={isHistoryModalOpen}
+                        onClose={() => setIsHistoryModalOpen(false)}
+                        onSelectSession={handleSelectSessionFromHistory}
+                    />
+                </>
+            )}
+            
+            {/* Fallback UI if not initializing, not authenticated, and AuthModal isn't showing (should be rare) */}
+            { !appInitializing && !token && !showAuthModal && (
+                 <div className="fixed inset-0 flex flex-col items-center justify-center bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark">
+                     <p className="text-xl">Please <button 
+                        onClick={()=> { setShowAuthModal(true); }} 
+                        className="text-primary hover:underline font-semibold"
+                        >log in</button> to continue.</p>
+                 </div>
+            )}
+        </div>
+    );
+}
+
+export default App;
+```
+
 `src/components/analysis/AnalysisTool.jsx`
 
 ```javascript
@@ -4027,10 +4334,28 @@ apiClient.interceptors.response.use(
   }
 );
 
+
+  // Helper function to parse thinking tags from content
+function parseAnalysisOutput(rawOutput) {
+    if (!rawOutput || typeof rawOutput !== 'string') {
+        return { content: '', thinking: '' };
+    }
+    const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    let thinkingText = '';
+    let mainContent = rawOutput;
+
+    if (thinkingMatch && thinkingMatch[1]) {
+        thinkingText = thinkingMatch[1].trim();
+        // Remove the thinking block (and any leading/trailing newlines around it) from the main content
+        mainContent = rawOutput.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim();
+    }
+    return { content: mainContent, thinking: thinkingText };
+}
+
 // --- API Definition Object ---
 const api = {
-  
-    // --- Helper to fetch stored analysis (can be internal to this module) ---
+
+  // --- Helper to fetch stored analysis (can be internal to this module) ---
   _getStoredDocumentAnalysis: async (documentFilename) => {
     try {
       // This GET request fetches the whole analysis object { faq, topics, mindmap }
@@ -4049,7 +4374,6 @@ const api = {
   // --- Unified and Intelligent requestAnalysis function ---
   // This function is called by AnalysisTool.jsx's "Run" button.
   requestAnalysis: async (payload) => {
-    // payload will be like { filename: "doc.pdf", analysis_type: "faq" }
     const { filename, analysis_type } = payload;
 
     if (!filename || !analysis_type) {
@@ -4060,68 +4384,375 @@ const api = {
     const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
 
     try {
-      // 1. Attempt to fetch existing analysis data from MongoDB via our backend
       const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
 
-      if (storedAnalysisData && 
-          storedAnalysisData[analysis_type] && 
+      if (storedAnalysisData &&
+          storedAnalysisData[analysis_type] &&
           typeof storedAnalysisData[analysis_type] === 'string' &&
           storedAnalysisData[analysis_type].trim() !== "") {
-        // Real data found for the specific analysis_type
+        
+        const { content: parsedContent, thinking: parsedThinking } = parseAnalysisOutput(storedAnalysisData[analysis_type]);
+        
         toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
         return {
-          content: storedAnalysisData[analysis_type],
-          thinking: `Retrieved stored ${analysis_type} data from the database.`
+          content: parsedContent,
+          thinking: parsedThinking || `Retrieved stored ${analysis_type} data. No specific thinking process recorded in content.`
         };
       } else {
-        // No stored data, or the specific field is empty. Proceed to mock generation.
-        toast.dismiss(toastId); // Dismiss the "checking" toast
+        toast.dismiss(toastId);
         const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
         console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
 
-        // --- MOCK GENERATION LOGIC (as per your original AnalysisTool's expectation) ---
-        // This part simulates what would happen in V2 if you hit a backend endpoint
-        // to *generate* new analysis, which would then save it to MongoDB.
-        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // Simulate delay
+        // --- MOCK GENERATION LOGIC ---
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
 
-        let mockContent = "";
-        const thinkingMessage = `Mock generation for ${analysis_type} on "${filename}". In a real scenario, this would involve AI processing and database updates.`;
+        let fullMockOutput = ""; // This will be the string as if LLM returned it, including <thinking> tags
 
         switch (analysis_type) {
           case 'faq':
-            mockContent = `## Mock FAQs for ${filename}\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            fullMockOutput = `<thinking>I will identify key details from the provided text about ${filename} to formulate 5-7 FAQs with concise answers directly from the text. My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking>\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
             break;
           case 'topics':
-            mockContent = `### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            fullMockOutput = `<thinking>I will identify the key topics in the provided biography of ${filename}. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text. I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
             break;
           case 'mindmap':
-            mockContent = `mindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
             break;
           default:
-            mockContent = `Mock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+            fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
         }
-        // In a real V2, the backend endpoint responsible for *generating* this analysis
-        // would save `mockContent` (the real generated content) to the database:
-        // User.uploadedDocuments.find(doc => doc.filename === filename).analysis[analysis_type] = realGeneratedContent;
-        // await user.save();
-        // For V1, this frontend mock doesn't save.
+
+        const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
+
         toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
         return {
-          content: mockContent,
-          thinking: thinkingMessage
+          content: parsedMockContent,
+          thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
         };
         // --- END MOCK GENERATION LOGIC ---
       }
     } catch (error) {
       toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
       console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
-      // Return a structure that AnalysisTool can handle to display an error
       return {
         content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
         thinking: "An error occurred during the analysis process."
       };
     }
   },
+
+  
+  // ------------------------------------------------- Auth --------------------------------------------------
+ 
+  // Completed✅
+  login: async (credentials) => {
+    const response = await apiClient.post("/auth/signin", credentials);
+    return response.data; // Expects { token, _id, username, sessionId, message }
+  },
+
+  // Completed✅
+  signup: async (userData) => {
+    const response = await apiClient.post("/auth/signup", userData);
+    return response.data; // Expects { token, _id, username, sessionId, message }
+  },
+
+  // Completed✅
+  getMe: async () => {
+    const response = await apiClient.get("/auth/me");
+    return response.data; // Expects { _id, username, ... }
+  },
+
+  // ------------------------------------------------ Chat -----------------------------------------------
+  
+  // Not completed yet❌
+  sendMessage: async (payload) => {
+    const response = await apiClient.post("/chat/message", payload);
+    return response.data; // Expects { reply: { role, parts, timestamp, ... } }
+  },
+
+  // Not completed yet❌
+  getChatHistory: async (sessionId) => {
+    const response = await apiClient.get(`/chat/session/${sessionId}`);
+    // Backend returns the full session object which includes { messages: [...] }
+    return response.data.messages || []; 
+  },
+
+  // Not completed yet❌
+  getChatSessions: async () => {
+    const response = await apiClient.get("/chat/sessions");
+    return response.data; // Expects array of session summaries
+  },
+
+  // Not completed yet❌
+  startNewSession: async () => {
+    // This call is to the backend's /api/chat/history to get a new session ID
+    // when the user explicitly clicks "New Chat" and is already logged in.
+    // The backend creates a new session placeholder if needed and returns a new UUID.
+    const response = await apiClient.post("/chat/history", { 
+        sessionId: `client-initiate-${Date.now()}`, // Temporary ID, backend replaces it
+        messages: [] 
+    });
+    // Expects { message, savedSessionId (can be null), newSessionId }
+    return { sessionId: response.data.newSessionId };
+  },
+
+  // Not completed yet❌
+  saveChatHistory: async (sessionId, messages) => {
+    const response = await apiClient.post("/chat/history", { sessionId, messages });
+    return response.data; // Expects { message, savedSessionId, newSessionId }
+  },
+
+ 
+  // -------------------------------------------------- Files ------------------------------------------------------
+  
+  // Completed✅
+  uploadFile: async (formData, onUploadProgress) => {
+    const response = await apiClient.post("/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress,
+    });
+    return response.data; // Expects { message, filename (serverFilename), originalname }
+  },
+  
+  // Completed✅
+  getFiles: async () => {
+     
+    const response = await apiClient.get("/files");
+    console.log("Response from /files ; ", response.data);
+    
+    return response.data; // Expects array of file objects
+  },
+
+  // Completed✅
+  deleteFile: async (serverFilename) => {
+    const response = await apiClient.delete(`/files/${serverFilename}`);
+    return response.data;
+  },
+  
+  // -------------------------------------------- User LLM Config ---------------------------------------------------
+  
+  // Not completed yet❌-
+  updateUserLLMConfig: async (configData) => {
+    // For V2, if backend stores user LLM preferences:
+    // const response = await apiClient.post('/user/config/llm', configData);
+    // return response.data;
+    console.warn("api.updateUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. This is a local mock via api.js.");
+    return new Promise(resolve => setTimeout(() => {
+        localStorage.setItem("selectedLLM", configData.llmProvider); // Still update local for UI
+        if (configData.apiKey) localStorage.setItem("mockGeminiApiKeyStatus", "set");
+        if (configData.ollamaUrl) localStorage.setItem("mockOllamaUrl", configData.ollamaUrl);
+        resolve({ message: `LLM preference for ${configData.llmProvider} noted (local mock via API layer).` });
+    }, 100));
+  },
+
+  // Not completed yet❌
+  getUserLLMConfig: async () => {
+    // For V2, if backend stores user LLM preferences:
+    // const response = await apiClient.get('/user/config/llm');
+    // return response.data; // expects { llmProvider }
+    console.warn("api.getUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. Returning local default via api.js.");
+    return new Promise(resolve => setTimeout(() => {
+        resolve({ llmProvider: localStorage.getItem("selectedLLM") || "ollama" });
+    }, 50));
+  },
+
+
+  // ----------------------------------------------- Status & Syllabus -------------------------------------------
+  
+  // Not completed yet❌
+  getOrchestratorStatus: async () => {
+    // For V2, Node.js backend could have its own /api/status endpoint.
+    // For now, this simulates a status.
+    console.warn("api.getOrchestratorStatus (frontend): Using a local mock via API layer for backend status.");
+    return new Promise(resolve => setTimeout(() => {
+        resolve({
+            status: "ok",
+            message: "Backend (Node.js - Mocked Status via Frontend API)",
+            database_status: "Connected (Mock)",
+        });
+    }, 50));
+    // Example real call:
+    // const response = await apiClient.get('/status'); // Assuming /api/status on Node.js backend
+    // return response.data;
+  },
+
+  // Not completed yet❌
+  getSyllabus: async (subjectId) => {
+    const response = await apiClient.get(`/syllabus/${subjectId}`);
+    return response.data.syllabus; // Backend returns { syllabus: "markdown_content" }
+  },
+
+  // Not completed yet❌
+  getMindmap: async () => {
+    const response = await apiClient.get('/mindmap'); // Assumes /api/mindmap on backend
+    return response.data; // Expects { mermaidCode: "...", source: "..." }
+  }
+};
+
+export default api;
+
+
+```
+
+`src/services/api2.js`
+
+```javascript
+// frontend/src/services/api.js
+import axios from "axios";
+import toast from "react-hot-toast";
+
+// --- CENTRAL CONTROL FLAG FOR MOCKING ---
+const DEV_MODE_MOCK_API = false; // <--- SET THIS TO false
+
+// --- Axios API Client (for real backend calls) ---
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api",
+});
+
+
+
+
+
+// Axios Request Interceptor to add JWT token
+apiClient.interceptors.request.use( 
+  (config) => {
+    const token = localStorage.getItem("authToken");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Axios Response Interceptor to handle common errors (e.g., 401)
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      console.error("API Interceptor: Received 401 Unauthorized. Token might be invalid or expired.");
+      // The AuthContext will handle the actual logout logic and UI update.
+      // We can dispatch a custom event that AuthContext can listen for,
+      // or AuthContext can catch the error from the API call directly.
+      // For simplicity, AuthContext will catch the error from the API call.
+      // localStorage.removeItem('authToken'); // AuthContext will handle this.
+    }
+    return Promise.reject(error);
+  }
+);
+
+
+  // Helper function to parse thinking tags from content
+function parseAnalysisOutput(rawOutput) {
+    if (!rawOutput || typeof rawOutput !== 'string') {
+        return { content: '', thinking: '' };
+    }
+    const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    let thinkingText = '';
+    let mainContent = rawOutput;
+
+    if (thinkingMatch && thinkingMatch[1]) {
+        thinkingText = thinkingMatch[1].trim();
+        // Remove the thinking block (and any leading/trailing newlines around it) from the main content
+        mainContent = rawOutput.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim();
+    }
+    return { content: mainContent, thinking: thinkingText };
+}
+
+// --- API Definition Object ---
+const api = {
+
+  // --- Helper to fetch stored analysis (can be internal to this module) ---
+  // Completed✅
+  _getStoredDocumentAnalysis: async (documentFilename) => {
+    try {
+      // This GET request fetches the whole analysis object { faq, topics, mindmap }
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.info(`No stored analysis found for document: ${documentFilename}`);
+        return null; // Return null if no analysis record exists for the document
+      }
+      console.error(`Error fetching stored analysis for ${documentFilename}:`, error);
+      throw error; // Re-throw other errors to be handled by the caller
+    }
+  },
+
+  // --- Unified and Intelligent requestAnalysis function ---
+  // This function is called by AnalysisTool.jsx's "Run" button.
+  // Completed✅
+  requestAnalysis: async (payload) => {
+    const { filename, analysis_type } = payload;
+
+    if (!filename || !analysis_type) {
+      toast.error("Filename and analysis type are required.");
+      throw new Error("Filename and analysis_type are required for requestAnalysis.");
+    }
+
+    const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
+
+    try {
+      const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
+
+      if (storedAnalysisData &&
+          storedAnalysisData[analysis_type] &&
+          typeof storedAnalysisData[analysis_type] === 'string' &&
+          storedAnalysisData[analysis_type].trim() !== "") {
+        
+        const { content: parsedContent, thinking: parsedThinking } = parseAnalysisOutput(storedAnalysisData[analysis_type]);
+        
+        toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
+        return {
+          content: parsedContent,
+          thinking: parsedThinking || `Retrieved stored ${analysis_type} data. No specific thinking process recorded in content.`
+        };
+      } else {
+        toast.dismiss(toastId);
+        const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
+        console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
+
+        // --- MOCK GENERATION LOGIC ---
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+
+        let fullMockOutput = ""; // This will be the string as if LLM returned it, including <thinking> tags
+
+        switch (analysis_type) {
+          case 'faq':
+            fullMockOutput = `<thinking>I will identify key details from the provided text about ${filename} to formulate 5-7 FAQs with concise answers directly from the text. My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking>\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            break;
+          case 'topics':
+            fullMockOutput = `<thinking>I will identify the key topics in the provided biography of ${filename}. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text. I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            break;
+          case 'mindmap':
+            fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            break;
+          default:
+            fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+        }
+
+        const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
+
+        toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
+        return {
+          content: parsedMockContent,
+          thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
+        };
+        // --- END MOCK GENERATION LOGIC ---
+      }
+    } catch (error) {
+      toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
+      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
+      return {
+        content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
+        thinking: "An error occurred during the analysis process."
+      };
+    }
+  },
+
+  
   // ------------------------------------------------- Auth --------------------------------------------------
  
   // Completed✅

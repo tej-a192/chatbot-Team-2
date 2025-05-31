@@ -1,5 +1,5 @@
 // src/components/layout/CenterPanel.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import api from '../../services/api';
@@ -8,102 +8,142 @@ import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
 
 function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setChatStatus }) {
-    const { token } = useAuth();
-    // Get systemPrompt from global state
-    const { selectedLLM, systemPrompt } = useAppState(); 
-    const [useRag, setUseRag] = useState(false); // RAG toggle state
+    const { token, user } = useAuth();
+    const { selectedLLM, systemPrompt, selectedDocumentForAnalysis } = useAppState(); 
+    const [useRag, setUseRag] = useState(false); 
     const [isSending, setIsSending] = useState(false);
     
     const handleSendMessage = async (inputText) => {
-        if (!inputText.trim() || !token || isSending) return;
+        if (!inputText.trim() || !token || !currentSessionId || isSending) {
+            if (!currentSessionId) toast.error("No active session. Try 'New Chat'.");
+            return;
+        }
 
+        const clientSideId = `user-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const userMessage = {
-            id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            id: clientSideId, // Client-side ID for optimistic update
             sender: 'user',
+            role: 'user', // For backend
             text: inputText.trim(),
+            parts: [{ text: inputText.trim() }], // For backend
             timestamp: new Date().toISOString()
         };
+        
+        // Optimistic UI update
         setMessages(prev => [...prev, userMessage]);
         
         setIsSending(true);
-        let thinkingStatus = "Thinking...";
+        let currentThinkingStatus = "Connecting to AI...";
         if (useRag) {
-            thinkingStatus = `Searching docs & Thinking (${selectedLLM.toUpperCase()} RAG)...`;
+            currentThinkingStatus = `Searching documents & Contacting ${selectedLLM.toUpperCase()} (RAG)...`;
         } else {
-            thinkingStatus = `Thinking (${selectedLLM.toUpperCase()})...`;
+            currentThinkingStatus = `Contacting ${selectedLLM.toUpperCase()}...`;
         }
-        // Add system prompt to status if it's custom or not the default
-        const defaultInitialPrompt = "You are a helpful AI engineering tutor."; // Or fetch from your presets
-        if (systemPrompt && systemPrompt !== defaultInitialPrompt) {
-            thinkingStatus += ` (Mode: ${systemPrompt.substring(0,25)}...)`;
-        }
-        setChatStatus(thinkingStatus);
+        setChatStatus(currentThinkingStatus);
 
-
+        // Prepare history for backend (exclude the current optimistic user message)
+        const historyForBackend = messages.map(m => ({
+            // Backend expects: role, parts, timestamp (optionally thinking, references, source_pipeline for model messages)
+            role: m.sender === 'bot' ? 'model' : 'user',
+            parts: m.parts || [{ text: m.text }], // Ensure parts format
+            timestamp: m.timestamp,
+            ...(m.sender === 'bot' && { // Include these if they exist for bot messages
+                thinking: m.thinking,
+                references: m.references,
+                source_pipeline: m.source_pipeline
+            })
+        }));
+        
+        const payload = {
+            query: inputText.trim(), // This is the user's actual query text
+            history: historyForBackend,
+            sessionId: currentSessionId,
+            useRag: useRag,
+            llmProvider: selectedLLM, 
+            systemPrompt: systemPrompt,
+            // If RAG is enabled and a document is selected for analysis, you might pass its name
+            // The backend's /api/chat/message can then use this to filter RAG results
+            ...(useRag && selectedDocumentForAnalysis && { 
+                ragFilter: { document_name: selectedDocumentForAnalysis } // Example filter
+            })
+        };
+            
         try {
-            const historyForBackend = messages.map(m => ({
-                role: m.sender === 'bot' ? 'model' : 'user',
-                parts: [{ text: m.text }]
-            }));
-
-            const payload = {
-                query: inputText.trim(),
-                history: historyForBackend,
-                sessionId: currentSessionId,
-                useRag: useRag,
-                llmProvider: selectedLLM, // Send the selected LLM provider
-                systemPrompt: systemPrompt // Send the current system prompt text
-            };
+            console.log("CenterPanel: Sending payload to /api/chat/message:", payload);
+            const response = await api.sendMessage(payload); // Backend returns { reply: AIMessageObject }
             
-            const response = await api.sendMessage(payload);
-            
-            const botReply = response.reply;
-            if (botReply && botReply.parts && botReply.parts.length > 0) {
-                setMessages(prev => [...prev, {
-                    id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                    sender: 'bot',
-                    text: botReply.parts[0]?.text,
-                    thinking: botReply.thinking,
-                    references: botReply.references || [],
-                    timestamp: botReply.timestamp || new Date().toISOString(),
-                    source_pipeline: response.source_pipeline
-                }]);
-                setChatStatus(`Responded via ${response.source_pipeline || selectedLLM.toUpperCase()}.`);
+            if (response && response.reply) {
+                const aiReply = {
+                    ...response.reply, // Includes sender, text, parts, timestamp, thinking, references, source_pipeline
+                    id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}` // Client-side ID
+                };
+                setMessages(prev => [...prev, aiReply]);
+                setChatStatus(`Responded via ${aiReply.source_pipeline || selectedLLM.toUpperCase()}.`);
             } else {
-                throw new Error("Invalid response structure from AI.");
+                throw new Error("Invalid or empty response structure from AI service.");
             }
 
         } catch (error) {
             console.error("Error sending message:", error);
-            const errorText = error.response?.data?.message || error.message || 'Failed to get response.';
-            setMessages(prev => [...prev, { 
-                id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`, 
-                sender: 'bot', 
-                text: `Error: ${errorText}`,
-                timestamp: new Date().toISOString()
-            }]);
-            setChatStatus(`Error: ${errorText.substring(0,50)}...`);
+            const errorText = error.response?.data?.message || error.message || 'Failed to get response from AI.';
+            
+            // If backend sends a structured error reply, use it, otherwise create one
+            let errorReplyMessage;
+            if (error.response?.data?.reply) {
+                errorReplyMessage = {
+                    ...error.response.data.reply,
+                    id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`
+                };
+            } else {
+                errorReplyMessage = { 
+                    id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`, 
+                    sender: 'bot', 
+                    text: `Error: ${errorText}`,
+                    parts: [{ text: `Error: ${errorText}` }],
+                    timestamp: new Date().toISOString(),
+                    thinking: "Error processing request.",
+                    source_pipeline: "error"
+                };
+            }
+            setMessages(prev => [...prev, errorReplyMessage]);
+            setChatStatus(`Error: ${errorText.substring(0,70)}...`);
             toast.error(errorText);
         } finally {
             setIsSending(false);
         }
     };
+    
+    // Effect to update chat status if session ID changes or messages clear
+    useEffect(() => {
+        if (!currentSessionId) {
+            setChatStatus("Please login or start a new chat.");
+        } else if (messages.length === 0 && !isSending) {
+            setChatStatus("Ready. Send a message to start!");
+        }
+    }, [currentSessionId, messages, isSending]);
+
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
-            {messages.length === 0 && !isSending && (
+            {messages.length === 0 && !isSending && currentSessionId && (
                  <div className="p-6 sm:p-8 text-center text-text-muted-light dark:text-text-muted-dark animate-fadeIn">
-                    <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-text-light dark:text-text-dark">HELLO MY FRIEND,</h2>
-                    <p className="text-base sm:text-lg mb-3">HOW CAN I ASSIST YOU TODAY?</p>
+                    <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-text-light dark:text-text-dark">
+                        AI Engineering Tutor
+                    </h2>
+                    <p className="text-base sm:text-lg mb-3">Session ID: {currentSessionId.substring(0,8)}...</p>
                     <div className="text-xs sm:text-sm space-y-1">
-                        <p>
-                            Current LLM: <span className="font-semibold text-accent">{selectedLLM.toUpperCase()}</span>.
-                        </p>
+                        <p>Current LLM: <span className="font-semibold text-accent">{selectedLLM.toUpperCase()}</span>.</p>
                         <p className="max-w-md mx-auto">
                             Assistant Mode: <span className="italic">"{systemPrompt.length > 60 ? systemPrompt.substring(0,60)+'...' : systemPrompt}"</span>
                         </p>
+                        {selectedDocumentForAnalysis && (
+                            <p className="mt-1">
+                                Analysis Target: <span className="font-medium text-primary dark:text-primary-light">{selectedDocumentForAnalysis}</span>
+                            </p>
+                        )}
                         <p className="mt-2">
-                            Toggle "Use My Docs" below for RAG-enhanced chat.
+                            {useRag ? <span>RAG is <span className="text-green-500 font-semibold">ON</span>. Using your documents.</span> 
+                                  : <span>RAG is <span className="text-red-500 font-semibold">OFF</span>. Chatting directly with LLM.</span>}
                         </p>
                     </div>
                 </div>
