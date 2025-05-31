@@ -496,11 +496,17 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename }) {
     const [thinking, setThinking] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [isFetchingStored, setIsFetchingStored] = useState(false); // For fetching stored data
+
 
     // Dynamically select icon component based on iconName prop
     const IconComponent = LucideIcons[iconName] || LucideIcons.HelpCircle; // Default to HelpCircle if not found
     console.log('selectedDocumentFilename :::: ', selectedDocumentFilename);
     
+
+    
+
+
     const handleRunAnalysis = async () => {
         if (!selectedDocumentFilename) {
             toast.error("Please select a document from the left panel first.");
@@ -616,6 +622,294 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename }) {
     );
 }
 export default AnalysisTool;
+```
+
+`src/components/analysis/AnalysisToolRunner.jsx`
+
+```javascript
+// src/components/analysis/AnalysisToolRunner.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion'; // Ensure AnimatePresence for smooth dropdown
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon } from 'lucide-react'; // Sparkles for Reasoning
+import * as LucideIcons from 'lucide-react';
+import Button from '../core/Button.jsx';
+import IconButton from '../core/IconButton.jsx';
+import Modal from '../core/Modal.jsx';
+import { marked } from 'marked';
+import MindmapViewer from './MindmapViewer.jsx';
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+const createMarkup = (markdownText) => {
+    if (!markdownText) return { __html: '' };
+    const rawHtml = marked.parse(markdownText);
+    return { __html: rawHtml };
+};
+
+const escapeHtml = (unsafe) => {
+    if (typeof unsafe !== 'string') return '';
+    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/'/g, "'");
+};
+
+const ENGAGEMENT_TEXTS = {
+    faq: ["Analyzing FAQs...", "Identifying questions...", "Compiling answers..."],
+    topics: ["Extracting topics...", "Identifying themes...", "Summarizing points..."],
+    mindmap: ["Generating mind map...", "Structuring concepts...", "Visualizing..."],
+    default: ["Processing...", "Thinking...", "Working on it..."]
+};
+
+function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilename }) {
+    const [isSectionOpen, setIsSectionOpen] = useState(false); // For the main tool accordion
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false); // For the content dropdown after "Run"
+    
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+    
+    const [analysisContent, setAnalysisContent] = useState(null); // Stores the final analysis result
+    const [aiReasoning, setAiReasoning] = useState(null); // Stores the "thinking" part
+    
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [currentEngagementText, setCurrentEngagementText] = useState('');
+
+    const IconComponent = LucideIcons[iconName] || DefaultIcon;
+
+    // Effect to cycle through engagement texts during loading
+    useEffect(() => {
+        let intervalId;
+        if (isLoading) {
+            const texts = ENGAGEMENT_TEXTS[toolType] || ENGAGEMENT_TEXTS.default;
+            let textIndex = 0;
+            setCurrentEngagementText(texts[0]);
+            intervalId = setInterval(() => {
+                textIndex = (textIndex + 1) % texts.length;
+                setCurrentEngagementText(texts[textIndex]);
+            }, 1800);
+        } else {
+            setCurrentEngagementText('');
+        }
+        return () => clearInterval(intervalId);
+    }, [isLoading, toolType]);
+
+    // Reset states when document selection changes or tool is unmounted
+    useEffect(() => {
+        if (!selectedDocumentFilename) {
+            setIsLoading(false);
+            setError('');
+            setAnalysisContent(null);
+            setAiReasoning(null);
+            setIsDropdownOpen(false);
+            setIsSectionOpen(false); // Optionally close the section
+        } else {
+             setIsSectionOpen(true); // Optionally open the section when a doc is selected
+             // Clear previous results if a new document is selected
+             setAnalysisContent(null);
+             setAiReasoning(null);
+             setIsDropdownOpen(false);
+             setError('');
+        }
+    }, [selectedDocumentFilename]);
+
+    const handleRunAnalysis = async () => {
+        if (!selectedDocumentFilename) {
+            toast.error("Please select a document first.");
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        setAnalysisContent(null);
+        setAiReasoning(null);
+        setIsDropdownOpen(false); // Close dropdown if it was open, before running again
+
+        const payload = { filename: selectedDocumentFilename, analysis_type: toolType };
+        
+        try {
+            // api.requestAnalysis is intelligent: fetches stored or generates (mock)
+            const response = await api.requestAnalysis(payload); 
+
+            if (response) {
+                if (response.content && response.content.trim() !== "" && !response.content.startsWith("Error:")) {
+                    setAnalysisContent(response.content);
+                } else if (response.content && response.content.startsWith("Error:")) {
+                    setError(response.content);
+                    toast.error(`Error generating ${title}: ${response.content.substring(0,100)}`);
+                } else {
+                    setError(`No content returned for ${title}.`);
+                    toast.warn(`No content was generated for ${title}.`);
+                }
+                
+                if (response.thinking && response.thinking.trim() !== "") {
+                    setAiReasoning(response.thinking);
+                } else {
+                    setAiReasoning(response.content ? "Analysis complete. No detailed reasoning provided by AI for this step." : "AI reasoning not available.");
+                }
+                setIsDropdownOpen(true); // Open dropdown to show Reasoning & View button
+            } else {
+                throw new Error("Empty response from analysis service.");
+            }
+
+        } catch (err) {
+            const errorMessage = err.message || `Failed to generate or fetch ${title}.`;
+            setError(errorMessage);
+            toast.error(errorMessage);
+            console.error(`Run ${title} Analysis Error:`, err);
+            setIsDropdownOpen(false); // Ensure dropdown is closed on error
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const renderModalContent = () => {
+        if (!analysisContent) return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
+        if (toolType === 'mindmap') {
+            return <MindmapViewer markdownContent={analysisContent} />;
+        }
+        return (
+            <div 
+                className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark p-1 custom-scrollbar text-[0.8rem] leading-relaxed"
+                dangerouslySetInnerHTML={createMarkup(analysisContent)}
+            />
+        );
+    };
+
+    return (
+        <div className="card-base p-3">
+            {/* Header: Icon, Title, Run Button, Accordion Toggle */}
+            <div className="flex items-center justify-between">
+                <div 
+                    className="flex items-center gap-2 text-sm font-medium text-text-light dark:text-text-dark focus:outline-none w-full text-left cursor-pointer hover:text-primary dark:hover:text-primary-light transition-colors"
+                    onClick={() => setIsSectionOpen(!isSectionOpen)} // Allow toggling the main section
+                    aria-expanded={isSectionOpen}
+                >
+                    <IconComponent size={16} className="text-primary dark:text-primary-light flex-shrink-0" />
+                    <span className="flex-grow">{title}</span>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button
+                        onClick={handleRunAnalysis}
+                        variant="primary" 
+                        size="sm"
+                        className="!px-3 !py-1 text-xs"
+                        isLoading={isLoading} // Loader for the Run button itself
+                        disabled={!selectedDocumentFilename || isLoading} // Enable based on document selection
+                        title={!selectedDocumentFilename ? "Select a document first" : `Run ${title} Analysis`}
+                    >
+                       {isLoading ? currentEngagementText.split(' ')[0] : "Run"} {/* Show first word of engagement or "Run" */}
+                    </Button>
+                    <IconButton 
+                        icon={isSectionOpen ? ChevronUp : ChevronDown} 
+                        onClick={() => setIsSectionOpen(!isSectionOpen)} 
+                        size="sm" 
+                        variant="ghost"
+                        className="p-1"
+                        aria-label={isSectionOpen ? "Collapse section" : "Expand section"}
+                        disabled={isLoading && isSectionOpen} // Don't allow closing section if loading and already open
+                    />
+                </div>
+            </div>
+
+            {/* Main Accordion Content (conditionally rendered based on isSectionOpen) */}
+            <AnimatePresence>
+                {isSectionOpen && (
+                    <motion.div 
+                        key="tool-section-content"
+                        initial={{ height: 0, opacity: 0 }} 
+                        animate={{ height: 'auto', opacity: 1 }} 
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="mt-2 pt-2 border-t border-border-light dark:border-border-dark overflow-hidden" 
+                    >
+                        {/* Engagement Text (shown below Run button when loading) */}
+                        {isLoading && (
+                            <div className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 flex items-center justify-center gap-2 animate-fadeIn">
+                                <Loader2 size={14} className="animate-spin"/> {currentEngagementText}
+                            </div>
+                        )}
+
+                        {/* Error Display */}
+                        {error && !isLoading && (
+                            <div className="my-2 p-2 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-xs flex items-center gap-1">
+                                <AlertTriangle size={14} /> {error.length > 150 ? error.substring(0,147) + "..." : error}
+                            </div>
+                        )}
+                        
+                        {/* Dropdown for AI Reasoning and View Button (shown after successful run) */}
+                        {!isLoading && !error && (analysisContent || aiReasoning) && isDropdownOpen && (
+                            <motion.div
+                                key="analysis-dropdown"
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.2 }}
+                                className="mt-2 space-y-2"
+                            >
+                                {/* AI Reasoning Section */}
+                                {aiReasoning && (
+                                    <details className="group text-xs rounded-md border border-border-light dark:border-border-dark bg-surface-light dark:bg-gray-800 shadow-sm">
+                                        <summary className="flex items-center justify-between gap-1 p-2 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors rounded-t-md">
+                                            <span className="flex items-center gap-1.5 font-medium">
+                                                <Sparkles size={14} className="text-accent" /> AI Reasoning
+                                            </span>
+                                            <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
+                                        </summary>
+                                        <pre className="p-2.5 bg-gray-50 dark:bg-gray-900/50 rounded-b-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-40 overflow-y-auto custom-scrollbar">
+                                            <code>{escapeHtml(aiReasoning)}</code>
+                                        </pre>
+                                    </details>
+                                )}
+
+                                {/* View Button */}
+                                {analysisContent && (
+                                     <Button
+                                        onClick={() => setIsModalOpen(true)}
+                                        variant="outline" 
+                                        size="sm"
+                                        fullWidth
+                                        leftIcon={<Eye size={14}/>}
+                                        className="!py-1.5 text-xs border-primary/70 text-primary hover:bg-primary/10 dark:border-primary-light/70 dark:text-primary-light dark:hover:bg-primary-light/10"
+                                    >
+                                       View Full {title}
+                                    </Button>
+                                )}
+                            </motion.div>
+                        )}
+                        
+                        {/* Placeholder if no doc selected or no run yet */}
+                        {!isLoading && !isDropdownOpen && !error && (
+                            <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 text-center">
+                                {selectedDocumentFilename ? `Click "Run" to generate ${title} for "${selectedDocumentFilename}".` : "Select a document to enable analysis."}
+                            </p>
+                        )}
+
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Modal for Displaying Full Analysis Content */}
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={`Result for ${title}`}
+                size="xl" // Can be 'lg', 'xl', '2xl'
+            >
+                <div className="max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 bg-gray-50 dark:bg-gray-800 rounded-md shadow-inner">
+                    {/* Add a sub-header for context if selectedDocumentFilename is available */}
+                    {selectedDocumentFilename && (
+                        <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-2 border-b border-border-light dark:border-border-dark pb-1.5">
+                            Source Document: <strong>{selectedDocumentFilename}</strong>
+                        </p>
+                    )}
+                    {renderModalContent()}
+                </div>
+            </Modal>
+        </div>
+    );
+}
+export default AnalysisToolRunner;
 ```
 
 `src/components/analysis/MindmapViewer.jsx`
@@ -1663,7 +1957,8 @@ export default IconButton;
 `src/components/core/Modal.jsx`
 
 ```javascript
-import React, { useEffect } from 'react';
+// src/components/core/Modal.jsx
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -1673,78 +1968,136 @@ const Modal = ({
     title,
     children,
     footerContent,
-    size = 'md', // 'sm', 'md', 'lg', 'xl'
+    size = 'md', // 'sm', 'md', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', 'full'
     closeOnOverlayClick = true,
+    initialFocusRef, // Optional ref for focusing an element inside the modal on open
 }) => {
+    const modalRef = useRef(null);
+
+    // Handle Escape key for closing
     useEffect(() => {
         const handleEscapeKey = (event) => {
             if (event.key === 'Escape' && isOpen) {
                 onClose();
             }
         };
-        document.addEventListener('keydown', handleEscapeKey);
+        if (isOpen) {
+            document.addEventListener('keydown', handleEscapeKey);
+        }
         return () => {
             document.removeEventListener('keydown', handleEscapeKey);
         };
     }, [isOpen, onClose]);
+
+    // Handle focus trapping and initial focus
+    useEffect(() => {
+        if (isOpen) {
+            // Set focus to the initialFocusRef or the modal itself
+            if (initialFocusRef && initialFocusRef.current) {
+                initialFocusRef.current.focus();
+            } else if (modalRef.current) {
+                modalRef.current.focus(); // Fallback to modal itself
+            }
+
+            // Basic focus trapping (can be made more robust with a library)
+            const focusableElements = modalRef.current?.querySelectorAll(
+                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            );
+            if (focusableElements && focusableElements.length > 0) {
+                const firstElement = focusableElements[0];
+                const lastElement = focusableElements[focusableElements.length - 1];
+
+                const onKeyDown = (e) => {
+                    if (e.key === 'Tab') {
+                        if (e.shiftKey) { // Shift + Tab
+                            if (document.activeElement === firstElement) {
+                                lastElement.focus();
+                                e.preventDefault();
+                            }
+                        } else { // Tab
+                            if (document.activeElement === lastElement) {
+                                firstElement.focus();
+                                e.preventDefault();
+                            }
+                        }
+                    }
+                };
+                modalRef.current?.addEventListener('keydown', onKeyDown);
+                return () => modalRef.current?.removeEventListener('keydown', onKeyDown);
+            }
+        }
+    }, [isOpen, initialFocusRef]);
+
 
     const sizeClasses = {
         sm: 'max-w-sm',
         md: 'max-w-md',
         lg: 'max-w-lg',
         xl: 'max-w-xl',
-        '2xl': 'max-w-2xl'
+        '2xl': 'max-w-2xl',
+        '3xl': 'max-w-3xl',
+        '4xl': 'max-w-4xl',
+        '5xl': 'max-w-5xl',
+        full: 'max-w-full h-full rounded-none sm:rounded-lg sm:max-h-[95vh]', // Special case for full screen like
     };
 
     const backdropVariants = {
-        visible: { opacity: 1 },
-        hidden: { opacity: 0 },
+        visible: { opacity: 1, transition: { duration: 0.2, ease: "easeOut" } },
+        hidden: { opacity: 0, transition: { duration: 0.15, ease: "easeIn" } },
     };
 
     const modalVariants = {
-        hidden: { y: "-50px", opacity: 0 },
-        visible: { y: "0", opacity: 1 },
-        exit: { y: "50px", opacity: 0 }
+        hidden: { y: "-30px", opacity: 0, scale: 0.98, transition: { duration: 0.15, ease: "easeIn" } },
+        visible: { y: "0", opacity: 1, scale: 1, transition: { type: "spring", stiffness: 400, damping: 30, duration: 0.3 } },
+        exit: { y: "30px", opacity: 0, scale: 0.98, transition: { duration: 0.2, ease: "easeIn" } }
     };
 
     if (!isOpen) return null;
 
     return (
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
             {isOpen && (
                 <motion.div
                     key="modal-backdrop"
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-75"
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 dark:bg-black/80 backdrop-blur-sm"
                     initial="hidden"
                     animate="visible"
                     exit="hidden"
                     variants={backdropVariants}
-                    transition={{ duration: 0.2 }}
                     onClick={closeOnOverlayClick ? onClose : undefined}
+                    aria-labelledby="modal-title" // For screen readers
+                    role="dialog" // Role for the backdrop itself, more specific roles on content
+                    aria-modal="true" // Indicate it's a modal overlaying other content
                 >
                     <motion.div
-                        key="modal-content"
-                        className={`bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl w-full ${sizeClasses[size]} flex flex-col max-h-[90vh]`}
-                        role="dialog"
+                        key="modal-content-wrapper" // Changed key for potential AnimatePresence behavior
+                        ref={modalRef}
+                        tabIndex={-1} // Make the modal itself focusable for fallback
+                        className={`bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl w-full ${sizeClasses[size]} flex flex-col overflow-hidden
+                                    ${size === 'full' ? '' : 'max-h-[90vh] sm:max-h-[85vh]'}`} 
+                                    // Apply max-h unless it's 'full' size
+                        role="document" // The actual dialog content
                         aria-modal="true"
-                        aria-labelledby="modal-title"
+                        aria-labelledby={title ? "modal-title-text" : undefined} // Point to title if exists
                         initial="hidden"
                         animate="visible"
                         exit="exit"
                         variants={modalVariants}
-                        transition={{ type: "spring", stiffness: 300, damping: 30, duration: 0.3 }}
                         onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside modal
                     >
                         {/* Modal Header */}
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-light dark:border-border-dark sticky top-0 bg-surface-light dark:bg-surface-dark z-10 flex-shrink-0">
                             {title && (
-                                <h2 id="modal-title" className="text-lg font-semibold text-text-light dark:text-text-dark">
+                                <h2 id="modal-title-text" className="text-lg font-semibold text-text-light dark:text-text-dark truncate pr-4">
                                     {title}
                                 </h2>
                             )}
                             <button
                                 onClick={onClose}
-                                className="p-1 rounded-full text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                                className="p-1.5 rounded-full text-text-muted-light dark:text-text-muted-dark 
+                                           hover:bg-gray-200/80 dark:hover:bg-gray-700/80 
+                                           hover:text-red-500 dark:hover:text-red-400 
+                                           focus:outline-none focus:ring-2 focus:ring-primary dark:focus:ring-primary-light focus:ring-offset-1 dark:focus:ring-offset-surface-dark"
                                 aria-label="Close modal"
                             >
                                 <X size={20} />
@@ -1752,13 +2105,13 @@ const Modal = ({
                         </div>
 
                         {/* Modal Body */}
-                        <div className="px-6 py-5 overflow-y-auto flex-grow custom-scrollbar">
+                        <div className="px-5 py-4 overflow-y-auto flex-grow custom-scrollbar">
                             {children}
                         </div>
 
                         {/* Modal Footer */}
                         {footerContent && (
-                            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                            <div className="px-5 py-3.5 border-t border-border-light dark:border-border-dark flex justify-end gap-3 sticky bottom-0 bg-surface-light dark:bg-surface-dark z-10 flex-shrink-0">
                                 {footerContent}
                             </div>
                         )}
@@ -2680,20 +3033,20 @@ export default RightCollapsedNav;
 `src/components/layout/RightPanel.jsx`
 
 ```javascript
-// frontend/src/components/layout/RightPanel.jsx
-import React, { useEffect, useState } from 'react';
+// src/components/layout/RightPanel.jsx
+import React, { useState } from 'react'; // Removed useEffect if not used
 import { useAppState } from '../../contexts/AppStateContext';
-import AnalysisTool from '../analysis/AnalysisTool.jsx'; // Added .jsx
+// import AnalysisTool from '../analysis/AnalysisTool.jsx'; // Comment out or remove old import
+import AnalysisToolRunner from '../analysis/AnalysisToolRunner.jsx'; // <-- NEW IMPORT
 import { PanelRightClose, ChevronDown, ChevronUp, Telescope } from 'lucide-react';
-import IconButton from '../core/IconButton.jsx'; // Added .jsx
+import IconButton from '../core/IconButton.jsx';
 import { motion } from 'framer-motion';
 
 function RightPanel() {
     const { setIsRightPanelOpen, selectedDocumentForAnalysis } = useAppState();
     const [isAnalyzerOpen, setIsAnalyzerOpen] = useState(true);
 
-    const currentSelectedDocFilename = selectedDocumentForAnalysis?.originalName || null;
-
+    const currentSelectedDocFilename = selectedDocumentForAnalysis || null;
 
     return (
         <div className="flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar">
@@ -2730,9 +3083,10 @@ function RightPanel() {
                             <p>Select a document from the left panel to enable analysis tools.</p>
                         </div>
                     )}
-                    <AnalysisTool toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} />
-                    <AnalysisTool toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} />
-                    <AnalysisTool toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} />
+                    {/* Replace AnalysisTool with AnalysisToolRunner */}
+                    <AnalysisToolRunner toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} />
+                    <AnalysisToolRunner toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} />
+                    <AnalysisToolRunner toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} />
                 </motion.div>
             )}
         </div>
@@ -3629,6 +3983,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 ```javascript
 // frontend/src/services/api.js
 import axios from "axios";
+import toast from "react-hot-toast";
 
 // --- CENTRAL CONTROL FLAG FOR MOCKING ---
 const DEV_MODE_MOCK_API = false; // <--- SET THIS TO false
@@ -3674,40 +4029,141 @@ apiClient.interceptors.response.use(
 
 // --- API Definition Object ---
 const api = {
-  // --- Auth ---
+  
+    // --- Helper to fetch stored analysis (can be internal to this module) ---
+  _getStoredDocumentAnalysis: async (documentFilename) => {
+    try {
+      // This GET request fetches the whole analysis object { faq, topics, mindmap }
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.info(`No stored analysis found for document: ${documentFilename}`);
+        return null; // Return null if no analysis record exists for the document
+      }
+      console.error(`Error fetching stored analysis for ${documentFilename}:`, error);
+      throw error; // Re-throw other errors to be handled by the caller
+    }
+  },
+
+  // --- Unified and Intelligent requestAnalysis function ---
+  // This function is called by AnalysisTool.jsx's "Run" button.
+  requestAnalysis: async (payload) => {
+    // payload will be like { filename: "doc.pdf", analysis_type: "faq" }
+    const { filename, analysis_type } = payload;
+
+    if (!filename || !analysis_type) {
+      toast.error("Filename and analysis type are required.");
+      throw new Error("Filename and analysis_type are required for requestAnalysis.");
+    }
+
+    const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
+
+    try {
+      // 1. Attempt to fetch existing analysis data from MongoDB via our backend
+      const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
+
+      if (storedAnalysisData && 
+          storedAnalysisData[analysis_type] && 
+          typeof storedAnalysisData[analysis_type] === 'string' &&
+          storedAnalysisData[analysis_type].trim() !== "") {
+        // Real data found for the specific analysis_type
+        toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
+        return {
+          content: storedAnalysisData[analysis_type],
+          thinking: `Retrieved stored ${analysis_type} data from the database.`
+        };
+      } else {
+        // No stored data, or the specific field is empty. Proceed to mock generation.
+        toast.dismiss(toastId); // Dismiss the "checking" toast
+        const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
+        console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
+
+        // --- MOCK GENERATION LOGIC (as per your original AnalysisTool's expectation) ---
+        // This part simulates what would happen in V2 if you hit a backend endpoint
+        // to *generate* new analysis, which would then save it to MongoDB.
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // Simulate delay
+
+        let mockContent = "";
+        const thinkingMessage = `Mock generation for ${analysis_type} on "${filename}". In a real scenario, this would involve AI processing and database updates.`;
+
+        switch (analysis_type) {
+          case 'faq':
+            mockContent = `## Mock FAQs for ${filename}\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            break;
+          case 'topics':
+            mockContent = `### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            break;
+          case 'mindmap':
+            mockContent = `mindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            break;
+          default:
+            mockContent = `Mock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+        }
+        // In a real V2, the backend endpoint responsible for *generating* this analysis
+        // would save `mockContent` (the real generated content) to the database:
+        // User.uploadedDocuments.find(doc => doc.filename === filename).analysis[analysis_type] = realGeneratedContent;
+        // await user.save();
+        // For V1, this frontend mock doesn't save.
+        toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
+        return {
+          content: mockContent,
+          thinking: thinkingMessage
+        };
+        // --- END MOCK GENERATION LOGIC ---
+      }
+    } catch (error) {
+      toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
+      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
+      // Return a structure that AnalysisTool can handle to display an error
+      return {
+        content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
+        thinking: "An error occurred during the analysis process."
+      };
+    }
+  },
+  // ------------------------------------------------- Auth --------------------------------------------------
+ 
+  // Completed✅
   login: async (credentials) => {
-    // No mock for DEV_MODE_MOCK_API = false
     const response = await apiClient.post("/auth/signin", credentials);
     return response.data; // Expects { token, _id, username, sessionId, message }
   },
 
+  // Completed✅
   signup: async (userData) => {
     const response = await apiClient.post("/auth/signup", userData);
     return response.data; // Expects { token, _id, username, sessionId, message }
   },
 
+  // Completed✅
   getMe: async () => {
     const response = await apiClient.get("/auth/me");
     return response.data; // Expects { _id, username, ... }
   },
 
-  // --- Chat ---
+  // ------------------------------------------------ Chat -----------------------------------------------
+  
+  // Not completed yet❌
   sendMessage: async (payload) => {
     const response = await apiClient.post("/chat/message", payload);
     return response.data; // Expects { reply: { role, parts, timestamp, ... } }
   },
 
+  // Not completed yet❌
   getChatHistory: async (sessionId) => {
     const response = await apiClient.get(`/chat/session/${sessionId}`);
     // Backend returns the full session object which includes { messages: [...] }
     return response.data.messages || []; 
   },
 
+  // Not completed yet❌
   getChatSessions: async () => {
     const response = await apiClient.get("/chat/sessions");
     return response.data; // Expects array of session summaries
   },
 
+  // Not completed yet❌
   startNewSession: async () => {
     // This call is to the backend's /api/chat/history to get a new session ID
     // when the user explicitly clicks "New Chat" and is already logged in.
@@ -3720,12 +4176,16 @@ const api = {
     return { sessionId: response.data.newSessionId };
   },
 
+  // Not completed yet❌
   saveChatHistory: async (sessionId, messages) => {
     const response = await apiClient.post("/chat/history", { sessionId, messages });
     return response.data; // Expects { message, savedSessionId, newSessionId }
   },
 
-  // --- Files ---
+ 
+  // -------------------------------------------------- Files ------------------------------------------------------
+  
+  // Completed✅
   uploadFile: async (formData, onUploadProgress) => {
     const response = await apiClient.post("/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
@@ -3743,29 +4203,15 @@ const api = {
     return response.data; // Expects array of file objects
   },
 
+  // Completed✅
   deleteFile: async (serverFilename) => {
     const response = await apiClient.delete(`/files/${serverFilename}`);
     return response.data;
   },
-
-  // --- Analysis (Triggered by backend on upload, this is for fetching if needed) ---
-  requestAnalysis: async (payload) => {
-    // Note: Analysis is primarily triggered on the backend during file upload.
-    // This frontend API call might be used for re-triggering or specific analysis fetching.
-    // For V2, if this route exists on the backend, it would be:
-    // const response = await apiClient.post('/analysis/document', payload);
-    // return response.data;
-    console.warn("api.requestAnalysis (frontend) called. For V2, ensure backend /analysis/document endpoint is implemented if this is used.");
-    // Mocking a delay and a generic response for now if backend doesn't have it
-    return new Promise(resolve => setTimeout(() => {
-        resolve({ 
-            content: `Mocked analysis result for ${payload.analysis_type} on ${payload.filename}. Real endpoint needed for V2.`,
-            thinking: "Mocked thinking process (frontend API)."
-        });
-    }, 600));
-  },
   
-  // --- User LLM Config ---
+  // -------------------------------------------- User LLM Config ---------------------------------------------------
+  
+  // Not completed yet❌-
   updateUserLLMConfig: async (configData) => {
     // For V2, if backend stores user LLM preferences:
     // const response = await apiClient.post('/user/config/llm', configData);
@@ -3779,6 +4225,7 @@ const api = {
     }, 100));
   },
 
+  // Not completed yet❌
   getUserLLMConfig: async () => {
     // For V2, if backend stores user LLM preferences:
     // const response = await apiClient.get('/user/config/llm');
@@ -3789,7 +4236,10 @@ const api = {
     }, 50));
   },
 
-  // --- Status & Syllabus ---
+
+  // ----------------------------------------------- Status & Syllabus -------------------------------------------
+  
+  // Not completed yet❌
   getOrchestratorStatus: async () => {
     // For V2, Node.js backend could have its own /api/status endpoint.
     // For now, this simulates a status.
@@ -3806,11 +4256,13 @@ const api = {
     // return response.data;
   },
 
+  // Not completed yet❌
   getSyllabus: async (subjectId) => {
     const response = await apiClient.get(`/syllabus/${subjectId}`);
     return response.data.syllabus; // Backend returns { syllabus: "markdown_content" }
   },
 
+  // Not completed yet❌
   getMindmap: async () => {
     const response = await apiClient.get('/mindmap'); // Assumes /api/mindmap on backend
     return response.data; // Expects { mermaidCode: "...", source: "..." }
@@ -3820,6 +4272,12 @@ const api = {
 export default api;
 
 
+```
+
+`src/utils/aiResponseParser.jsx`
+
+```javascript
+// This file is used for the response handling of thinking and result
 ```
 
 `src/utils/helpers.js`

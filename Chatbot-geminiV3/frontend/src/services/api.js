@@ -44,10 +44,28 @@ apiClient.interceptors.response.use(
   }
 );
 
+
+  // Helper function to parse thinking tags from content
+function parseAnalysisOutput(rawOutput) {
+    if (!rawOutput || typeof rawOutput !== 'string') {
+        return { content: '', thinking: '' };
+    }
+    const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    let thinkingText = '';
+    let mainContent = rawOutput;
+
+    if (thinkingMatch && thinkingMatch[1]) {
+        thinkingText = thinkingMatch[1].trim();
+        // Remove the thinking block (and any leading/trailing newlines around it) from the main content
+        mainContent = rawOutput.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim();
+    }
+    return { content: mainContent, thinking: thinkingText };
+}
+
 // --- API Definition Object ---
 const api = {
-  
-    // --- Helper to fetch stored analysis (can be internal to this module) ---
+
+  // --- Helper to fetch stored analysis (can be internal to this module) ---
   _getStoredDocumentAnalysis: async (documentFilename) => {
     try {
       // This GET request fetches the whole analysis object { faq, topics, mindmap }
@@ -66,7 +84,6 @@ const api = {
   // --- Unified and Intelligent requestAnalysis function ---
   // This function is called by AnalysisTool.jsx's "Run" button.
   requestAnalysis: async (payload) => {
-    // payload will be like { filename: "doc.pdf", analysis_type: "faq" }
     const { filename, analysis_type } = payload;
 
     if (!filename || !analysis_type) {
@@ -77,68 +94,64 @@ const api = {
     const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
 
     try {
-      // 1. Attempt to fetch existing analysis data from MongoDB via our backend
       const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
 
-      if (storedAnalysisData && 
-          storedAnalysisData[analysis_type] && 
+      if (storedAnalysisData &&
+          storedAnalysisData[analysis_type] &&
           typeof storedAnalysisData[analysis_type] === 'string' &&
           storedAnalysisData[analysis_type].trim() !== "") {
-        // Real data found for the specific analysis_type
+        
+        const { content: parsedContent, thinking: parsedThinking } = parseAnalysisOutput(storedAnalysisData[analysis_type]);
+        
         toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
         return {
-          content: storedAnalysisData[analysis_type],
-          thinking: `Retrieved stored ${analysis_type} data from the database.`
+          content: parsedContent,
+          thinking: parsedThinking || `Retrieved stored ${analysis_type} data. No specific thinking process recorded in content.`
         };
       } else {
-        // No stored data, or the specific field is empty. Proceed to mock generation.
-        toast.dismiss(toastId); // Dismiss the "checking" toast
+        toast.dismiss(toastId);
         const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
         console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
 
-        // --- MOCK GENERATION LOGIC (as per your original AnalysisTool's expectation) ---
-        // This part simulates what would happen in V2 if you hit a backend endpoint
-        // to *generate* new analysis, which would then save it to MongoDB.
-        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // Simulate delay
+        // --- MOCK GENERATION LOGIC ---
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
 
-        let mockContent = "";
-        const thinkingMessage = `Mock generation for ${analysis_type} on "${filename}". In a real scenario, this would involve AI processing and database updates.`;
+        let fullMockOutput = ""; // This will be the string as if LLM returned it, including <thinking> tags
 
         switch (analysis_type) {
           case 'faq':
-            mockContent = `## Mock FAQs for ${filename}\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            fullMockOutput = `<thinking>I will identify key details from the provided text about ${filename} to formulate 5-7 FAQs with concise answers directly from the text. My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking>\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
             break;
           case 'topics':
-            mockContent = `### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            fullMockOutput = `<thinking>I will identify the key topics in the provided biography of ${filename}. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text. I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
             break;
           case 'mindmap':
-            mockContent = `mindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
             break;
           default:
-            mockContent = `Mock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+            fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
         }
-        // In a real V2, the backend endpoint responsible for *generating* this analysis
-        // would save `mockContent` (the real generated content) to the database:
-        // User.uploadedDocuments.find(doc => doc.filename === filename).analysis[analysis_type] = realGeneratedContent;
-        // await user.save();
-        // For V1, this frontend mock doesn't save.
+
+        const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
+
         toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
         return {
-          content: mockContent,
-          thinking: thinkingMessage
+          content: parsedMockContent,
+          thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
         };
         // --- END MOCK GENERATION LOGIC ---
       }
     } catch (error) {
       toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
       console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
-      // Return a structure that AnalysisTool can handle to display an error
       return {
         content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
         thinking: "An error occurred during the analysis process."
       };
     }
   },
+
+  
   // ------------------------------------------------- Auth --------------------------------------------------
  
   // Completed✅
