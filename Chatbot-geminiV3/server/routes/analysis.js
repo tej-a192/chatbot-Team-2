@@ -10,7 +10,7 @@ const User = require('../models/User');
 router.get('/:documentFilename', authMiddleware, async (req, res) => {
     const userId = req.user._id; // From authMiddleware
     const { documentFilename } = req.params;
-
+    
     if (!documentFilename) {
         return res.status(400).json({ message: 'Document filename parameter is required.' });
     }
