@@ -4,7 +4,7 @@
 START_DIR="."                 # Directory to start searching from (default: current directory)
 MAX_DEPTH=6                   # Max depth for find (0=start_dir, 1=immediate children, ..., 6 includes files 5 levels deep)
 OUTPUT_FILE="code.txt" # Name of the final Markdown file
-declare -a IGNORE_DIRS=("node_modules" "assets" "backup_assets" ".git" ".vscode" "dist" "build" "venv")
+declare -a IGNORE_DIRS=("node_modules" "assets" "backup_assets" ".git" ".vscode" "dist" "build" "venv" "indexes")
 declare -a INCLUDE_EXTENSIONS=("py" "js" "jsx" "py" "ts" "tsx" "css" "scss" "html" "txt" "env"  ) # Add file extensions to include
 
 # --- Script Logic ---

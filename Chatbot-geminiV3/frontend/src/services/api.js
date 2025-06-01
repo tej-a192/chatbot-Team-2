@@ -1,5 +1,6 @@
 // frontend/src/services/api.js
 import axios from "axios";
+import toast from "react-hot-toast";
 
 // --- CENTRAL CONTROL FLAG FOR MOCKING ---
 const DEV_MODE_MOCK_API = false; // <--- SET THIS TO false
@@ -43,9 +44,116 @@ apiClient.interceptors.response.use(
   }
 );
 
+
+  // Helper function to parse thinking tags from content
+function parseAnalysisOutput(rawOutput) {
+    if (!rawOutput || typeof rawOutput !== 'string') {
+        return { content: '', thinking: '' };
+    }
+    const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    let thinkingText = '';
+    let mainContent = rawOutput;
+
+    if (thinkingMatch && thinkingMatch[1]) {
+        thinkingText = thinkingMatch[1].trim();
+        // Remove the thinking block (and any leading/trailing newlines around it) from the main content
+        mainContent = rawOutput.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim();
+    }
+    return { content: mainContent, thinking: thinkingText };
+}
+
 // --- API Definition Object ---
 const api = {
-  // --- Auth ---
+
+  // --- Helper to fetch stored analysis (can be internal to this module) ---
+  _getStoredDocumentAnalysis: async (documentFilename) => {
+    try {
+      // This GET request fetches the whole analysis object { faq, topics, mindmap }
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.info(`No stored analysis found for document: ${documentFilename}`);
+        return null; // Return null if no analysis record exists for the document
+      }
+      console.error(`Error fetching stored analysis for ${documentFilename}:`, error);
+      throw error; // Re-throw other errors to be handled by the caller
+    }
+  },
+
+  // --- Unified and Intelligent requestAnalysis function ---
+  // This function is called by AnalysisTool.jsx's "Run" button.
+  requestAnalysis: async (payload) => {
+    const { filename, analysis_type } = payload;
+
+    if (!filename || !analysis_type) {
+      toast.error("Filename and analysis type are required.");
+      throw new Error("Filename and analysis_type are required for requestAnalysis.");
+    }
+
+    const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
+
+    try {
+      const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
+
+      if (storedAnalysisData &&
+          storedAnalysisData[analysis_type] &&
+          typeof storedAnalysisData[analysis_type] === 'string' &&
+          storedAnalysisData[analysis_type].trim() !== "") {
+        
+        const { content: parsedContent, thinking: parsedThinking } = parseAnalysisOutput(storedAnalysisData[analysis_type]);
+        
+        toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
+        return {
+          content: parsedContent,
+          thinking: parsedThinking || `Retrieved stored ${analysis_type} data. No specific thinking process recorded in content.`
+        };
+      } else {
+        toast.dismiss(toastId);
+        const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
+        console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
+
+        // --- MOCK GENERATION LOGIC ---
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+
+        let fullMockOutput = ""; // This will be the string as if LLM returned it, including <thinking> tags
+
+        switch (analysis_type) {
+          case 'faq':
+            fullMockOutput = `<thinking>I will identify key details from the provided text about ${filename} to formulate 5-7 FAQs with concise answers directly from the text. My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking>\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            break;
+          case 'topics':
+            fullMockOutput = `<thinking>I will identify the key topics in the provided biography of ${filename}. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text. I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+            break;
+          case 'mindmap':
+            fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+            break;
+          default:
+            fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+        }
+
+        const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
+
+        toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
+        return {
+          content: parsedMockContent,
+          thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
+        };
+        // --- END MOCK GENERATION LOGIC ---
+      }
+    } catch (error) {
+      toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
+      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
+      return {
+        content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
+        thinking: "An error occurred during the analysis process."
+      };
+    }
+  },
+
+  
+  // ------------------------------------------------- Auth --------------------------------------------------
+ 
   // Completed✅
   login: async (credentials) => {
     const response = await apiClient.post("/auth/signin", credentials);
@@ -64,7 +172,7 @@ const api = {
     return response.data; // Expects { _id, username, ... }
   },
 
-  // --- Chat ---
+  // ------------------------------------------------ Chat -----------------------------------------------
   
   // Not completed yet❌
   sendMessage: async (payload) => {
@@ -104,7 +212,9 @@ const api = {
     return response.data; // Expects { message, savedSessionId, newSessionId }
   },
 
-  // --- Files ---
+ 
+  // -------------------------------------------------- Files ------------------------------------------------------
+  
   // Completed✅
   uploadFile: async (formData, onUploadProgress) => {
     const response = await apiClient.post("/upload", formData, {
@@ -128,11 +238,10 @@ const api = {
     const response = await apiClient.delete(`/files/${serverFilename}`);
     return response.data;
   },
-
- 
   
-  // --- User LLM Config ---
-  // Not completed yet❌
+  // -------------------------------------------- User LLM Config ---------------------------------------------------
+  
+  // Not completed yet❌-
   updateUserLLMConfig: async (configData) => {
     // For V2, if backend stores user LLM preferences:
     // const response = await apiClient.post('/user/config/llm', configData);
@@ -157,7 +266,8 @@ const api = {
     }, 50));
   },
 
-  // --- Status & Syllabus ---
+
+  // ----------------------------------------------- Status & Syllabus -------------------------------------------
   
   // Not completed yet❌
   getOrchestratorStatus: async () => {

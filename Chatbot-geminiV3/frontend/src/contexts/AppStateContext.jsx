@@ -9,41 +9,33 @@ export const useAppState = () => {
     return context;
 };
 
-const defaultSystemPromptText = "You are a helpful AI engineering tutor."; // Default prompt
+const defaultSystemPromptText = "You are a helpful AI engineering tutor.";
 
 export const AppStateProvider = ({ children }) => {
     const [theme, setThemeState] = useState(() => {
         const storedTheme = localStorage.getItem('theme') || 'dark';
-        // console.log("AppStateContext: Initial theme from localStorage or default:", storedTheme);
         if (typeof window !== 'undefined') {
-            const root = document.documentElement;
-            root.classList.remove('light', 'dark');
-            root.classList.add(storedTheme);
+            document.documentElement.classList.remove('light', 'dark');
+            document.documentElement.classList.add(storedTheme);
         }
         return storedTheme;
     });
 
-    const [selectedLLM, setSelectedLLM] = useState(localStorage.getItem('selectedLLM') || 'ollama');
+    const [selectedLLM, setSelectedLLM] = useState(localStorage.getItem('selectedLLM') || 'gemini'); // Default to gemini
     const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
     const [isRightPanelOpen, setIsRightPanelOpen] = useState(true); 
     
-    // Initialize currentSessionId from localStorage, or null if not found.
-    // App.jsx will handle setting it after login if null or from auth response.
     const [currentSessionId, setCurrentSessionIdState] = useState(() => {
-        const storedSessionId = localStorage.getItem('aiTutorSessionId');
-        // console.log("AppStateContext: Initial sessionId from localStorage:", storedSessionId);
-        return storedSessionId || null;
+        return localStorage.getItem('aiTutorSessionId') || null;
     });
     
     const [systemPrompt, setSystemPromptState] = useState(localStorage.getItem('aiTutorSystemPrompt') || defaultSystemPromptText);
     const [selectedDocumentForAnalysis, setSelectedDocumentForAnalysisState] = useState(null);
 
-
     const toggleTheme = () => {
         setThemeState(prevTheme => {
             const newTheme = prevTheme === 'light' ? 'dark' : 'light';
             localStorage.setItem('theme', newTheme);
-            // console.log("AppStateContext: Toggling theme to:", newTheme);
             return newTheme;
         });
     };
@@ -54,13 +46,11 @@ export const AppStateProvider = ({ children }) => {
          console.log("AppStateContext: Switched LLM to:", llm);
     };
     
-    const setSessionId = (sessionId) => {
+    const setSessionId = (sessionId) => { // This is setGlobalSessionId in App.jsx
         if (sessionId) {
             localStorage.setItem('aiTutorSessionId', sessionId);
-            // console.log("AppStateContext: Session ID persisted to localStorage:", sessionId);
         } else {
             localStorage.removeItem('aiTutorSessionId');
-            // console.log("AppStateContext: Session ID removed from localStorage.");
         }
         setCurrentSessionIdState(sessionId); 
         console.log("AppStateContext: Global session ID updated to:", sessionId);
@@ -69,19 +59,19 @@ export const AppStateProvider = ({ children }) => {
     const setSystemPrompt = (promptText) => {
         setSystemPromptState(promptText);
         localStorage.setItem('aiTutorSystemPrompt', promptText);
-        // console.log("AppStateContext: System prompt updated.");
     };
 
     const selectDocumentForAnalysis = (documentFile) => {
-        setSelectedDocumentForAnalysisState(documentFile);
-        console.log("AppStateContext: Document selected for analysis:", documentFile?.originalName || null);
+        setSelectedDocumentForAnalysisState(documentFile); // Stores filename string
+        console.log("AppStateContext: Document selected for analysis:", documentFile || null);
     };
 
     useEffect(() => {
-        // console.log("AppStateContext: Theme useEffect triggered. Current theme state:", theme);
         const rootHtmlElement = document.documentElement;
         rootHtmlElement.classList.remove('light', 'dark');
         rootHtmlElement.classList.add(theme);
+        document.body.className = ''; 
+        document.body.classList.add(theme === 'dark' ? 'bg-background-dark' : 'bg-background-light');
     }, [theme]);
 
     return (
@@ -90,7 +80,7 @@ export const AppStateProvider = ({ children }) => {
             selectedLLM, switchLLM,
             isLeftPanelOpen, setIsLeftPanelOpen,
             isRightPanelOpen, setIsRightPanelOpen,
-            currentSessionId, setSessionId, // Make sure this setSessionId is used by App.jsx
+            currentSessionId, setSessionId, 
             systemPrompt, setSystemPrompt,
             selectedDocumentForAnalysis, selectDocumentForAnalysis
         }}>

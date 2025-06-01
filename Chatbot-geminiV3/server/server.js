@@ -24,7 +24,7 @@ dotenv.config(); // Load environment variables
 // --- Configuration Defaults & Variables ---
 const DEFAULT_PORT = 5001;
 const DEFAULT_MONGO_URI = 'mongodb://localhost:27017/chatbotGeminiDB';
-const DEFAULT_PYTHON_RAG_URL = 'http://localhost:5002';
+const DEFAULT_PYTHON_RAG_URL = 'http://localhost:5000';
 
 let port = process.env.PORT || DEFAULT_PORT;
 let mongoUri = process.env.MONGO_URI || '';
