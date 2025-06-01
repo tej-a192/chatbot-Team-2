@@ -66,12 +66,12 @@ const ANALYSIS_THINKING_PREFIX_TEMPLATE = `**STEP 1: THINKING PROCESS (Recommend
 --- START DOCUMENT TEXT ---
 {doc_text_for_llm}
 --- END DOCUMENT TEXT ---
-`; // Note: Escaped backticks if your template string itself uses them inside.
+`;
 
 const ANALYSIS_PROMPTS = {
     faq: {
-        // No need for PromptTemplate class here, just the string parts
         getPrompt: (docTextForLlm) => {
+            // ... your existing faq prompt logic ...
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
 **TASK:** Generate 5-7 Frequently Asked Questions (FAQs) with concise answers based ONLY on the text.
@@ -90,6 +90,7 @@ const ANALYSIS_PROMPTS = {
     },
     topics: {
         getPrompt: (docTextForLlm) => {
+            // ... your existing topics prompt logic ...
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
 **TASK:** Identify the 5-8 most important topics discussed. Provide a 1-2 sentence explanation per topic based ONLY on the text.
@@ -106,6 +107,7 @@ const ANALYSIS_PROMPTS = {
     },
     mindmap: {
         getPrompt: (docTextForLlm) => {
+            // ... your existing mindmap prompt logic ...
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
 **TASK:** Generate a mind map outline in Markdown list format representing key concepts and hierarchy ONLY from the text.
@@ -122,7 +124,52 @@ const ANALYSIS_PROMPTS = {
     }
 };
 
-module.exports = { ANALYSIS_PROMPTS };
+const KG_GENERATION_SYSTEM_PROMPT = `You are an expert academic in the field relevant to the provided text. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment.
+The output MUST be a valid JSON object with "nodes" and "edges" sections.
+
+Instructions for Node Creation:
+1.  Identify CORE CONCEPTS or main topics discussed in the chunk. These should be 'major' nodes (parent: null).
+2.  Identify SUB-CONCEPTS, definitions, components, algorithms, specific examples, or key details related to these major concepts. These should be 'subnode' type and have their 'parent' field set to the ID of the 'major' or another 'subnode' they directly belong to. Aim for a granular breakdown.
+3.  Node 'id': Use a concise, descriptive, and specific term for the concept (e.g., "Linear Regression", "LMS Update Rule", "Feature Selection"). Capitalize appropriately.
+4.  Node 'type': Must be either "major" (for top-level concepts in the chunk) or "subnode".
+5.  Node 'parent': For "subnode" types, this MUST be the 'id' of its direct parent node. For "major" nodes, this MUST be null.
+6.  Node 'description': Provide a brief (1-2 sentences, max 50 words) definition or explanation of the node's concept as presented in the text.
+
+Instructions for Edge Creation:
+1.  Edges represent relationships BETWEEN the nodes you've identified.
+2.  The 'from' field should be the 'id' of the child/more specific node.
+3.  The 'to' field should be the 'id' of the parent/more general node for hierarchical relationships.
+4.  Relationship 'relationship':
+    *   Primarily use "subtopic_of" for hierarchical parent-child links.
+    *   Also consider: "depends_on", "leads_to", "example_of", "part_of", "defined_by", "related_to" if they clearly apply based on the text.
+5.  Ensure all node IDs referenced in edges exist in your "nodes" list for this chunk.
+
+Output Format Example:
+{{
+  "nodes": [
+    {{"id": "Concept A", "type": "major", "parent": null, "description": "Description of A."}},
+    {{"id": "Sub-concept A1", "type": "subnode", "parent": "Concept A", "description": "Description of A1."}},
+    {{"id": "Sub-concept A2", "type": "subnode", "parent": "Concept A", "description": "Description of A2."}},
+    {{"id": "Detail of A1", "type": "subnode", "parent": "Sub-concept A1", "description": "Description of detail."}}
+  ],
+  "edges": [
+    {{"from": "Sub-concept A1", "to": "Concept A", "relationship": "subtopic_of"}},
+    {{"from": "Sub-concept A2", "to": "Concept A", "relationship": "subtopic_of"}},
+    {{"from": "Detail of A1", "to": "Sub-concept A1", "relationship": "subtopic_of"}},
+    {{"from": "Sub-concept A1", "to": "Sub-concept A2", "relationship": "related_to"}} // Example of a non-hierarchical link
+  ]
+}}
+
+Analyze the provided text chunk carefully and generate the JSON. Be thorough in identifying distinct concepts and their relationships to create a rich graph.
+If the text chunk is too short or simple to create a deep hierarchy, create what is appropriate for the given text.
+`;
+// --- END OF KG GENERATION SYSTEM PROMPT ---
+
+
+module.exports = {
+    ANALYSIS_PROMPTS,
+    KG_GENERATION_SYSTEM_PROMPT
+};
 ```
 
 `middleware/authMiddleware.js`
@@ -180,23 +227,38 @@ module.exports = { authMiddleware }; // ONLY export this
 
 ```javascript
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid'); // For default message ID if needed
 
 const MessageSchema = new mongoose.Schema({
-    role: {
+    // id: { type: String, default: uuidv4 }, // Client usually generates this for optimistic updates
+    role: { // 'user' or 'model' (for Gemini compatibility)
         type: String,
-        enum: ['user', 'model'], // Gemini roles
+        enum: ['user', 'model'],
         required: true
     },
-    parts: [{
+    parts: [{ // Gemini structure
         text: {
             type: String,
             required: true
-        }
+        },
         // _id: false // Mongoose adds _id by default, can disable if truly not needed per part
     }],
     timestamp: {
         type: Date,
         default: Date.now
+    },
+    // Optional fields from AI response
+    thinking: {
+        type: String,
+        default: ''
+    },
+    references: {
+        type: Array, // Array of objects like { number, source, content_preview }
+        default: []
+    },
+    source_pipeline: { // e.g., "gemini-direct", "gemini-rag"
+        type: String,
+        default: ''
     }
 }, { _id: false }); // Don't create separate _id for each message object in the array
 
@@ -213,7 +275,7 @@ const ChatHistorySchema = new mongoose.Schema({
         unique: true,
         index: true,
     },
-    messages: [MessageSchema], // Array of message objects
+    messages: [MessageSchema],
     createdAt: {
         type: Date,
         default: Date.now,
@@ -224,25 +286,20 @@ const ChatHistorySchema = new mongoose.Schema({
     }
 });
 
-// Update `updatedAt` timestamp before saving any changes
 ChatHistorySchema.pre('save', function (next) {
-    if (this.isModified()) { // Only update if document changed
+    if (this.isModified()) {
       this.updatedAt = Date.now();
     }
     next();
 });
 
-// Also update `updatedAt` on findOneAndUpdate operations if messages are modified
 ChatHistorySchema.pre('findOneAndUpdate', function(next) {
   this.set({ updatedAt: new Date() });
   next();
 });
 
-
 const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
-
 module.exports = ChatHistory;
-
 ```
 
 `models/User.js`
@@ -394,6 +451,7 @@ PYPDF_AVAILABLE = config.PYPDF_AVAILABLE
 PDFPLUMBER_AVAILABLE = config.PDFPLUMBER_AVAILABLE
 PANDAS_AVAILABLE = config.PANDAS_AVAILABLE
 DOCX_AVAILABLE = config.DOCX_AVAILABLE
+PPTX_AVAILABLE = config.PPTX_AVAILABLE
 PIL_AVAILABLE = config.PIL_AVAILABLE
 FITZ_AVAILABLE = config.FITZ_AVAILABLE
 PYTESSERACT_AVAILABLE = config.PYTESSERACT_AVAILABLE
@@ -413,6 +471,7 @@ PyPDF2 = config.PyPDF2
 pdfplumber = config.pdfplumber
 pd = config.pd
 DocxDocument = config.DocxDocument
+Presentation = config.Presentation
 Image = config.Image
 fitz = config.fitz
 pytesseract = config.pytesseract
@@ -2652,11 +2711,10 @@ module.exports = router;
 ```javascript
 // server/routes/chat.js
 const express = require('express');
-const axios = require('axios');
-// const { tempAuth } = require('../middleware/authMiddleware'); // <-- REMOVE THIS IMPORT
-const ChatHistory = require('../models/ChatHistory');
 const { v4: uuidv4 } = require('uuid');
+const ChatHistory = require('../models/ChatHistory');
 const { generateContentWithHistory } = require('../services/geminiService');
+const axios = require('axios');
 
 const router = express.Router();
 
@@ -2664,257 +2722,301 @@ const router = express.Router();
 async function queryPythonRagService(userId, query, k = 5, filter = null) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
-        console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot query RAG service.");
-        throw new Error("RAG service configuration error.");
+        console.error("PYTHON_RAG_SERVICE_URL is not set. RAG features disabled for this request.");
+        return []; // Return empty if RAG is not configured, allowing fallback to direct LLM
     }
     const searchUrl = `${pythonServiceUrl}/query`;
-
-    console.log(`Querying Python RAG service for User ${userId} at ${searchUrl} with query (first 50): "${query.substring(0,50)}...", k=${k}`);
-
+    console.log(`Querying Python RAG: User ${userId}, Query (first 50): "${query.substring(0,50)}...", k=${k}`);
+    
     const payload = {
         query: query,
-        k: k
+        k: k,
+        user_id: userId // Ensure Python service expects 'user_id'
     };
 
     if (filter && typeof filter === 'object' && Object.keys(filter).length > 0) {
         payload.filter = filter;
         console.log(`  Applying filter to Python RAG search:`, filter);
-    } else {
-        console.log(`  No filter applied to Python RAG search.`);
     }
 
     try {
         const response = await axios.post(searchUrl, payload, {
             headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
+            timeout: 30000 // 30 seconds
         });
 
+        // Adapt this based on the exact structure of your Python RAG service's response
         if (response.data && Array.isArray(response.data.retrieved_documents_list)) {
-            console.log(`Python RAG service /search returned ${response.data.results_count} results.`);
-            const adaptedDocs = response.data.retrieved_documents_list.map(doc => {
-                const metadata = doc.metadata || {};
-                return {
-                    documentName: metadata.original_name || metadata.file_name || metadata.title || 'Unknown Document',
-                    content: doc.page_content || "",
-                    score: metadata.score,
-                };
-            });
-            console.log(`  Adapted ${adaptedDocs.length} documents for Node.js service.`);
-            return adaptedDocs;
-        } else {
-             console.warn(`Python RAG service /search returned unexpected data structure:`, response.data);
-             throw new Error("Received unexpected data structure from RAG search service.");
+            console.log(`Python RAG service /query returned ${response.data.retrieved_documents_list.length} results.`);
+            return response.data.retrieved_documents_list.map(doc => ({
+                documentName: doc.metadata?.original_name || doc.metadata?.file_name || doc.metadata?.title || 'Unknown Document',
+                content: doc.page_content || "",
+                score: doc.metadata?.score,
+                // Include other relevant metadata from Python RAG if needed
+            }));
         }
+        console.warn(`Python RAG /query returned unexpected data structure:`, response.data);
+        return [];
     } catch (error) {
-        const errorStatus = error.response?.status;
-        const errorData = error.response?.data;
-        let errorMsg = "Unknown RAG search error";
-
-        if (errorData) {
-            if (typeof errorData === 'string' && errorData.toLowerCase().includes("<!doctype html>")) {
-                errorMsg = `HTML error page received from Python RAG service (Status: ${errorStatus}). URL (${searchUrl}) might be incorrect or Python service has an issue.`;
-            } else {
-                errorMsg = errorData?.error || error.message || "Error response from RAG service had no specific message.";
-            }
-            console.error(`Error querying Python RAG service at ${searchUrl}. Status: ${errorStatus}, Python Error: ${errorMsg}`, errorData);
-        } else if (error.request) {
-            errorMsg = `No response received from Python RAG service at ${searchUrl}. It might be down or unreachable.`;
-            console.error(`Error querying Python RAG service at ${searchUrl}: No response received. ${error.message}`);
-        } else {
-            errorMsg = error.message;
-            console.error(`Error setting up or sending request to Python RAG service at ${searchUrl}: ${error.message}`);
-        }
-        throw new Error(`RAG Search Failed: ${errorMsg}`);
+        console.error(`Error querying Python RAG service at ${searchUrl}:`, error.message);
+        // Do not throw here, allow fallback to direct LLM
+        return []; 
     }
 }
 
-// --- @route   POST /api/chat/rag ---
-// No explicit middleware here; authMiddleware is applied in server.js for all /api/chat routes
-router.post('/rag', async (req, res) => {
-    const { message, filter } = req.body;
-    // req.user is populated by authMiddleware from server.js
-    const userId = req.user._id.toString();
-
-    if (!message || typeof message !== 'string' || message.trim() === '') {
-        return res.status(400).json({ message: 'Query message text required.' });
-    }
-
-    console.log(`>>> POST /api/chat/rag: User=${userId}. Query: "${message.substring(0,50)}..."`);
-
-    try {
-        const kValue = parseInt(process.env.RAG_DEFAULT_K) || 5;
-        const clientFilter = filter && typeof filter === 'object' ? filter : null;
-        const relevantDocs = await queryPythonRagService(userId, message.trim(), kValue, clientFilter);
-        console.log(`<<< POST /api/chat/rag successful for User ${userId}. Found ${relevantDocs.length} docs.`);
-        res.status(200).json({ relevantDocs });
-    } catch (error) {
-        console.error(`!!! Error processing RAG query for User ${userId}:`, error.message);
-        res.status(500).json({ message: error.message || "Failed to retrieve relevant documents." });
-    }
-});
 
 // --- @route   POST /api/chat/message ---
+// --- @desc    Send a message, get AI response, save interaction ---
+// --- @access  Private (authMiddleware applied in server.js) ---
 router.post('/message', async (req, res) => {
-    const { message, history, sessionId, systemPrompt, isRagEnabled, relevantDocs } = req.body;
-    const userId = req.user._id.toString();
+    // Payload from frontend's CenterPanel:
+    // { query, history, sessionId, useRag, llmProvider, systemPrompt }
+    const { query, history, sessionId, useRag, llmProvider, systemPrompt } = req.body;
+    const userId = req.user._id; // From authMiddleware
 
-    if (!message || typeof message !== 'string' || message.trim() === '') return res.status(400).json({ message: 'Message text required.' });
-    if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ message: 'Session ID required.' });
-    if (!Array.isArray(history)) return res.status(400).json({ message: 'Invalid history format.'});
-    const useRAG = !!isRagEnabled;
+    if (!query || typeof query !== 'string' || query.trim() === '') {
+        return res.status(400).json({ message: 'Query message text required.' });
+    }
+    if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: 'Session ID required.' });
+    }
+    if (!Array.isArray(history)) {
+        return res.status(400).json({ message: 'Invalid history format.'});
+    }
 
-    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRAG}. Query: "${message.substring(0,50)}..."`);
+    const currentTimestamp = new Date();
+    const userMessageForDb = {
+        role: 'user',
+        parts: [{ text: query.trim() }],
+        timestamp: currentTimestamp
+        // Note: 'id' for frontend display is generated client-side
+    };
 
-    let contextString = "";
-    let citationHints = [];
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}. Query: "${query.substring(0,50)}..."`);
 
     try {
-        if (useRAG && Array.isArray(relevantDocs) && relevantDocs.length > 0) {
-            console.log(`   RAG Enabled: Processing ${relevantDocs.length} relevant documents provided by client.`);
-            contextString = "Answer the user's question based primarily on the following context documents.\nIf the context documents do not contain the necessary information to answer the question fully, clearly state what information is missing from the context *before* potentially providing an answer based on your general knowledge.\n\n--- Context Documents ---\n";
-            relevantDocs.forEach((doc, index) => {
-                if (!doc || typeof doc.documentName !== 'string' || typeof doc.content !== 'string') {
-                    console.warn("   Skipping invalid/incomplete document in relevantDocs (missing 'documentName' or 'content'):", doc);
-                    return;
-                }
-                const docName = doc.documentName;
-                const scoreDisplay = doc.score !== undefined ? `(Rel. Score: ${doc.score.toFixed(4)})` : '';
-                const fullContent = doc.content;
-                contextString += `\n[${index + 1}] Source: ${docName} ${scoreDisplay}\nContent:\n${fullContent}\n---\n`;
-                citationHints.push(`[${index + 1}] ${docName}`);
-            });
-            contextString += "\n--- End of Context ---\n\n";
-            console.log(`   Constructed context string. ${citationHints.length} valid docs used.`);
-        } else {
-            console.log(`   RAG Disabled or no relevant documents provided by client.`);
+        let aiResponseMessageText;
+        let thinkingForAI = "User query received. Preparing response."; // Initial thinking
+        let referencesForResponse = [];
+        let actualSourcePipeline = `${llmProvider || 'gemini'}-direct`;
+
+        let contextForLLM = "";
+        let relevantDocsFromRag = [];
+
+        if (useRag) {
+            thinkingForAI = `Initiating RAG process for query...`;
+            actualSourcePipeline = `${llmProvider || 'gemini'}-rag`;
+            
+            // Call Python RAG service. Pass userId as string.
+            relevantDocsFromRag = await queryPythonRagService(userId.toString(), query.trim());
+
+            if (relevantDocsFromRag && relevantDocsFromRag.length > 0) {
+                thinkingForAI += ` Found ${relevantDocsFromRag.length} relevant document chunks. Constructing context.`;
+                contextForLLM = "Answer the user's question based primarily on the following context documents. If the context is insufficient, clearly state that before providing a general answer.\n\n--- Context Documents ---\n";
+                relevantDocsFromRag.forEach((doc, index) => {
+                    contextForLLM += `\n[${index + 1}] Source: ${doc.documentName} (Score: ${doc.score ? doc.score.toFixed(3) : 'N/A'})\nContent:\n${doc.content}\n---\n`;
+                    referencesForResponse.push({
+                        number: index + 1,
+                        source: doc.documentName,
+                        content_preview: doc.content.substring(0, 100) + (doc.content.length > 100 ? "..." : "")
+                    });
+                });
+                contextForLLM += "\n--- End of Context ---\n\nWhen referencing information ONLY from the context documents provided above, please cite the source using the format [Number] Document Name.\n\nUSER QUESTION: ";
+            } else {
+                thinkingForAI += ` No relevant document chunks found by RAG. Proceeding with direct LLM call.`;
+            }
         }
 
-        const historyForGeminiAPI = history.map(msg => ({
-             role: msg.role,
-             parts: msg.parts.map(part => ({ text: part.text || '' }))
-        })).filter(msg => msg && msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
+        // Prepare history for Gemini (or other LLM)
+        // Ensure history format is correct: [{role: 'user'/'model', parts: [{text: ...}]}]
+        const historyForLLM = history
+            .map(msg => ({
+                role: msg.sender === 'bot' ? 'model' : 'user', // Convert sender to role
+                parts: msg.parts && Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{ text: msg.text || '' }] // Ensure parts structure
+            }))
+            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
 
-        let finalUserQueryText = "";
-        if (contextString) {
-            const citationInstruction = `When referencing information ONLY from the context documents provided above, please cite the source using the format [Number] Document Name (e.g., ${citationHints.slice(0, Math.min(3, citationHints.length)).join(', ')}).`;
-            finalUserQueryText = `CONTEXT:\n${contextString}\nINSTRUCTIONS: ${citationInstruction}\n\nUSER QUESTION: ${message.trim()}`;
-        } else {
-            finalUserQueryText = message.trim();
-        }
+        const queryForLLM = contextForLLM + query.trim();
 
-        const finalHistoryForGemini = [
-            ...historyForGeminiAPI,
-            { role: "user", parts: [{ text: finalUserQueryText }] }
+        // Add current user query to history for the LLM call
+        const fullHistoryForLLM = [
+            ...historyForLLM,
+            { role: 'user', parts: [{ text: queryForLLM }] }
         ];
+        
+        console.log(`   Calling ${llmProvider || 'Gemini'} API. History length for LLM: ${fullHistoryForLLM.length}. System Prompt Used: ${!!systemPrompt}`);
+        
+        // For V1, we'll assume Gemini. Later, you can use llmProvider to switch services.
+        aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, systemPrompt);
+        thinkingForAI += ` LLM call successful. Response generated.`;
 
-        console.log(`   Calling Gemini API. History length for Gemini: ${finalHistoryForGemini.length}. System Prompt: ${!!systemPrompt}`);
-        const geminiResponseText = await generateContentWithHistory(finalHistoryForGemini, systemPrompt);
-        const modelResponseMessage = {
-            role: 'model',
-            parts: [{ text: geminiResponseText }],
-            timestamp: new Date()
+
+        const aiMessageForDbAndClient = {
+            // id: generated client-side
+            sender: 'bot', // For frontend
+            role: 'model', // For DB
+            parts: [{ text: aiResponseMessageText }],
+            text: aiResponseMessageText, // For frontend convenience
+            timestamp: new Date(),
+            thinking: thinkingForAI, // This is the "AI Reasoning"
+            references: referencesForResponse,
+            source_pipeline: actualSourcePipeline
         };
-        console.log(`<<< POST /api/chat/message successful for session ${sessionId}.`);
-        res.status(200).json({ reply: modelResponseMessage });
+
+        // Save to MongoDB
+        // Ensure messages in DB follow the MessageSchema (role, parts, timestamp)
+        const dbUserMessage = { role: 'user', parts: userMessageForDb.parts, timestamp: userMessageForDb.timestamp };
+        const dbAiMessage = { role: 'model', parts: aiMessageForDbAndClient.parts, timestamp: aiMessageForDbAndClient.timestamp, thinking: aiMessageForDbAndClient.thinking, references: aiMessageForDbAndClient.references, source_pipeline: aiMessageForDbAndClient.source_pipeline };
+
+
+        await ChatHistory.findOneAndUpdate(
+            { sessionId: sessionId, userId: userId },
+            { 
+                $push: { messages: { $each: [dbUserMessage, dbAiMessage] } },
+                $set: { updatedAt: new Date() } // Explicitly set updatedAt
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true } // upsert will create if not found
+        );
+        
+        console.log(`<<< POST /api/chat/message successful for Session ${sessionId}.`);
+        // Send the frontend-compatible message structure
+        res.status(200).json({ reply: aiMessageForDbAndClient }); 
 
     } catch (error) {
-        console.error(`!!! Error processing chat message for session ${sessionId}:`, error);
+        console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
         let statusCode = error.status || error.response?.status || 500;
         let clientMessage = error.message || error.response?.data?.message || "Failed to get response from AI service.";
-        if (statusCode === 500 && !error.response?.data?.message) {
-            clientMessage = "An internal server error occurred while processing the AI response.";
+        
+        const errorMessageForChat = {
+            sender: 'bot',
+            role: 'model',
+            parts: [{ text: `Error: ${clientMessage}` }],
+            text: `Error: ${clientMessage}`,
+            timestamp: new Date(),
+            thinking: `Error occurred during processing: ${error.message}`,
+            source_pipeline: 'error-pipeline'
+        };
+        
+        // Attempt to save the user's message and this error message to history
+        try {
+            const dbUserMessageOnError = { role: 'user', parts: userMessageForDb.parts, timestamp: userMessageForDb.timestamp };
+            const dbAiErrorMsg = { role: 'model', parts: errorMessageForChat.parts, timestamp: errorMessageForChat.timestamp, thinking: errorMessageForChat.thinking, source_pipeline: 'error-pipeline' };
+
+            await ChatHistory.findOneAndUpdate(
+                { sessionId: sessionId, userId: userId },
+                { 
+                    $push: { messages: { $each: [dbUserMessageOnError, dbAiErrorMsg] } },
+                    $set: { updatedAt: new Date() }
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } catch (dbError) {
+            console.error(`!!! CRITICAL: Failed to save error message to chat history for Session ${sessionId}:`, dbError);
         }
-        res.status(statusCode).json({ message: clientMessage });
+        res.status(statusCode).json({ message: clientMessage, reply: errorMessageForChat });
     }
 });
 
-// --- @route POST /api/chat/history ---
-router.post('/history', async (req, res) => {
-    const { sessionId, messages } = req.body;
-    const userId = req.user._id;
-    if (!sessionId) return res.status(400).json({ message: 'Session ID required to save history.' });
-    if (!Array.isArray(messages)) return res.status(400).json({ message: 'Invalid messages format.' });
 
-    console.log(`>>> POST /api/chat/history: User=${userId}, Session=${sessionId}, Messages=${messages.length}`);
+// --- @route   POST /api/chat/history ---
+// --- @desc    Primarily for generating a new session ID for "New Chat" button.
+// ---           Can also save an entire batch of messages if needed, but /message handles incremental.
+// --- @access  Private ---
+router.post('/history', async (req, res) => {
+    const { sessionId, messages } = req.body; 
+    const userId = req.user._id;
+
+    // Case 1: Client requests a new session ID (typical for "New Chat")
+    // This happens if sessionId is missing, or is a client-side temporary one,
+    // or if messages are empty (indicating a fresh start).
+    if (!sessionId || sessionId.startsWith('client-initiate-') || (Array.isArray(messages) && messages.length === 0)) {
+        const newServerSessionId = uuidv4();
+        console.log(`>>> POST /api/chat/history (New Session ID): User=${userId}. Client Temp SID: ${sessionId}. Generated New SID: ${newServerSessionId}`);
+        // We don't create an empty ChatHistory document here.
+        // The first call to /api/chat/message with this newServerSessionId will upsert it.
+        return res.status(200).json({
+            message: 'New session ID generated.',
+            savedSessionId: null, 
+            newSessionId: newServerSessionId // Key for the client
+        });
+    }
+
+    // Case 2: Explicitly save a batch of messages for an existing session
+    // This is less common for typical chat flow if /message saves incrementally.
+    if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ message: 'No valid messages provided to save for existing session.' });
+    }
+    
+    console.log(`>>> POST /api/chat/history (Explicit Save): User=${userId}, Session=${sessionId}, Messages=${messages.length}`);
     try {
-        const validMessages = messages.filter(m =>
-            m && typeof m.role === 'string' &&
+        // Validate and format messages for DB
+        const validMessagesForDb = messages.filter(m =>
+            m && typeof (m.sender === 'user' ? 'user' : 'model') === 'string' && // Check m.sender for role
             Array.isArray(m.parts) && m.parts.length > 0 &&
             typeof m.parts[0].text === 'string' &&
             m.timestamp
         ).map(m => ({
-            role: m.role,
-            parts: [{ text: m.parts[0].text }],
-            timestamp: new Date(m.timestamp)
+            role: m.sender === 'user' ? 'user' : 'model', // Convert sender to role
+            parts: m.parts.map(p => ({ text: p.text || ''})), // Ensure parts structure
+            timestamp: new Date(m.timestamp),
+            thinking: m.thinking || undefined,
+            references: m.references || undefined,
+            source_pipeline: m.source_pipeline || undefined
         }));
 
-        if (validMessages.length !== messages.length) {
-             console.warn(`Session ${sessionId}: Filtered out ${messages.length - validMessages.length} invalid messages during save attempt.`);
-        }
-        if (validMessages.length === 0 && messages.length > 0) {
-            console.warn(`Session ${sessionId}: All ${messages.length} messages were invalid. No history saved.`);
-            const newSessionIdForClient = uuidv4();
-            return res.status(200).json({
-                message: 'No valid messages to save. Chat not saved. New session ID provided.',
-                savedSessionId: null,
-                newSessionId: newSessionIdForClient
-            });
-        }
-        if (validMessages.length === 0 && messages.length === 0) {
-             console.log(`Session ${sessionId}: No messages provided to save. Generating new session ID for client.`);
-             const newSessionIdForClient = uuidv4();
-             return res.status(200).json({
-                 message: 'No history provided to save. New session ID for client.',
-                 savedSessionId: null,
-                 newSessionId: newSessionIdForClient
-             });
+        if (validMessagesForDb.length === 0) {
+            return res.status(400).json({ message: 'No valid messages to save after filtering.' });
         }
 
         const savedHistory = await ChatHistory.findOneAndUpdate(
             { sessionId: sessionId, userId: userId },
-            { $set: { userId: userId, sessionId: sessionId, messages: validMessages, updatedAt: Date.now() } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
+            { $set: { userId: userId, sessionId: sessionId, messages: validMessagesForDb, updatedAt: Date.now() } },
+            { new: true, upsert: true, setDefaultsOnInsert: true } // Upsert ensures it creates if not found
         );
-        const newClientSessionId = uuidv4();
-        console.log(`<<< POST /api/chat/history: History saved for session ${savedHistory.sessionId}. New client session ID: ${newClientSessionId}`);
+        
+        console.log(`<<< POST /api/chat/history (Explicit Save): History saved for session ${savedHistory.sessionId}.`);
         res.status(200).json({
-            message: 'Chat history saved successfully.',
+            message: 'Chat history explicitly saved successfully.',
             savedSessionId: savedHistory.sessionId,
-            newSessionId: newClientSessionId
+            newSessionId: savedHistory.sessionId // Return same session ID
         });
     } catch (error) {
-        console.error(`!!! Error saving chat history for session ${sessionId}:`, error);
-        if (error.name === 'ValidationError') return res.status(400).json({ message: "Validation Error saving history: " + error.message });
-        if (error.code === 11000) return res.status(409).json({ message: "Conflict: Session ID might already exist unexpectedly." });
+        console.error(`!!! Error explicitly saving chat history for session ${sessionId}:`, error);
+        if (error.name === 'ValidationError') return res.status(400).json({ message: "Validation Error: " + error.message });
         res.status(500).json({ message: 'Failed to save chat history due to a server error.' });
     }
 });
 
-// --- @route GET /api/chat/sessions ---
+
+// --- @route   GET /api/chat/sessions ---
+// --- @desc    Get a list of user's past chat sessions ---
+// --- @access  Private ---
 router.get('/sessions', async (req, res) => {
     const userId = req.user._id;
     console.log(`>>> GET /api/chat/sessions: User=${userId}`);
     try {
         const sessions = await ChatHistory.find({ userId: userId })
-            .sort({ updatedAt: -1 })
-            .select('sessionId createdAt updatedAt messages')
-            .lean();
+            .sort({ updatedAt: -1 }) 
+            .select('sessionId createdAt updatedAt messages') 
+            .lean(); 
+
         const sessionSummaries = sessions.map(session => {
-             const firstUserMessage = session.messages?.find(m => m.role === 'user');
-             let preview = 'Chat Session';
-             if (firstUserMessage?.parts?.[0]?.text) {
-                 preview = firstUserMessage.parts[0].text.substring(0, 75);
-                 if (firstUserMessage.parts[0].text.length > 75) {
-                     preview += '...';
-                 }
-             }
-             return {
-                 sessionId: session.sessionId,
-                 createdAt: session.createdAt,
-                 updatedAt: session.updatedAt,
-                 messageCount: session.messages?.length || 0,
-                 preview: preview
-             };
+            const firstUserMessage = session.messages?.find(m => m.role === 'user');
+            let preview = 'Chat Session';
+            if (firstUserMessage?.parts?.[0]?.text) {
+                preview = firstUserMessage.parts[0].text.substring(0, 75);
+                if (firstUserMessage.parts[0].text.length > 75) preview += '...';
+            } else if (session.messages?.length > 0 && session.messages[0]?.parts?.[0]?.text) {
+                preview = session.messages[0].parts[0].text.substring(0,75) + (session.messages[0].parts[0].text.length > 75 ? "..." : "");
+            }
+
+            return {
+                sessionId: session.sessionId,
+                createdAt: session.createdAt,
+                updatedAt: session.updatedAt,
+                messageCount: session.messages?.length || 0,
+                preview: preview
+            };
         });
         console.log(`<<< GET /api/chat/sessions: Found ${sessionSummaries.length} sessions for User ${userId}.`);
         res.status(200).json(sessionSummaries);
@@ -2924,25 +3026,67 @@ router.get('/sessions', async (req, res) => {
     }
 });
 
-// --- @route GET /api/chat/session/:sessionId ---
+
+// --- @route   GET /api/chat/session/:sessionId ---
+// --- @desc    Get all messages for a specific session ---
+// --- @access  Private ---
 router.get('/session/:sessionId', async (req, res) => {
     const userId = req.user._id;
     const { sessionId } = req.params;
     console.log(`>>> GET /api/chat/session/${sessionId}: User=${userId}`);
-    if (!sessionId) return res.status(400).json({ message: 'Session ID parameter is required.' });
+
+    if (!sessionId) {
+        return res.status(400).json({ message: 'Session ID parameter is required.' });
+    }
+
     try {
         const session = await ChatHistory.findOne({ sessionId: sessionId, userId: userId }).lean();
         if (!session) {
             console.log(`--- GET /api/chat/session/${sessionId}: Session not found for User ${userId}.`);
             return res.status(404).json({ message: 'Chat session not found or access denied.' });
         }
-        console.log(`<<< GET /api/chat/session/${sessionId}: Session found for User ${userId}.`);
-        res.status(200).json(session);
+        console.log(`<<< GET /api/chat/session/${sessionId}: Session found for User ${userId}. Messages: ${session.messages?.length}`);
+        // Transform messages to frontend format if necessary
+        const messagesForFrontend = (session.messages || []).map(msg => ({
+            id: msg._id || uuidv4(), // Mongoose subdocs don't have _id unless schema opts in
+            sender: msg.role === 'model' ? 'bot' : 'user',
+            text: msg.parts?.[0]?.text || '',
+            thinking: msg.thinking,
+            references: msg.references,
+            timestamp: msg.timestamp,
+            source_pipeline: msg.source_pipeline
+        }));
+        
+        res.status(200).json({ ...session, messages: messagesForFrontend }); // Send modified session
     } catch (error) {
         console.error(`!!! Error fetching chat session ${sessionId} for user ${userId}:`, error);
         res.status(500).json({ message: 'Failed to retrieve chat session details.' });
     }
 });
+
+// The /api/chat/rag endpoint seems to be for directly testing RAG,
+// it's not directly part of the main chat flow if /message handles RAG internally.
+// Keeping it as is if you use it for direct RAG testing.
+router.post('/rag', async (req, res) => {
+    const { message, filter } = req.body;
+    const userId = req.user._id.toString();
+
+    if (!message || typeof message !== 'string' || message.trim() === '') {
+        return res.status(400).json({ message: 'Query message text required.' });
+    }
+    console.log(`>>> POST /api/chat/rag (Direct Test): User=${userId}. Query: "${message.substring(0,50)}..."`);
+    try {
+        const kValue = parseInt(process.env.RAG_DEFAULT_K) || 5;
+        const clientFilter = filter && typeof filter === 'object' ? filter : null;
+        const relevantDocs = await queryPythonRagService(userId, message.trim(), kValue, clientFilter);
+        console.log(`<<< POST /api/chat/rag successful for User ${userId}. Found ${relevantDocs.length} docs.`);
+        res.status(200).json({ relevantDocs }); // Send back adapted docs
+    } catch (error) {
+        console.error(`!!! Error processing RAG query for User ${userId}:`, error.message);
+        res.status(500).json({ message: error.message || "Failed to retrieve relevant documents." });
+    }
+});
+
 
 module.exports = router;
 ```
@@ -2956,7 +3100,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
-
+const axios = require('axios');
 const router = express.Router();
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
@@ -3404,8 +3548,9 @@ const fs = require('fs');
 const axios = require('axios');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User'); // Import the User model
-const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); 
-const geminiService = require('../services/geminiService');
+const { Worker } = require('worker_threads');
+// const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); 
+// const geminiService = require('../services/geminiService');
 
 const router = express.Router();
 
@@ -3528,94 +3673,73 @@ const upload = multer({
 
 // --- Function to call Python RAG service ---
 async function triggerPythonRagProcessing(userId, filePath, originalName) {
-    // Read URL from environment variable set during startup
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
-        console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot trigger processing.");
-        // Optionally: Delete the uploaded file if processing can't be triggered?
-        // await fs.promises.unlink(filePath).catch(e => console.error(`Failed to delete unprocessed file ${filePath}: ${e}`));
-        return { success: false, message: "RAG service URL not configured." }; // Indicate failure
+        console.error("PYTHON_RAG_SERVICE_URL is not set in environment. Cannot trigger RAG processing.");
+        return {
+            success: false,
+            message: "RAG service URL not configured.",
+            status: 'error', // Indicate a config error
+            text: null,
+            chunksForKg: []
+        };
     }
+
     const addDocumentUrl = `${pythonServiceUrl}/add_document`;
-    console.log(`Triggering Python RAG processing for ${originalName} (User: ${userId}) at ${addDocumentUrl}`);
+    console.log(`Calling Python RAG Service: ${addDocumentUrl} for document '${originalName}' (User: ${userId})`);
+
     try {
-        // Send absolute path
         const response = await axios.post(addDocumentUrl, {
             user_id: userId,
-            file_path: filePath, // Send the absolute path
+            file_path: filePath, // Absolute path to the file on the server
             original_name: originalName
-        }, { timeout: 300000 }); // 5 minute timeout for processing
+        }); // 5 minute timeout
 
-        console.log(`Python RAG service response for ${originalName}:`, response.data);
+        const pythonData = response.data;
+        // console.log(`Python RAG service response for '${originalName}':`, JSON.stringify(pythonData).substring(0, 500) + "..."); // Log snippet
 
-        const text = response.data?.raw_text_for_analysis || ""; // This is initial_extracted_text
+        // Extract data carefully, providing defaults
+        const text = pythonData?.raw_text_for_analysis || null;
+        const chunksForKg = pythonData?.chunks_with_metadata || [];
+        const pythonStatus = pythonData?.status; // e.g., 'added', 'skipped_no_content', 'processed_qdrant_chunks_not_added', etc.
+        let pythonMessage = pythonData?.message || "No specific message from Python RAG service.";
 
-        if (response.data?.status === "added" && originalName && userId) {
-            try {
-                const newDocumentEntry = {
-                    filename: originalName,
-                    text: text, // Raw text from Python for storage and later re-analysis if needed
-                    analysis: { // Initialize analysis object matching schema defaults
-                        faq: "",
-                        topics: "",
-                        mindmap: ""
-                    }
-                };
+        // Determine overall success for the RAG step based on Python's status
+        // 'added' means Qdrant was updated, which is the primary goal for RAG.
+        // 'processed_for_analysis_only_no_qdrant' means text was extracted but Qdrant failed/skipped. This might still be a "partial success" if text is valuable.
+        // For now, let's consider 'added' as the main success criteria for proceeding with text-dependent tasks.
+        const isRagStepSuccessful = pythonStatus === 'added';
 
-                const updatedUser = await User.findByIdAndUpdate(
-                    userId,
-                    { $push: { uploadedDocuments: newDocumentEntry } },
-                    { new: true, runValidators: true }
-                );
-
-                if (!updatedUser) {
-                    console.error(`Failed to find user with ID ${userId} to save document info for ${originalName}.`);
-                    return {
-                        success: false,
-                        message: `User not found for saving document metadata. Status: ${response.data?.status}`,
-                        Text: text, 
-                        Status: response.data?.status
-                    };
-                }
-                console.log(`Successfully saved document info ('${originalName}') and raw text to user ${userId}.`);
-
-            } catch (dbError) {
-                console.error(`Database error saving document info for ${originalName} (User: ${userId}):`, dbError);
-                return {
-                    success: false,
-                    message: `DB error saving document metadata: ${dbError.message}. Python processing status: ${response.data?.status}`,
-                    Text: text, // Still return text if Python provided it
-                    Status: response.data?.status
-                };
-            }
-        } 
-        else if (originalName && userId) { // If not saving, log why
-            console.warn(`Skipping DB update for ${originalName} (User: ${userId}). HTTP Status: ${response.status}, Python Custom Status: ${response.data?.status}.`);
-        } 
-        else {
-            console.warn(`Skipping DB update due to missing originalName or userId. Python Custom Status: ${response.data?.status}`);
+        if (!isRagStepSuccessful && !text) {
+            // If RAG didn't succeed in adding to Qdrant AND there's no text, it's a more significant failure.
+            pythonMessage = `RAG processing critical failure: ${pythonMessage} (Status: ${pythonStatus})`;
+        } else if (!isRagStepSuccessful && text) {
+            pythonMessage = `RAG processing partial: ${pythonMessage} (Status: ${pythonStatus}). Text was extracted, but Qdrant step may have issues.`;
         }
 
-        // --- END DATABASE UPDATE ---
 
-
-        // Check response.data.status ('added' or 'skipped')
-        if (response.data?.status === 'skipped') {
-             console.warn(`Python RAG service skipped processing ${originalName}: ${response.data.message}`);
-             return { success: true, status: 'skipped', message: response.data.message, text: text};
-        } else if (response.data?.status === 'added') {
-             return { success: true, status: 'added', message: response.data.message, text: text };
-        } else {
-             console.warn(`Unexpected response status from Python RAG service for ${originalName}: ${response.data?.status}`);
-             return { success: false, message: `Unexpected RAG status: ${response.data?.status}` };
-        }
+        return {
+            success: isRagStepSuccessful, // True primarily if pythonStatus is 'added'
+            status: pythonStatus,         // The actual status string from Python
+            message: pythonMessage,
+            text: text,                   // Extracted text (can be null)
+            chunksForKg: chunksForKg      // Chunks for KG (can be empty)
+        };
 
     } catch (error) {
-        const errorMsg = error.response?.data?.error || error.message || "Unknown RAG service error";
-        console.error(`Error calling Python RAG service for ${originalName}:`, errorMsg);
-        // Maybe delete the file if the call fails? Depends on retry logic.
-        // await fs.promises.unlink(filePath).catch(e => console.error(`Failed to delete file ${filePath} after RAG call error: ${e}`));
-        return { success: false, message: `RAG service call failed: ${errorMsg}` }; // Indicate failure
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || "Unknown error calling Python RAG service";
+        console.error(`Error calling Python RAG service for '${originalName}': ${errorMsg}`);
+        // Log more details if available from error.response
+        if (error.response && error.response.data) {
+            // console.error("Python service error details:", error.response.data);
+        }
+        return {
+            success: false,
+            message: `Python RAG service call failed: ${errorMsg}`,
+            status: 'error_calling_python', // Custom status for this type of failure
+            text: null,
+            chunksForKg: []
+        };
     }
 }
 // --- End Function ---
@@ -3712,131 +3836,221 @@ async function triggerAnalysisGeneration(userId, originalName, textForAnalysis) 
 // --- End Analysis Generation Function ---
 
 
-// --- Modified Upload Route ---
 router.post('/', authMiddleware, (req, res) => {
     const uploader = upload.single('file');
 
-    uploader(req, res, async function (err) { // <<<< ASYNC HERE IS KEY
+    uploader(req, res, async function (err) {
         if (!req.user) {
-             console.error("Upload handler: User context missing.");
-             return res.status(401).json({ message: "Authentication error." });
+            console.error("Upload Route: User context missing after auth middleware.");
+            return res.status(401).json({ message: "Authentication error: User context not found." });
         }
         const userId = req.user._id.toString();
+        const username = req.user.username;
+
+        let absoluteFilePath = null; // Will be set if file is processed by multer
+        let originalName = null;
+        let serverFilename = null;
 
         if (err) {
-            // ... (your multer error handling - this part is fine)
-            console.error(`Multer error for user ${req.user.username}:`, err.message);
-            if (err instanceof multer.MulterError) { /* ... */ return res.status(400).json({ message: err.message || "File upload failed."}); }
-            return res.status(500).json({ message: "Server error during upload prep." });
+            console.error(`Upload Route: Multer error for user '${username}': ${err.message}`);
+            if (err instanceof multer.MulterError) {
+                return res.status(400).json({ message: err.message });
+            }
+            return res.status(500).json({ message: "Server error during upload preparation." });
         }
+
         if (!req.file) {
-            console.warn(`No file received for user ${req.user.username}.`);
-            return res.status(400).json({ message: "No file received or file type rejected." });
+            console.warn(`Upload Route: No file received for user '${username}'.`);
+            return res.status(400).json({ message: "No file received or file type rejected by filter." });
         }
 
-        const { path: filePath, originalname: originalName, filename: serverFilename } = req.file;
-        const absoluteFilePath = path.resolve(filePath);
-        console.log(`Upload received: User '${req.user.username}', File: ${serverFilename}, Original: ${originalName}`);
+        // File successfully received by multer
+        absoluteFilePath = path.resolve(req.file.path);
+        originalName = req.file.originalname;
+        serverFilename = req.file.filename;
+        console.log(`Upload Route: File received for user '${username}'. Server Filename: ${serverFilename}, Original: ${originalName}`);
 
-        // --- Main Try-Catch for the entire RAG + Analysis process ---
         try {
             // ----- STAGE 1: MongoDB Pre-check for existing originalName -----
-            const userForPreCheck = await User.findById(userId).select('uploadedDocuments');
+            const userForPreCheck = await User.findById(userId).select('uploadedDocuments.filename'); // Only need filename
             if (!userForPreCheck) {
-                console.error(`Upload Aborted: User ${userId} not found (pre-check). Deleting ${absoluteFilePath}`);
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (user not found): ${e}`));
+                console.error(`Upload Route: User ${userId} ('${username}') not found during pre-check. Deleting uploaded file: ${absoluteFilePath}`);
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route Cleanup: Error deleting file (user not found): ${e.message}`));
                 return res.status(404).json({ message: "User not found, cannot process upload." });
             }
             const existingDocument = userForPreCheck.uploadedDocuments.find(doc => doc.filename === originalName);
             if (existingDocument) {
-                console.log(`Upload Halted: '${originalName}' already exists for user ${userId}. Deleting ${absoluteFilePath}`);
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (duplicate): ${e}`));
+                console.log(`Upload Route: File '${originalName}' already exists for user '${username}'. Deleting uploaded file: ${absoluteFilePath}`);
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route Cleanup: Error deleting file (duplicate): ${e.message}`));
                 return res.status(409).json({
                     message: `File '${originalName}' already exists. No new processing initiated.`,
-                    filename: serverFilename, originalname: originalName,
+                    filename: serverFilename,
+                    originalname: originalName,
                 });
             }
-            console.log(`Pre-check passed for '${originalName}'. Proceeding to RAG.`);
-            // ----- END STAGE 1 -----
+            console.log(`Upload Route: Pre-check passed for '${originalName}' (User: '${username}'). Proceeding to RAG processing.`);
 
-
-            // ----- STAGE 2: RAG Processing -----
+            // ----- STAGE 2: RAG Processing (Synchronous Call to Python Service) -----
+            // This call extracts text, chunks, and gets data ready for Qdrant.
+            // It needs to complete before we can save the initial document record and respond to the user.
             const ragResult = await triggerPythonRagProcessing(userId, absoluteFilePath, originalName);
+            // Expected ragResult: { success, status ('added' or 'skipped'), text, chunksForKg, message }
 
-            if (!ragResult.success || !ragResult.text || ragResult.text.trim() === "") {
-                let message = `RAG processing failed or returned no text for '${originalName}'.`;
-                if (ragResult.message) message += ` Details: ${ragResult.message}`;
-                console.error(message + ` (User: ${userId})`);
-
-                // If RAG failed, the file text wasn't added to DB by triggerPythonRagProcessing
-                // (assuming triggerPythonRagProcessing only adds to DB on its own success).
-                // So, delete the physical file.
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (RAG fail/no text) for ${absoluteFilePath}: ${e}`));
-
+            if (!ragResult.success || ragResult.status !== 'added' || !ragResult.text || ragResult.text.trim() === '') {
+                const errorMessage = (ragResult && ragResult.message) || "RAG processing failed or returned insufficient data from Python service.";
+                console.error(`Upload Route Error: RAG processing failed for '${originalName}' (User: '${username}'): ${errorMessage}. Python Status: ${ragResult.status}. Deleting file.`);
+                if (absoluteFilePath) { // Check if path is still valid
+                    await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route Cleanup: Error deleting file (RAG fail): ${e.message}`));
+                }
                 return res.status(500).json({ // Or 422 if it's a content issue from RAG
-                    message: message,
+                    message: errorMessage,
                     filename: serverFilename, originalname: originalName
                 });
             }
-            console.log(`RAG processing completed with text for '${originalName}'. Proceeding to analysis.`);
-            // At this point, triggerPythonRagProcessing should have added the document with text to MongoDB.
-            // If it didn't, the logic in triggerPythonRagProcessing needs adjustment.
+            console.log(`Upload Route: RAG processing by Python service completed for '${originalName}'. Text obtained. Python Status: ${ragResult.status}.`);
 
+            // ----- STAGE 2.5: Initial MongoDB Save for the Document Entry -----
+            // This creates the document shell with the text from RAG and pending statuses.
+            const newDocumentEntryData = {
+                filename: originalName,
+                text: ragResult.text, // Save the text obtained from RAG
+                analysis: { faq: "", topics: "", mindmap: "" }, // Initialize
+                uploadedAt: new Date(),
+                ragStatus: ragResult.status, // Should be 'added' here
+                analysisStatus: "pending",   // Will be updated by analysisWorker
+                kgStatus: "pending"          // Will be updated by kgWorker
+            };
 
-            // ----- STAGE 3: Analysis Generation -----
-            const analysisOutcome = await triggerAnalysisGeneration(userId, originalName, ragResult.text);
-
-
-            // ----- STAGE 4: Handle Analysis Outcome & DB Update -----
-            if (analysisOutcome.success) {
-                console.log(`All analyses generated successfully for '${originalName}'. Storing in DB.`);
+            try {
                 await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    {
-                        $set: {
-                            "uploadedDocuments.$.analysis.faq": analysisOutcome.results.faq,
-                            "uploadedDocuments.$.analysis.topics": analysisOutcome.results.topics,
-                            "uploadedDocuments.$.analysis.mindmap": analysisOutcome.results.mindmap,
-                        }
-                    }
+                    { _id: userId },
+                    { $push: { uploadedDocuments: newDocumentEntryData } }
                 );
-                console.log(`Successfully stored all analyses for '${originalName}' in MongoDB.`);
-                return res.status(200).json({
-                    message: "File uploaded and all analyses completed successfully.",
-                    filename: serverFilename, originalname: originalName,
-                    // analysis: analysisOutcome.results // Optionally send analysis back
+                console.log(`Upload Route: Initial document entry for '${originalName}' saved to user '${username}' in MongoDB.`);
+            } catch (dbError) {
+                console.error(`Upload Route Error: MongoDB error saving initial document entry for '${originalName}': ${dbError.message}. Deleting file.`);
+                if (absoluteFilePath) {
+                    await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route Cleanup: Error deleting file (initial DB save fail): ${e.message}`));
+                }
+                // This is a server error, RAG was successful but we couldn't save.
+                return res.status(500).json({ message: `Database error after RAG processing: ${dbError.message}`, filename: serverFilename, originalname: originalName });
+            }
+
+            // ----- IMMEDIATE RESPONSE TO CLIENT -----
+            // Respond now, indicating acceptance and background processing.
+            res.status(202).json({ // HTTP 202 Accepted
+                message: `File '${originalName}' uploaded successfully. Processing has started in the background.`,
+                filename: serverFilename, // Server-generated filename
+                originalname: originalName,   // Original filename from user
+                initialStatus: {
+                    rag: ragResult.status,
+                    analysis: "pending",
+                    knowledgeGraph: "pending"
+                }
+            });
+            console.log(`Upload Route: Sent 202 Accepted to client for '${originalName}'. Offloading further tasks.`);
+
+
+            // ----- BACKGROUND PROCESSING INITIATION (AFTER RESPONSE) -----
+
+            // Offload Analysis Generation to a Worker
+            if (ragResult.text && ragResult.text.trim() !== '') {
+                console.log(`[Upload Route BG] Initiating Analysis Worker for '${originalName}'`);
+                const analysisWorkerPath = path.resolve(__dirname, '../workers/analysisWorker.js');
+                try {
+                    const analysisWorker = new Worker(analysisWorkerPath, {
+                        workerData: {
+                            userId: userId,
+                            originalName: originalName,
+                            textForAnalysis: ragResult.text // Pass the full text
+                        }
+                    });
+                    analysisWorker.on('message', (msg) => console.log(`[Upload Route BG] Analysis Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
+                    analysisWorker.on('error', (err) => console.error(`[Upload Route BG] Analysis Worker Error [Doc: ${originalName}]:`, err));
+                    analysisWorker.on('exit', (code) => console.log(`[Upload Route BG] Analysis Worker [Doc: ${originalName}] exited (code ${code}).`));
+                } catch (workerLaunchError) {
+                    console.error(`[Upload Route BG] Failed to launch Analysis Worker for '${originalName}':`, workerLaunchError);
+                    // Log this error, perhaps update DB doc analysisStatus to 'launch_failed'
+                    User.updateOne(
+                        { _id: userId, "uploadedDocuments.filename": originalName },
+                        { $set: { "uploadedDocuments.$.analysisStatus": "launch_failed" } }
+                    ).catch(e => console.error("DB update error for analysis launch fail (background):", e));
+                }
+            } else {
+                console.warn(`[Upload Route BG] Skipping Analysis Worker for '${originalName}' due to no text from RAG.`);
+                User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text" } }
+                ).catch(e => console.error("DB update error for analysis skipped (background):", e));
+            }
+
+            // Offload KG Generation to a Worker
+            // Ensure ragResult.chunksForKg is correctly populated by triggerPythonRagProcessing
+            if (ragResult.status === "added" && ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
+                console.log(`[Upload Route BG] Initiating KG Worker for '${originalName}'. Chunks: ${ragResult.chunksForKg.length}`);
+                const kgWorkerScriptPath = path.resolve(__dirname, '../workers/kgWorker.js');
+                try {
+                    const kgWorker = new Worker(kgWorkerScriptPath, {
+                        workerData: {
+                            chunksForKg: ragResult.chunksForKg, // This comes from Python
+                            userId: userId,
+                            originalName: originalName,
+                        }
+                    });
+                    kgWorker.on('message', (msg) => console.log(`[Upload Route BG] KG Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
+                    kgWorker.on('error', (workerErr) => console.error(`[Upload Route BG] KG Worker Error [Doc: ${originalName}]:`, workerErr));
+                    kgWorker.on('exit', (code) => console.log(`[Upload Route BG] KG Worker [Doc: ${originalName}] exited (code ${code}).`));
+                } catch (workerLaunchError) {
+                    console.error(`[Upload Route BG] Failed to launch KG worker for '${originalName}':`, workerLaunchError);
+                    User.updateOne(
+                        { _id: userId, "uploadedDocuments.filename": originalName },
+                        { $set: { "uploadedDocuments.$.kgStatus": "launch_failed" } }
+                    ).catch(e => console.error("DB update error for KG launch fail (background):", e));
+                }
+            } else {
+                let kgSkipReason = "skipped_rag_issue";
+                if (ragResult.chunksForKg && ragResult.chunksForKg.length === 0) {
+                    kgSkipReason = "skipped_no_chunks";
+                }
+                console.log(`[Upload Route BG] KG Worker not triggered for '${originalName}'. RAG Status: ${ragResult.status}, Chunks: ${ragResult.chunksForKg ? ragResult.chunksForKg.length : 'N/A'}`);
+                User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.kgStatus": kgSkipReason } }
+                ).catch(e => console.error("DB update error for KG skipped (background):", e));
+            }
+
+            // Optional: Delete the physical uploaded file from the 'assets' directory
+            // Do this only if the text content is reliably stored in MongoDB (ragResult.text)
+            // and workers have what they need (text or chunk data).
+            if (absoluteFilePath) {
+                console.log(`[Upload Route BG] Attempting to delete temporary uploaded file: ${absoluteFilePath} as processing is fully offloaded.`);
+                await fs.promises.unlink(absoluteFilePath)
+                    .catch(e => console.error(`[Upload Route BG] Non-critical: Failed to delete temp file ${absoluteFilePath} after offloading: ${e.message}`));
+                absoluteFilePath = null; // Mark as deleted
+            }
+
+        } catch (processError) {
+            // This catch block handles errors from STAGE 1, 2, or 2.5, or any unhandled synchronous error
+            console.error(`Upload Route: !!! Overall processing error for ${originalName || 'unknown file'} (User: '${username}'):`, processError.message, processError.stack);
+            if (absoluteFilePath) { // If file path is known, try to delete it
+                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Upload Route Cleanup: Error deleting file (overall fail): ${e.message}`));
+            }
+            // If res hasn't been sent (e.g., error before 202 response)
+            if (!res.headersSent) {
+                return res.status(500).json({
+                    message: `Server error during file processing: ${processError.message || 'Unknown error.'}`,
+                    filename: serverFilename, // May be null if error was very early
+                    originalname: originalName // May be null
                 });
             } else {
-                console.warn(`One or more analyses failed for '${originalName}'. No analysis data from this attempt will be stored in DB.`);
-                // The RAG text is already in the DB. This analysis attempt failed.
-                // Optionally update a status for this document in DB to indicate analysis failure
-                return res.status(422).json({
-                    message: "File uploaded and RAG processing complete, but content analysis generation failed. The document text is saved. You may not need to re-upload but can try to trigger analysis again later if such a feature exists, or contact support.",
-                    filename: serverFilename, originalname: originalName,
-                    // failedAnalysisDetails: analysisOutcome.results // For client-side debugging if needed
-                });
+                // If response was already sent, we can only log the error.
+                // A separate mechanism might be needed to update the user/DB about this failure.
+                console.error(`Upload Route: Error occurred for ${originalName} after 202 response was sent. This indicates a problem in the background initiation logic itself or unhandled promise rejection before workers fully take over.`);
             }
-        } catch (processError) {
-            // Catch any unhandled errors from awaited promises or synchronous code
-            console.error(`!!! Overall processing error for ${originalName} (User: ${userId}):`, processError);
-            // Try to clean up the uploaded file if it exists and an error occurred.
-            // This is a bit tricky as RAG might have already added to DB.
-            // If processError is from RAG or before, file deletion is safer.
-            // If it's after RAG success but during analysis or DB update of analysis,
-            // the RAG text is already in DB.
-            if (absoluteFilePath) {
-                 // Consider if an error after RAG success should still delete the physical file.
-                 // Usually, if the RAG text is in DB, the physical file on disk is secondary.
-                 // But if the entire transaction failed, deleting is fine.
-                 await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup error (overall fail) for ${absoluteFilePath}: ${e}`));
-            }
-            return res.status(500).json({
-                message: `Server error during file processing: ${processError.message}`,
-                filename: serverFilename, originalname: originalName
-            });
         }
-    });
+    }); 
 });
+
 
 
 module.exports = router;
@@ -4125,30 +4339,22 @@ configureAndStart();
 ```javascript
 // server/services/geminiService.js
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-// require('dotenv').config(); // Removed dotenv
 
-// Read API Key directly from environment variables
 const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash"; // Or read from env: process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash";
+const MODEL_NAME = "gemini-1.5-flash"; 
 
 if (!API_KEY) {
-    // This check is now primarily done in server.js before starting
-    // But keep a safeguard here.
     console.error("FATAL ERROR: GEMINI_API_KEY is not available in the environment. Server should have exited.");
-    // Throw an error instead of exiting here, let the caller handle it
     throw new Error("GEMINI_API_KEY is missing.");
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 const baseGenerationConfig = {
-    temperature: 0.7, // Moderate temperature for creative but grounded responses
-    maxOutputTokens: 4096, // Adjust as needed, Flash model limit might be higher
-    // topP: 0.9, // Example: Could add nucleus sampling
-    // topK: 40,  // Example: Could add top-k sampling
+    temperature: 0.7, 
+    maxOutputTokens: 4096, 
 };
 
-// Stricter safety settings - adjust as needed for your use case
 const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
     { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -4156,272 +4362,325 @@ const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
-const generateContentWithHistory = async (chatHistory, systemPromptText = null, relevantDocs = []) => {
+const generateContentWithHistory = async (chatHistory, systemPromptText = null /* relevantDocs not used directly here */) => {
     try {
         if (!Array.isArray(chatHistory) || chatHistory.length === 0) {
              throw new Error("Chat history must be a non-empty array.");
         }
-        // Gemini API requires history to end with a 'user' message for sendMessage
         if (chatHistory[chatHistory.length - 1].role !== 'user') {
-            console.error("History for Gemini API must end with a 'user' role message.");
-            // Attempt to fix by removing trailing non-user messages if any? Risky.
-            // Or just throw error.
+            console.error("History for Gemini API must end with a 'user' role message. Last role:", chatHistory[chatHistory.length - 1].role);
             throw new Error("Internal error: Invalid chat history sequence for API call.");
         }
 
-        // --- Prepare Model Options ---
         const modelOptions = {
             model: MODEL_NAME,
             generationConfig: baseGenerationConfig,
             safetySettings: baseSafetySettings,
-            // Add system instruction if provided
             ...(systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '' && {
                 systemInstruction: {
-                    // Gemini expects system instruction parts as an array
                     parts: [{ text: systemPromptText.trim() }]
                 }
              })
         };
         const model = genAI.getGenerativeModel(modelOptions);
 
-
-        // --- Prepare History for startChat ---
-        // History for startChat should NOT include the latest user message
         const historyForStartChat = chatHistory.slice(0, -1)
-            .map(msg => ({ // Ensure correct format
+            .map(msg => ({ 
                  role: msg.role,
                  parts: msg.parts.map(part => ({ text: part.text || '' }))
             }))
-            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string'); // Basic validation
+            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
 
-        // --- Start Chat Session ---
         const chat = model.startChat({
             history: historyForStartChat,
         });
 
-        // --- Prepare the message to send ---
-        // Get the text from the last user message in the original history
         let lastUserMessageText = chatHistory[chatHistory.length - 1].parts[0].text;
 
-        // Optional: Add a subtle hint for citation if RAG was used (Gemini might pick it up)
-        // if (relevantDocs.length > 0) {
-        //     const citationHint = ` (Remember to cite sources like ${relevantDocs.map((doc, i) => `[${i+1}] ${doc.documentName}`).slice(0,2).join(', ')} if applicable)`;
-        //     lastUserMessageText += citationHint;
-        // }
-
         console.log(`Sending message to Gemini. History length sent to startChat: ${historyForStartChat.length}. System Prompt Used: ${!!modelOptions.systemInstruction}`);
-        // console.log("Last User Message Text Sent:", lastUserMessageText.substring(0, 200) + "..."); // Log truncated message
+        // console.log("Last User Message Text Sent to Gemini (first 200 chars):", lastUserMessageText.substring(0, 200) + "...");
 
-        // --- Send Message ---
         const result = await chat.sendMessage(lastUserMessageText);
-
-        // --- Process Response ---
         const response = result.response;
         const candidate = response?.candidates?.[0];
 
-        // --- Validate Response ---
-        if (!candidate || candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS') {
-            // Normal completion or max tokens reached
+        if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
             const responseText = candidate?.content?.parts?.[0]?.text;
             if (typeof responseText === 'string') {
-                return responseText; // Success
+                return responseText;
             } else {
                  console.warn("Gemini response finished normally but text content is missing or invalid.", { finishReason: candidate?.finishReason, content: candidate?.content });
                  throw new Error("Received an empty or invalid response from the AI service.");
             }
         } else {
-             // Handle blocked responses or other issues
              const finishReason = candidate?.finishReason || 'Unknown';
              const safetyRatings = candidate?.safetyRatings;
              console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
-
              let blockMessage = `AI response generation failed or was blocked.`;
              if (finishReason) blockMessage += ` Reason: ${finishReason}.`;
              if (safetyRatings) {
                 const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
-                if (blockedCategories) {
-                    blockMessage += ` Blocked Categories: ${blockedCategories}.`;
-                }
+                if (blockedCategories) blockMessage += ` Blocked Categories: ${blockedCategories}.`;
              }
-
              const error = new Error(blockMessage);
-             error.status = 400; // Treat as a bad request or policy issue
+             error.status = 400; 
              throw error;
         }
-
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
-        // Improve error message for client
         let clientMessage = "Failed to get response from AI service.";
-        if (error.message?.includes("API key not valid")) {
-            clientMessage = "AI Service Error: Invalid API Key.";
-        } else if (error.message?.includes("blocked")) {
-            clientMessage = error.message; // Use the specific block message
-        } else if (error.status === 400) {
-             clientMessage = `AI Service Error: ${error.message}`;
-        }
-
+        if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
+        else if (error.message?.includes("blocked")) clientMessage = error.message;
+        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`;
+        
         const enhancedError = new Error(clientMessage);
-        enhancedError.status = error.status || 500; // Keep original status if available
-        enhancedError.originalError = error; // Attach original error if needed for server logs
+        enhancedError.status = error.status || 500; 
+        enhancedError.originalError = error; 
         throw enhancedError;
     }
 };
 
 module.exports = { generateContentWithHistory };
-
 ```
 
-`services/geminiService2.js`
+`services/kgService.js`
 
 ```javascript
-// server/services/geminiService.js
-const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-// require('dotenv').config(); // Removed dotenv
+// server/services/kgService.js
+const geminiService = require('./geminiService'); // Assuming it's in the same folder or adjust path
+const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 
-// Read API Key directly from environment variables
-const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash"; // Or read from env: process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash";
+// --- IMPORT THE PROMPT ---
+const { KG_GENERATION_SYSTEM_PROMPT } = require('../config/promptTemplates'); // Adjust path if necessary
 
-if (!API_KEY) {
-    // This check is now primarily done in server.js before starting
-    // But keep a safeguard here.
-    console.error("FATAL ERROR: GEMINI_API_KEY is not available in the environment. Server should have exited.");
-    // Throw an error instead of exiting here, let the caller handle it
-    throw new Error("GEMINI_API_KEY is missing.");
+// --- REMOVE THE INLINE PROMPT DEFINITION ---
+// const KG_GENERATION_SYSTEM_PROMPT = `...`; // This whole block should be removed
+
+
+function constructKgPromptForChunk(chunkText) {
+    return `
+Text chunk to process:
+---
+${chunkText}
+---
+Based on the instructions provided in the system prompt, generate the JSON output for nodes and edges from this text chunk.
+`;
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
 
-const baseGenerationConfig = {
-    temperature: 0.7, // Moderate temperature for creative but grounded responses
-    maxOutputTokens: 4096, // Adjust as needed, Flash model limit might be higher
-    // topP: 0.9, // Example: Could add nucleus sampling
-    // topK: 40,  // Example: Could add top-k sampling
-};
+async function _processSingleChunkForKg(chunkTextContent, chunkMetadata, chunkIndex) {
+    const userPrompt = constructKgPromptForChunk(chunkTextContent);
+    const chatHistory = [
+        { role: 'user', parts: [{ text: userPrompt }] }
+    ];
 
-// Stricter safety settings - adjust as needed for your use case
-const baseSafetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-];
-
-const generateContentWithHistory = async (chatHistory, systemPromptText = null, relevantDocs = []) => {
     try {
-        if (!Array.isArray(chatHistory) || chatHistory.length === 0) {
-             throw new Error("Chat history must be a non-empty array.");
-        }
-        // Gemini API requires history to end with a 'user' message for sendMessage
-        if (chatHistory[chatHistory.length - 1].role !== 'user') {
-            console.error("History for Gemini API must end with a 'user' role message.");
-            // Attempt to fix by removing trailing non-user messages if any? Risky.
-            // Or just throw error.
-            throw new Error("Internal error: Invalid chat history sequence for API call.");
+        console.log(`[KG Service] Processing chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`} for KG generation.`);
+        const responseText = await geminiService.generateContentWithHistory(
+            chatHistory,
+            KG_GENERATION_SYSTEM_PROMPT // Using the imported prompt
+        );
+
+        if (!responseText) {
+            console.warn(`[KG Service] Empty response from Gemini for chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}.`);
+            return null;
         }
 
-        // --- Prepare Model Options ---
-        const modelOptions = {
-            model: MODEL_NAME,
-            generationConfig: baseGenerationConfig,
-            safetySettings: baseSafetySettings,
-            // Add system instruction if provided
-            ...(systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '' && {
-                systemInstruction: {
-                    // Gemini expects system instruction parts as an array
-                    parts: [{ text: systemPromptText.trim() }]
+        let cleanedResponseText = responseText.trim();
+        if (cleanedResponseText.startsWith("```json")) {
+            cleanedResponseText = cleanedResponseText.substring(7);
+            if (cleanedResponseText.endsWith("```")) {
+                cleanedResponseText = cleanedResponseText.slice(0, -3);
+            }
+            cleanedResponseText = cleanedResponseText.trim();
+        } else if (cleanedResponseText.startsWith("```")) {
+            cleanedResponseText = cleanedResponseText.substring(3);
+            if (cleanedResponseText.endsWith("```")) {
+                cleanedResponseText = cleanedResponseText.slice(0, -3);
+            }
+            cleanedResponseText = cleanedResponseText.trim();
+        }
+
+        const graphData = JSON.parse(cleanedResponseText);
+
+        if (graphData && typeof graphData === 'object' && Array.isArray(graphData.nodes) && Array.isArray(graphData.edges)) {
+            return graphData;
+        } else {
+            console.warn(`[KG Service] Invalid graph structure from Gemini for chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}. Response:`, cleanedResponseText.substring(0, 200));
+            return null;
+        }
+    } catch (error) {
+        console.error(`[KG Service] Error processing chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}:`, error.message);
+        if (error.originalError) console.error("[KG Service] Original Gemini error:", error.originalError);
+        return null;
+    }
+}
+
+
+function _mergeGraphFragments(graphFragments) {
+    console.log(`[KG Service] Merging ${graphFragments.length} graph fragments...`);
+    const finalNodesMap = new Map();
+    const finalEdgesSet = new Set();
+
+    for (const fragment of graphFragments) {
+        if (!fragment || !fragment.nodes || !fragment.edges) {
+            console.warn("[KG Service] Skipping invalid or null graph fragment during merge.");
+            continue;
+        }
+
+        for (const node of fragment.nodes) {
+            if (!node || typeof node.id !== 'string' || !node.id.trim()) {
+                console.warn("[KG Service] Skipping invalid node during merge:", node);
+                continue;
+            }
+            const nodeId = node.id.trim();
+            if (!finalNodesMap.has(nodeId)) {
+                finalNodesMap.set(nodeId, { ...node, id: nodeId });
+            } else {
+                const existingNode = finalNodesMap.get(nodeId);
+                if (node.description && typeof node.description === 'string' &&
+                    (!existingNode.description || node.description.length > existingNode.description.length)) {
+                    existingNode.description = node.description;
                 }
-             })
+                if (node.type && (!existingNode.type || existingNode.type === "generic")) {
+                    existingNode.type = node.type;
+                }
+                if (node.parent && !existingNode.parent) {
+                    existingNode.parent = node.parent;
+                }
+            }
+        }
+
+        for (const edge of fragment.edges) {
+            if (!edge || typeof edge.from !== 'string' || typeof edge.to !== 'string' || typeof edge.relationship !== 'string' ||
+                !edge.from.trim() || !edge.to.trim() || !edge.relationship.trim()) {
+                console.warn("[KG Service] Skipping invalid edge during merge:", edge);
+                continue;
+            }
+            const edgeKey = `${edge.from.trim()}|${edge.to.trim()}|${edge.relationship.trim()}`;
+            finalEdgesSet.add(edgeKey);
+        }
+    }
+
+    const mergedNodes = Array.from(finalNodesMap.values());
+    const mergedEdges = Array.from(finalEdgesSet).map(edgeKey => {
+        const [from, to, relationship] = edgeKey.split('|');
+        return { from, to, relationship };
+    });
+
+    console.log(`[KG Service] Merged into ${mergedNodes.length} nodes and ${mergedEdges.length} edges.`);
+    return { nodes: mergedNodes, edges: mergedEdges };
+}
+
+
+async function generateAndStoreKg(chunksForKg, userId, originalName) {
+    console.log(`[KG Service] Starting KG generation for document: ${originalName} (User: ${userId}) with ${chunksForKg.length} chunks.`);
+
+    if (!chunksForKg || chunksForKg.length === 0) {
+        console.warn("[KG Service] No chunks provided for KG generation.");
+        // --- Return a structure consistent with what kgWorker.js expects ---
+        return { success: true, message: "No chunks provided for KG generation.", finalKgNodesCount: 0, finalKgEdgesCount: 0 };
+    }
+
+    const graphFragments = [];
+    let chunkIndex = 0;
+    for (const chunk of chunksForKg) {
+        if (!chunk || !chunk.text_content) {
+            console.warn(`[KG Service] Skipping chunk index ${chunkIndex} due to missing text_content.`);
+            chunkIndex++;
+            continue;
+        }
+        // --- Pass originalName to _processSingleChunkForKg if its logging needs it, currently it does not use it.
+        // --- For now, keeping the signature simple.
+        const fragment = await _processSingleChunkForKg(chunk.text_content, chunk.metadata, chunkIndex);
+        if (fragment) {
+            graphFragments.push(fragment);
+        }
+        chunkIndex++;
+        // Optional: Add a small delay
+        // await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    if (graphFragments.length === 0) {
+        console.warn(`[KG Service] No valid graph fragments were generated for ${originalName}.`);
+        // --- Return a structure consistent with what kgWorker.js expects ---
+        return { success: true, message: "No KG data extracted from document chunks.", finalKgNodesCount: 0, finalKgEdgesCount: 0 };
+    }
+
+    const finalKg = _mergeGraphFragments(graphFragments);
+    console.log(`[KG Service] Successfully generated KG for document: ${originalName}. Nodes: ${finalKg.nodes.length}, Edges: ${finalKg.edges.length}.`);
+    // console.log("[KG Service] Full Final Merged KG : ", finalKg); // Potentially very verbose
+
+    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002';
+    const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`;
+
+    if (!kgIngestionApiUrl.startsWith('http')) {
+        console.error("[KG Service] KG Ingestion API URL could not be determined properly. Check DEFAULT_PYTHON_RAG_URL. Current URL:", kgIngestionApiUrl);
+        return {
+            success: false,
+            message: "KG generated, but KG Ingestion API URL is invalid. KG not stored.",
+            finalKgNodesCount: finalKg.nodes.length, // Still report counts even if store fails
+            finalKgEdgesCount: finalKg.edges.length
         };
-        const model = genAI.getGenerativeModel(modelOptions);
+    }
 
+    console.log(`[KG Service] Sending KG for '${originalName}' to KG Ingestion API: ${kgIngestionApiUrl}`);
+    try {
+        const payload = {
+            userId: userId,
+            originalName: originalName,
+            nodes: finalKg.nodes,
+            edges: finalKg.edges
+        };
 
-        // --- Prepare History for startChat ---
-        // History for startChat should NOT include the latest user message
-        const historyForStartChat = chatHistory.slice(0, -1)
-            .map(msg => ({ // Ensure correct format
-                 role: msg.role,
-                 parts: msg.parts.map(part => ({ text: part.text || '' }))
-            }))
-            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string'); // Basic validation
-
-        // --- Start Chat Session ---
-        const chat = model.startChat({
-            history: historyForStartChat,
+        const serviceResponse = await axios.post(kgIngestionApiUrl, payload, {
+            timeout: 180000 // 3 minute timeout
         });
 
-        // --- Prepare the message to send ---
-        // Get the text from the last user message in the original history
-        let lastUserMessageText = chatHistory[chatHistory.length - 1].parts[0].text;
+        const responseData = serviceResponse.data;
+        console.log(`[KG Service] KG Ingestion API response for '${originalName}':`, responseData);
 
-        // Optional: Add a subtle hint for citation if RAG was used (Gemini might pick it up)
-        // if (relevantDocs.length > 0) {
-        //     const citationHint = ` (Remember to cite sources like ${relevantDocs.map((doc, i) => `[${i+1}] ${doc.documentName}`).slice(0,2).join(', ')} if applicable)`;
-        //     lastUserMessageText += citationHint;
-        // }
+        const API_SUCCESS_STATUS_VALUE = "completed";
 
-        console.log(`Sending message to Gemini. History length sent to startChat: ${historyForStartChat.length}. System Prompt Used: ${!!modelOptions.systemInstruction}`);
-        // console.log("Last User Message Text Sent:", lastUserMessageText.substring(0, 200) + "..."); // Log truncated message
-
-        // --- Send Message ---
-        const result = await chat.sendMessage(lastUserMessageText);
-
-        // --- Process Response ---
-        const response = result.response;
-        const candidate = response?.candidates?.[0];
-
-        // --- Validate Response ---
-        if (!candidate || candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS') {
-            // Normal completion or max tokens reached
-            const responseText = candidate?.content?.parts?.[0]?.text;
-            if (typeof responseText === 'string') {
-                return responseText; // Success
-            } else {
-                 console.warn("Gemini response finished normally but text content is missing or invalid.", { finishReason: candidate?.finishReason, content: candidate?.content });
-                 throw new Error("Received an empty or invalid response from the AI service.");
+        if (serviceResponse.status >= 200 && serviceResponse.status < 300 && responseData && responseData.status === API_SUCCESS_STATUS_VALUE) {
+            if (responseData['document-name'] !== originalName || responseData.userId !== userId) {
+                console.warn(`[KG Service] Mismatch in KG API response for '${originalName}'. Expected doc/user: ${originalName}/${userId}, Got: ${responseData['document-name']}/${responseData.userId}`);
             }
+            const successMessage = `KG for '${originalName}' successfully processed by Ingestion API. Status: ${responseData.status}.`;
+            console.log(`[KG Service] ${successMessage}`);
+            return {
+                success: true,
+                message: successMessage,
+                serviceResponseData: responseData,
+                finalKgNodesCount: finalKg.nodes.length,
+                finalKgEdgesCount: finalKg.edges.length
+            };
         } else {
-             // Handle blocked responses or other issues
-             const finishReason = candidate?.finishReason || 'Unknown';
-             const safetyRatings = candidate?.safetyRatings;
-             console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
-
-             let blockMessage = `AI response generation failed or was blocked.`;
-             if (finishReason) blockMessage += ` Reason: ${finishReason}.`;
-             if (safetyRatings) {
-                const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
-                if (blockedCategories) {
-                    blockMessage += ` Blocked Categories: ${blockedCategories}.`;
-                }
-             }
-
-             const error = new Error(blockMessage);
-             error.status = 400; // Treat as a bad request or policy issue
-             throw error;
+            const failureMessage = `KG Ingestion API for '${originalName}' indicated failure or unexpected status. HTTP: ${serviceResponse.status}, API Status: '${responseData?.status || "N/A"}'. Response Msg: ${responseData?.message || responseData?.error || 'No specific error from API.'}`;
+            console.warn(`[KG Service] ${failureMessage}`);
+            return {
+                success: false,
+                message: failureMessage,
+                serviceResponseData: responseData,
+                finalKgNodesCount: finalKg.nodes.length, // Report counts even if API call failed
+                finalKgEdgesCount: finalKg.edges.length
+            };
         }
-
     } catch (error) {
-        console.error("Gemini API Call Error:", error?.message || error);
-        // Improve error message for client
-        let clientMessage = "Failed to get response from AI service.";
-        if (error.message?.includes("API key not valid")) {
-            clientMessage = "AI Service Error: Invalid API Key.";
-        } else if (error.message?.includes("blocked")) {
-            clientMessage = error.message; // Use the specific block message
-        } else if (error.status === 400) {
-             clientMessage = `AI Service Error: ${error.message}`;
-        }
-
-        const enhancedError = new Error(clientMessage);
-        enhancedError.status = error.status || 500; // Keep original status if available
-        enhancedError.originalError = error; // Attach original error if needed for server logs
-        throw enhancedError;
+        const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || "Unknown error calling KG Ingestion API";
+        console.error(`[KG Service] Error calling KG Ingestion API for '${originalName}':`, errorMsg);
+        if (error.response?.data) console.error("[KG Service] KG API Error Response Data:", error.response.data);
+        return {
+            success: false,
+            message: `KG generated, but error calling KG Ingestion API: ${errorMsg}`,
+            finalKgNodesCount: finalKg.nodes.length, // Report counts
+            finalKgEdgesCount: finalKg.edges.length
+        };
     }
-};
+}
 
-module.exports = { generateContentWithHistory };
-
+module.exports = { generateAndStoreKg };
 ```
 
 `utils/assetCleanup.js`
@@ -4579,5 +4838,301 @@ function getPreferredLocalIP() {
 
 module.exports = { getLocalIPs, getPreferredLocalIP };
 
+```
+
+`workers/analysisWorker.js`
+
+```javascript
+// server/workers/analysisWorker.js
+const { workerData, parentPort } = require('worker_threads');
+const mongoose = require('mongoose');
+// const path = require('path'); // Not strictly needed if paths below are correct
+
+// Assuming worker is in server/workers/ and services/models are in server/services/, server/models/
+const User = require('../models/User');
+const connectDB = require('../config/db');
+const geminiService = require('../services/geminiService'); // For actual LLM calls
+const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); // For prompts
+
+// This function will now contain the actual analysis generation logic
+async function performFullAnalysis(userId, originalName, textForAnalysis) {
+    console.log(`[Analysis Worker ${process.pid}] Starting actual analysis generation for '${originalName}'. Text length: ${textForAnalysis.length}`);
+
+    const analysisResults = { faq: "", topics: "", mindmap: "" };
+    let allIndividualAnalysesSuccessful = true; // Tracks if each specific analysis type was successful
+
+    // Helper for a single analysis type, similar to what was in upload.js
+    async function generateSingleAnalysis(type, promptContentForLLM, context) {
+        try {
+            console.log(`[Analysis Worker] Generating ${type} for '${context.originalName}' (User: ${context.userId}).`);
+            const historyForGemini = [{ role: 'user', parts: [{ text: "Please perform the requested analysis based on the system instruction provided." }] }];
+            
+            const generatedText = await geminiService.generateContentWithHistory(
+                historyForGemini,
+                promptContentForLLM // This is the full prompt including the document text
+            );
+
+            if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
+                console.warn(`[Analysis Worker] Gemini returned empty content for ${type} for '${context.originalName}'.`);
+                return { success: false, content: `Notice: No content generated by the AI for ${type}.` };
+            }
+            console.log(`[Analysis Worker] ${type} generation successful for '${context.originalName}'.`);
+            return { success: true, content: generatedText.trim() };
+        } catch (error) {
+            console.error(`[Analysis Worker] Error during ${type} generation for '${context.originalName}': ${error.message}`);
+            allIndividualAnalysesSuccessful = false; // Mark that at least one analysis type failed
+            return { success: false, content: `Error generating ${type}: ${error.message.split('\n')[0].substring(0, 250)}` };
+        }
+    }
+
+    const logCtx = { userId, originalName };
+
+    // --- Generate FAQ, Topics, and Mindmap IN PARALLEL within this worker ---
+    // This makes the worker itself more efficient if the LLM calls are independent.
+    const analysisPromises = [
+        generateSingleAnalysis('FAQ', ANALYSIS_PROMPTS.faq.getPrompt(textForAnalysis), logCtx),
+        generateSingleAnalysis('Topics', ANALYSIS_PROMPTS.topics.getPrompt(textForAnalysis), logCtx),
+        generateSingleAnalysis('Mindmap', ANALYSIS_PROMPTS.mindmap.getPrompt(textForAnalysis), logCtx)
+    ];
+
+    const [faqOutcome, topicsOutcome, mindmapOutcome] = await Promise.allSettled(analysisPromises);
+
+    // Process outcomes from Promise.allSettled
+    if (faqOutcome.status === 'fulfilled') {
+        analysisResults.faq = faqOutcome.value.content;
+        if (!faqOutcome.value.success) allIndividualAnalysesSuccessful = false;
+    } else { // rejected
+        analysisResults.faq = `Error generating FAQ: ${faqOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
+        allIndividualAnalysesSuccessful = false;
+        console.error(`[Analysis Worker] FAQ generation promise rejected for ${originalName}:`, faqOutcome.reason);
+    }
+
+    if (topicsOutcome.status === 'fulfilled') {
+        analysisResults.topics = topicsOutcome.value.content;
+        if (!topicsOutcome.value.success) allIndividualAnalysesSuccessful = false;
+    } else { // rejected
+        analysisResults.topics = `Error generating Topics: ${topicsOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
+        allIndividualAnalysesSuccessful = false;
+        console.error(`[Analysis Worker] Topics generation promise rejected for ${originalName}:`, topicsOutcome.reason);
+    }
+
+    if (mindmapOutcome.status === 'fulfilled') {
+        analysisResults.mindmap = mindmapOutcome.value.content;
+        if (!mindmapOutcome.value.success) allIndividualAnalysesSuccessful = false;
+    } else { // rejected
+        analysisResults.mindmap = `Error generating Mindmap: ${mindmapOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
+        allIndividualAnalysesSuccessful = false;
+        console.error(`[Analysis Worker] Mindmap generation promise rejected for ${originalName}:`, mindmapOutcome.reason);
+    }
+    
+    // Update MongoDB with all results (even if some failed, we store what we have or the error messages)
+    const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
+    try {
+        await User.updateOne(
+            { _id: userId, "uploadedDocuments.filename": originalName },
+            {
+                $set: {
+                    "uploadedDocuments.$.analysis.faq": analysisResults.faq,
+                    "uploadedDocuments.$.analysis.topics": analysisResults.topics,
+                    "uploadedDocuments.$.analysis.mindmap": analysisResults.mindmap,
+                    "uploadedDocuments.$.analysisStatus": finalAnalysisStatus,
+                    "uploadedDocuments.$.analysisTimestamp": new Date()
+                }
+            }
+        );
+        console.log(`[Analysis Worker ${process.pid}] Analysis results for '${originalName}' (Status: ${finalAnalysisStatus}) stored in DB.`);
+        return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed successfully' : 'completed with some failures'}.`, results: analysisResults };
+    } catch (dbError) {
+        console.error(`[Analysis Worker ${process.pid}] DB Error storing analysis results for '${originalName}':`, dbError);
+        // This is a critical error for the worker's task.
+        // The 'analysisStatus' might remain 'processing' or be whatever it was before this attempt.
+        return { success: false, message: `DB Error storing analysis: ${dbError.message}`, results: analysisResults };
+    }
+}
+
+async function run() {
+    const { userId, originalName, textForAnalysis } = workerData;
+    let dbConnected = false;
+    let overallTaskSuccess = false; // Renamed for clarity for the worker's overall task
+    let finalMessageToParent = "Analysis worker encountered an issue.";
+
+    try {
+        console.log(`[Analysis Worker ${process.pid}] Received task for: ${originalName}, User: ${userId}`);
+        if (!process.env.MONGO_URI) {
+            throw new Error("MONGO_URI not set in Analysis worker environment.");
+        }
+        if (!userId || !originalName) {
+            throw new Error("Missing userId or originalName in workerData.");
+        }
+        
+        await connectDB(process.env.MONGO_URI);
+        dbConnected = true;
+        console.log(`[Analysis Worker ${process.pid}] DB Connected for ${originalName}.`);
+
+        // Update status to 'processing_analysis'
+        await User.updateOne(
+            { _id: userId, "uploadedDocuments.filename": originalName },
+            { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
+        );
+        console.log(`[Analysis Worker ${process.pid}] Set analysisStatus to 'processing' for ${originalName}.`);
+
+
+        if (!textForAnalysis || textForAnalysis.trim() === '') {
+            console.warn(`[Analysis Worker ${process.pid}] No text provided for analysis for ${originalName}. Marking as skipped.`);
+            await User.updateOne(
+                { _id: userId, "uploadedDocuments.filename": originalName },
+                { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
+            );
+            overallTaskSuccess = true; // Not a failure of the worker, just nothing to do.
+            finalMessageToParent = "Analysis skipped: No text provided.";
+            // Fall through to postMessage and finally block.
+        } else {
+            const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis);
+            overallTaskSuccess = analysisServiceResult.success;
+            finalMessageToParent = analysisServiceResult.message;
+        }
+
+        if (parentPort) {
+            parentPort.postMessage({
+                success: overallTaskSuccess,
+                originalName: originalName,
+                message: finalMessageToParent
+                // Optionally send back analysisServiceResult.results if the main thread needs them
+            });
+        }
+
+    } catch (error) {
+        console.error(`[Analysis Worker ${process.pid}] Critical error processing '${originalName}':`, error.message, error.stack);
+        finalMessageToParent = error.message || "Unknown critical error in Analysis worker.";
+        overallTaskSuccess = false; // Ensure this is false on critical error
+        if (dbConnected && userId && originalName) { // Check if userId & originalName are defined
+            try {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
+                );
+            } catch (dbUpdateError) {
+                console.error(`[Analysis Worker ${process.pid}] Failed to update status to 'failed_critical' for ${originalName} after error:`, dbUpdateError);
+            }
+        }
+        if (parentPort) {
+            parentPort.postMessage({ success: false, originalName, error: finalMessageToParent });
+        }
+    } finally {
+        if (dbConnected) {
+            await mongoose.disconnect().catch(e => console.error("[Analysis Worker] Error disconnecting DB:", e));
+            console.log(`[Analysis Worker ${process.pid}] DB Disconnected for ${originalName}.`);
+        }
+        // The worker will exit automatically after the run() promise fulfills or rejects.
+        // If parentPort exists, Node.js waits for messages or explicit exit.
+        // If no parentPort (e.g. direct execution), we might need process.exit.
+        // Since we expect parentPort, this is okay.
+        console.log(`[Analysis Worker ${process.pid}] Finished task for ${originalName}. Overall Success: ${overallTaskSuccess}`);
+    }
+}
+
+run();
+```
+
+`workers/kgWorker.js`
+
+```javascript
+// server/workers/kgWorker.js
+const { workerData, parentPort } = require('worker_threads');
+const mongoose = require('mongoose');
+
+const User = require('../models/User');
+const connectDB = require('../config/db');
+const kgService = require('../services/kgService');
+
+async function runKgGeneration() {
+    const { chunksForKg: allInitialChunks, userId, originalName } = workerData;
+    let dbConnected = false;
+    let overallSuccess = false;
+    let finalMessage = "KG processing encountered an issue.";
+    const logPrefix = `[KG Worker ${process.pid}, Doc: ${originalName}]`;
+
+    try {
+        console.log(`${logPrefix} Received task. User: ${userId}, Initial Chunks: ${allInitialChunks ? allInitialChunks.length : 0}`);
+        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in KG worker environment.");
+        if (!userId || !originalName) throw new Error("Missing userId or originalName in KG workerData.");
+
+        await connectDB(process.env.MONGO_URI);
+        dbConnected = true;
+        console.log(`${logPrefix} DB Connected.`);
+
+        await User.updateOne(
+            { _id: userId, "uploadedDocuments.filename": originalName },
+            { $set: { "uploadedDocuments.$.kgStatus": "processing" } }
+        );
+        console.log(`${logPrefix} Status set to 'processing'.`);
+
+        if (!allInitialChunks || allInitialChunks.length === 0) {
+            console.log(`${logPrefix} No chunks provided for KG generation. Marking as skipped.`);
+            await User.updateOne(
+                { _id: userId, "uploadedDocuments.filename": originalName },
+                { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks", "uploadedDocuments.$.kgTimestamp": new Date() } }
+            );
+            finalMessage = "No chunks provided for KG generation.";
+            overallSuccess = true; // Not a failure of this worker's process
+        } else {
+            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName);
+
+            if (kgExtractionResult && kgExtractionResult.success) {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: {
+                        "uploadedDocuments.$.kgStatus": "completed",
+                        "uploadedDocuments.$.kgNodesCount": kgExtractionResult.finalKgNodesCount,
+                        "uploadedDocuments.$.kgEdgesCount": kgExtractionResult.finalKgEdgesCount,
+                        "uploadedDocuments.$.kgTimestamp": new Date()
+                        }
+                    }
+                );
+                overallSuccess = true;
+                finalMessage = kgExtractionResult.message || "KG generation and storage completed successfully.";
+                console.log(`${logPrefix} SUCCESS: ${finalMessage}`);
+            } else {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.kgStatus": "failed_extraction" } }
+                );
+                finalMessage = (kgExtractionResult && kgExtractionResult.message) ? kgExtractionResult.message : "KG detailed extraction or storage failed.";
+                console.error(`${logPrefix} FAILED (Extraction/Store): ${finalMessage}`);
+                overallSuccess = false;
+            }
+        }
+
+        if (parentPort) {
+            parentPort.postMessage({ success: overallSuccess, originalName, message: finalMessage });
+        }
+
+    } catch (error) {
+        console.error(`${logPrefix} CRITICAL error:`, error.message, error.stack);
+        finalMessage = error.message || "Unknown critical error in KG worker.";
+        overallSuccess = false;
+        if (dbConnected && userId && originalName) {
+            try {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.kgStatus": "failed_critical" } }
+                );
+            } catch (dbUpdateError) {
+                console.error(`${logPrefix} DB update error on critical fail:`, dbUpdateError);
+            }
+        }
+        if (parentPort) {
+            parentPort.postMessage({ success: false, originalName, error: finalMessage });
+        }
+    } finally {
+        if (dbConnected) {
+            await mongoose.disconnect().catch(e => console.error(`${logPrefix} Error disconnecting DB:`, e));
+            console.log(`${logPrefix} DB Disconnected.`);
+        }
+        console.log(`${logPrefix} Finished task. Overall Success: ${overallSuccess}`);
+    }
+}
+
+runKgGeneration();
 ```
 

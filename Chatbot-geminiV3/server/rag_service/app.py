@@ -140,10 +140,9 @@ def add_document_qdrant():
         return create_error_response(f"File not found at server path: {file_path}", 404)
 
     try:
-        # Assuming ai_core.process_document_for_embeddings is updated to return two values,
-        # or you have a new function like ai_core.process_document_for_qdrant
-        current_app.logger.info(f"Calling ai_core to process document: '{original_name}'")
-        processed_chunks_with_embeddings, raw_text_for_node_analysis = ai_core.process_document_for_qdrant(
+        current_app.logger.info(f"Calling ai_core to process document: '{original_name}' for Qdrant")
+        # ai_core.process_document_for_qdrant returns: processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata
+        processed_chunks_with_embeddings, raw_text_for_node_analysis, chunks_with_metadata_for_kg = ai_core.process_document_for_qdrant(
             file_path=file_path,
             original_name=original_name,
             user_id=user_id
@@ -178,8 +177,9 @@ def add_document_qdrant():
             "status": "added",
             "filename": original_name,
             "user_id": user_id,
-            "num_chunks_added_to_qdrvecorant": num_chunks_added_to_qdrant,
-            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "" # Ensure it's always a string
+            "num_chunks_added_to_qdrant": num_chunks_added_to_qdrant,
+            "raw_text_for_analysis": raw_text_for_node_analysis if raw_text_for_node_analysis is not None else "",
+            "chunks_with_metadata": chunks_with_metadata_for_kg # Pass this to Node.js for KG worker
         }
         current_app.logger.info(f"Successfully processed '{original_name}' for Qdrant. Returning raw text and Qdrant status.")
         return jsonify(response_payload), 201
