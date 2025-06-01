@@ -4,7 +4,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
-
+const axios = require('axios');
 const router = express.Router();
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
