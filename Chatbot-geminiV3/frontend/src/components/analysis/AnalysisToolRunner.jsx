@@ -1,15 +1,18 @@
 // src/components/analysis/AnalysisToolRunner.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion'; // Ensure AnimatePresence for smooth dropdown
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon } from 'lucide-react'; // Sparkles for Reasoning
+import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import { marked } from 'marked';
 import MindmapViewer from './MindmapViewer.jsx';
+import DOMPurify from 'dompurify';
+import Prism from 'prismjs'; // Ensure Prism is imported or available globally
+import { renderMathInHtml } from '../../utils/markdownUtils';
 
 marked.setOptions({
   breaks: true,
@@ -18,13 +21,46 @@ marked.setOptions({
 
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
-    const rawHtml = marked.parse(markdownText);
-    return { __html: rawHtml };
+
+    console.log("createMarkup: Original Markdown:\n", markdownText);
+
+    let html = marked.parse(markdownText);
+
+    html = renderMathInHtml(html);
+
+    const cleanHtml = DOMPurify.sanitize(html, { 
+        ADD_TAGS: [
+            'iframe', 'math', 'mtable', 'mtr', 'mtd', 'mrow', 'mi', 'mo', 'mn', 'mtext',
+            'msup', 'msub', 'mfrac', 'msqrt', 'munderover', 'mstyle',
+            'semantics', 'annotation', '표', 'annotation-xml',
+            'span',
+        ],
+        ADD_ATTR: [
+            'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'encoding', 'style',
+            'xmlns', 'display', 'class', 'role', 'aria-hidden', 'mathvariant',
+            'mathsize', 'fontstyle', 'fontweight', 'color', 'background', 'href',
+            'accent', 'accentunder', 'align', 'columnalign', 'columnlines',
+            'columnspacing', 'columnspan', 'displaystyle', 'equalcolumns',
+            'equalrows', 'fence', 'fontfamily', 'fontsize', 'frame', 'height',
+            'linethickness', 'lspace', 'mathbackground', 'mathcolor',
+            'maxwidth', 'minlabelspacing', 'movablelimits', 'notation', 'rowalign',
+            'rowlines', 'rowspacing', 'rowspan', 'rspace', 'scriptlevel',
+            'selection', 'separator', 'stretchy', 'symmetric', 'width', 'xlink:href',
+        ],
+    });
+    return { __html: cleanHtml };
 };
+
 
 const escapeHtml = (unsafe) => {
     if (typeof unsafe !== 'string') return '';
-    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/'/g, "'");
+    // More robust HTML escaping
+    return unsafe
+        .replace(/&/g, "&")
+        .replace(/</g, "<")
+        .replace(/>/g, ">")
+        .replace(/"/g, `"`)
+        .replace(/'/g, "'");
 };
 
 const ENGAGEMENT_TEXTS = {
@@ -35,21 +71,19 @@ const ENGAGEMENT_TEXTS = {
 };
 
 function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilename }) {
-    const [isSectionOpen, setIsSectionOpen] = useState(false); // For the main tool accordion
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false); // For the content dropdown after "Run"
-    
+    const [isSectionOpen, setIsSectionOpen] = useState(true); // Default to open if a doc might be pre-selected
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
-    
-    const [analysisContent, setAnalysisContent] = useState(null); // Stores the final analysis result
-    const [aiReasoning, setAiReasoning] = useState(null); // Stores the "thinking" part
-    
+    const [analysisContent, setAnalysisContent] = useState(null);
+    const [aiReasoning, setAiReasoning] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentEngagementText, setCurrentEngagementText] = useState('');
 
     const IconComponent = LucideIcons[iconName] || DefaultIcon;
+    const modalAnalysisContentRef = useRef(null);
+    const aiReasoningRef = useRef(null);
 
-    // Effect to cycle through engagement texts during loading
     useEffect(() => {
         let intervalId;
         if (isLoading) {
@@ -66,7 +100,6 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         return () => clearInterval(intervalId);
     }, [isLoading, toolType]);
 
-    // Reset states when document selection changes or tool is unmounted
     useEffect(() => {
         if (!selectedDocumentFilename) {
             setIsLoading(false);
@@ -74,16 +107,41 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             setAnalysisContent(null);
             setAiReasoning(null);
             setIsDropdownOpen(false);
-            setIsSectionOpen(false); // Optionally close the section
+            // setIsSectionOpen(false); // Keep section open if desired, or close it
         } else {
-             setIsSectionOpen(true); // Optionally open the section when a doc is selected
-             // Clear previous results if a new document is selected
-             setAnalysisContent(null);
-             setAiReasoning(null);
-             setIsDropdownOpen(false);
-             setError('');
+            // setIsSectionOpen(true); // Keep section open if desired
+            // Optionally clear previous results when a NEW document is selected,
+            // but not if the same document is re-selected (depends on desired UX)
+            // For now, let's assume results are tied to the selected document and don't auto-clear on re-selection here
+            // Clearing happens in handleRunAnalysis before fetching new data.
         }
     }, [selectedDocumentFilename]);
+
+    useEffect(() => {
+        if (isModalOpen && analysisContent && modalAnalysisContentRef.current) {
+            const timer = setTimeout(() => {
+                if (modalAnalysisContentRef.current) {
+                    Prism.highlightAllUnder(modalAnalysisContentRef.current);
+                }
+            }, 50); // Slightly increased delay for modal animations
+            return () => clearTimeout(timer);
+        }
+    }, [isModalOpen, analysisContent]);
+
+    useEffect(() => {
+        // This effect is for the AI Reasoning <pre> block if it contains Markdown.
+        // Currently, it's set up to display plain text.
+        // If aiReasoning were Markdown and rendered via createMarkup:
+        if (aiReasoningRef.current && aiReasoning && isDropdownOpen) {
+            const codeElement = aiReasoningRef.current.querySelector('code');
+            // If the code element exists and has a language class (e.g., for plain text)
+            if (codeElement && codeElement.className.includes('language-')) {
+                Prism.highlightElement(codeElement);
+            }
+            // If the entire pre block was rendered from markdown with multiple code blocks:
+            // Prism.highlightAllUnder(aiReasoningRef.current);
+        }
+    }, [aiReasoning, isDropdownOpen]);
 
     const handleRunAnalysis = async () => {
         if (!selectedDocumentFilename) {
@@ -92,55 +150,58 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
         setIsLoading(true);
         setError('');
-        setAnalysisContent(null);
-        setAiReasoning(null);
-        setIsDropdownOpen(false); // Close dropdown if it was open, before running again
+        setAnalysisContent(null); // Clear previous content
+        setAiReasoning(null);   // Clear previous reasoning
+        setIsDropdownOpen(false);
 
         const payload = { filename: selectedDocumentFilename, analysis_type: toolType };
-        
+        const toastId = toast.loading(`Generating ${title} for "${selectedDocumentFilename}"...`);
+
         try {
-            // api.requestAnalysis is intelligent: fetches stored or generates (mock)
-            const response = await api.requestAnalysis(payload); 
+            const response = await api.requestAnalysis(payload);
+            toast.dismiss(toastId); // Dismiss loading toast before showing success/error
 
             if (response) {
                 if (response.content && response.content.trim() !== "" && !response.content.startsWith("Error:")) {
                     setAnalysisContent(response.content);
+                    toast.success(`${title} analysis complete!`);
                 } else if (response.content && response.content.startsWith("Error:")) {
                     setError(response.content);
-                    toast.error(`Error generating ${title}: ${response.content.substring(0,100)}`);
+                    toast.error(`Error in ${title}: ${response.content.substring(0, 100)}...`);
                 } else {
                     setError(`No content returned for ${title}.`);
                     toast.warn(`No content was generated for ${title}.`);
                 }
-                
+
                 if (response.thinking && response.thinking.trim() !== "") {
                     setAiReasoning(response.thinking);
                 } else {
-                    setAiReasoning(response.content ? "Analysis complete. No detailed reasoning provided by AI for this step." : "AI reasoning not available.");
+                    setAiReasoning(response.content ? "Analysis complete. No detailed reasoning provided." : "AI reasoning not available.");
                 }
-                setIsDropdownOpen(true); // Open dropdown to show Reasoning & View button
+                setIsDropdownOpen(true); // Show dropdown with results/reasoning
             } else {
                 throw new Error("Empty response from analysis service.");
             }
-
         } catch (err) {
+            toast.dismiss(toastId);
             const errorMessage = err.message || `Failed to generate or fetch ${title}.`;
             setError(errorMessage);
             toast.error(errorMessage);
             console.error(`Run ${title} Analysis Error:`, err);
-            setIsDropdownOpen(false); // Ensure dropdown is closed on error
+            setIsDropdownOpen(false);
         } finally {
             setIsLoading(false);
         }
     };
-    
+
     const renderModalContent = () => {
         if (!analysisContent) return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
         if (toolType === 'mindmap') {
             return <MindmapViewer markdownContent={analysisContent} />;
         }
         return (
-            <div 
+            <div
+                ref={modalAnalysisContentRef}
                 className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark p-1 custom-scrollbar text-[0.8rem] leading-relaxed"
                 dangerouslySetInnerHTML={createMarkup(analysisContent)}
             />
@@ -149,11 +210,10 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
     return (
         <div className="card-base p-3">
-            {/* Header: Icon, Title, Run Button, Accordion Toggle */}
             <div className="flex items-center justify-between">
-                <div 
+                <div
                     className="flex items-center gap-2 text-sm font-medium text-text-light dark:text-text-dark focus:outline-none w-full text-left cursor-pointer hover:text-primary dark:hover:text-primary-light transition-colors"
-                    onClick={() => setIsSectionOpen(!isSectionOpen)} // Allow toggling the main section
+                    onClick={() => setIsSectionOpen(!isSectionOpen)}
                     aria-expanded={isSectionOpen}
                 >
                     <IconComponent size={16} className="text-primary dark:text-primary-light flex-shrink-0" />
@@ -162,53 +222,49 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                 <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
                         onClick={handleRunAnalysis}
-                        variant="primary" 
+                        variant="primary"
                         size="sm"
                         className="!px-3 !py-1 text-xs"
-                        isLoading={isLoading} // Loader for the Run button itself
-                        disabled={!selectedDocumentFilename || isLoading} // Enable based on document selection
+                        isLoading={isLoading}
+                        disabled={!selectedDocumentFilename || isLoading}
                         title={!selectedDocumentFilename ? "Select a document first" : `Run ${title} Analysis`}
                     >
-                       {isLoading ? currentEngagementText.split(' ')[0] : "Run"} {/* Show first word of engagement or "Run" */}
+                       {isLoading ? (currentEngagementText.split(' ')[0] || "...") : "Run"}
                     </Button>
-                    <IconButton 
-                        icon={isSectionOpen ? ChevronUp : ChevronDown} 
-                        onClick={() => setIsSectionOpen(!isSectionOpen)} 
-                        size="sm" 
+                    <IconButton
+                        icon={isSectionOpen ? ChevronUp : ChevronDown}
+                        onClick={() => setIsSectionOpen(!isSectionOpen)}
+                        size="sm"
                         variant="ghost"
                         className="p-1"
                         aria-label={isSectionOpen ? "Collapse section" : "Expand section"}
-                        disabled={isLoading && isSectionOpen} // Don't allow closing section if loading and already open
+                        disabled={isLoading && isSectionOpen}
                     />
                 </div>
             </div>
 
-            {/* Main Accordion Content (conditionally rendered based on isSectionOpen) */}
             <AnimatePresence>
                 {isSectionOpen && (
-                    <motion.div 
+                    <motion.div
                         key="tool-section-content"
-                        initial={{ height: 0, opacity: 0 }} 
-                        animate={{ height: 'auto', opacity: 1 }} 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="mt-2 pt-2 border-t border-border-light dark:border-border-dark overflow-hidden" 
+                        className="mt-2 pt-2 border-t border-border-light dark:border-border-dark overflow-hidden"
                     >
-                        {/* Engagement Text (shown below Run button when loading) */}
                         {isLoading && (
                             <div className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 flex items-center justify-center gap-2 animate-fadeIn">
                                 <Loader2 size={14} className="animate-spin"/> {currentEngagementText}
                             </div>
                         )}
 
-                        {/* Error Display */}
                         {error && !isLoading && (
                             <div className="my-2 p-2 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-xs flex items-center gap-1">
                                 <AlertTriangle size={14} /> {error.length > 150 ? error.substring(0,147) + "..." : error}
                             </div>
                         )}
-                        
-                        {/* Dropdown for AI Reasoning and View Button (shown after successful run) */}
+
                         {!isLoading && !error && (analysisContent || aiReasoning) && isDropdownOpen && (
                             <motion.div
                                 key="analysis-dropdown"
@@ -218,7 +274,6 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 transition={{ duration: 0.2 }}
                                 className="mt-2 space-y-2"
                             >
-                                {/* AI Reasoning Section */}
                                 {aiReasoning && (
                                     <details className="group text-xs rounded-md border border-border-light dark:border-border-dark bg-surface-light dark:bg-gray-800 shadow-sm">
                                         <summary className="flex items-center justify-between gap-1 p-2 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors rounded-t-md">
@@ -227,17 +282,20 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                             </span>
                                             <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
                                         </summary>
-                                        <pre className="p-2.5 bg-gray-50 dark:bg-gray-900/50 rounded-b-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-40 overflow-y-auto custom-scrollbar">
-                                            <code>{escapeHtml(aiReasoning)}</code>
+                                        <pre
+                                            ref={aiReasoningRef}
+                                            className="p-2.5 bg-gray-50 dark:bg-gray-900/50 rounded-b-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-40 overflow-y-auto custom-scrollbar"
+                                        >
+                                            {/* For plain text reasoning. If it can contain specific code, add language-xxx class */}
+                                            <code className="language-text">{escapeHtml(aiReasoning)}</code>
                                         </pre>
                                     </details>
                                 )}
 
-                                {/* View Button */}
-                                {analysisContent && (
+                                {analysisContent && toolType !== 'mindmap' && ( // Don't show view button for mindmap if it's already rendered inline
                                      <Button
                                         onClick={() => setIsModalOpen(true)}
-                                        variant="outline" 
+                                        variant="outline"
                                         size="sm"
                                         fullWidth
                                         leftIcon={<Eye size={14}/>}
@@ -248,14 +306,12 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 )}
                             </motion.div>
                         )}
-                        
-                        {/* Placeholder if no doc selected or no run yet */}
+
                         {!isLoading && !isDropdownOpen && !error && (
                             <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 text-center">
                                 {selectedDocumentFilename ? `Click "Run" to generate ${title} for "${selectedDocumentFilename}".` : "Select a document to enable analysis."}
                             </p>
                         )}
-
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -264,11 +320,10 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                title={`Result for ${title}`}
-                size="xl" // Can be 'lg', 'xl', '2xl'
+                title={`Result for ${title} on "${selectedDocumentFilename || 'document'}"`}
+                size="xl"
             >
                 <div className="max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 bg-gray-50 dark:bg-gray-800 rounded-md shadow-inner">
-                    {/* Add a sub-header for context if selectedDocumentFilename is available */}
                     {selectedDocumentFilename && (
                         <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-2 border-b border-border-light dark:border-border-dark pb-1.5">
                             Source Document: <strong>{selectedDocumentFilename}</strong>

@@ -9,8 +9,8 @@ import { marked } from 'marked';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx'; // Import IconButton
 import { motion } from 'framer-motion'; // Import motion
+import DOMPurify from 'dompurify';
 
-// Configure marked for consistent rendering
 marked.setOptions({
   breaks: true,
   gfm: true,
@@ -19,11 +19,8 @@ marked.setOptions({
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
     const rawHtml = marked.parse(markdownText);
-    // For production, consider DOMPurify:
-    // import DOMPurify from 'dompurify';
-    // const cleanHtml = DOMPurify.sanitize(rawHtml);
-    // return { __html: cleanHtml };
-    return { __html: rawHtml };
+    const cleanHtml = DOMPurify.sanitize(rawHtml);
+    return { __html: cleanHtml };
 };
 
 const escapeHtml = (unsafe) => { // Helper for <pre> tags if thinking content isn't markdown
