@@ -1,52 +1,58 @@
-import React, { useEffect, useRef, useState } from 'react';
+// frontend/src/components/analysis/MindmapViewer.jsx
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import toast from 'react-hot-toast';
 
-// Ensure Markmap libraries are loaded globally from index.html (d3, markmap-lib, markmap-view, markmap-toolbar)
-
-function MindmapViewer({ markdownContent }) {
-    const svgRef = useRef(null);
+const MindmapViewer = forwardRef(({ markdownContent }, ref) => {
+    const localSvgRef = useRef(null);
+    const toolbarContainerRef = useRef(null); // Ref for the toolbar's container div
     const [markmapInstance, setMarkmapInstance] = useState(null);
     const [toolbarInstance, setToolbarInstance] = useState(null);
-    const { Transformer, Markmap, Toolbar } = window.markmap; // Access global markmap
+    const { Transformer, Markmap, Toolbar } = window.markmap;
+
+    useImperativeHandle(ref, () => ({
+        getSvgElement: () => localSvgRef.current,
+        getMarkmapInstance: () => markmapInstance,
+    }));
 
     useEffect(() => {
-        if (!markdownContent || !svgRef.current || !Transformer || !Markmap || !Toolbar) {
-            if (svgRef.current) svgRef.current.innerHTML = ''; // Clear previous
+        if (!markdownContent || !localSvgRef.current || !toolbarContainerRef.current || !Transformer || !Markmap || !Toolbar) {
+            if (localSvgRef.current) localSvgRef.current.innerHTML = '';
+            if (toolbarContainerRef.current) toolbarContainerRef.current.innerHTML = ''; // Clear toolbar too
             return;
         }
         
         let mm, tb;
         try {
-            // Cleanup previous instances if they exist
             if (markmapInstance && typeof markmapInstance.destroy === 'function') {
                 markmapInstance.destroy();
             }
             if (toolbarInstance && toolbarInstance.el && toolbarInstance.el.parentNode) {
                 toolbarInstance.el.parentNode.removeChild(toolbarInstance.el);
             }
+            if (toolbarContainerRef.current) {
+                toolbarContainerRef.current.innerHTML = '';
+            }
+
 
             const transformer = new Transformer();
-            const { root, features } = transformer.transform(markdownContent);
+            const { root } = transformer.transform(markdownContent); 
             
-            svgRef.current.innerHTML = ''; // Clear before re-rendering
-            mm = Markmap.create(svgRef.current, null, root); // Create new Markmap
+            localSvgRef.current.innerHTML = ''; 
+            mm = Markmap.create(localSvgRef.current, null, root);
             setMarkmapInstance(mm);
 
-            // Create and prepend toolbar
             tb = Toolbar.create(mm);
-            svgRef.current.parentNode.insertBefore(tb.el, svgRef.current);
+            toolbarContainerRef.current.appendChild(tb.el);
             setToolbarInstance(tb);
             
-            // Auto-fit after a short delay to ensure rendering is complete
-            setTimeout(() => mm.fit(), 100);
+            setTimeout(() => mm.fit(), 150); 
 
         } catch (e) {
             console.error("Error rendering Markmap:", e);
             toast.error("Failed to render mind map. Check console for details.");
-            if (svgRef.current) svgRef.current.innerHTML = '<p class="text-xs text-red-500 p-2">Error rendering mind map. Invalid Markdown for mind map?</p>';
+            if (localSvgRef.current) localSvgRef.current.innerHTML = '<p class="text-xs text-red-500 p-2">Error rendering mind map. Invalid Markdown or Markmap library issue.</p>';
         }
         
-        // Cleanup function for when component unmounts or markdownContent changes
         return () => {
             if (mm && typeof mm.destroy === 'function') {
                 mm.destroy();
@@ -55,19 +61,21 @@ function MindmapViewer({ markdownContent }) {
                 tb.el.parentNode.removeChild(tb.el);
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-    }, [markdownContent]); // Rerun when markdownContent changes
-
+    }, [markdownContent]); 
     if (!markdownContent) {
         return <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2">No mind map data to display.</p>;
     }
 
     return (
-        <div className="relative w-full h-80 md:h-96 my-2">
-            {/* Toolbar will be prepended here by useEffect */}
-            <svg ref={svgRef} className="w-full h-full border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 shadow-inner"></svg>
+        <div className="markmap-container relative w-full min-h-[20rem] md:min-h-[24rem] my-2 flex flex-col">
+            {/* Container for the toolbar */}
+            <div ref={toolbarContainerRef} className="markmap-toolbar-container h-8 mb-1"></div>
+            {/* SVG for the mindmap */}
+            <div className="flex-grow w-full h-full"> {/* Ensure SVG container takes remaining space */}
+                <svg ref={localSvgRef} className="w-full h-full border border-border-light dark:border-border-dark rounded-md bg-white dark:bg-gray-800 shadow-inner"></svg>
+            </div>
         </div>
     );
-}
+});
 
 export default MindmapViewer;

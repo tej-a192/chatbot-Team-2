@@ -1,3 +1,4 @@
+// tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -10,7 +11,7 @@ export default {
       colors: {
         'primary': { light: '#60a5fa', DEFAULT: '#3b82f6', dark: '#2563eb' },
         'secondary': { light: '#9ca3af', DEFAULT: '#6b7280', dark: '#4b5563' },
-        'accent': '#2dd4bf', 
+        'accent': '#2dd4bf',
         'background-dark': '#0F172A', 'surface-dark': '#1E293B', 'border-dark': '#334155', 'text-dark': '#E2E8F0', 'text-muted-dark': '#94A3B8',
         'background-light': '#F8FAFC', 'surface-light': '#FFFFFF', 'border-light': '#E2E8F0', 'text-light': '#0F172A', 'text-muted-light': '#64748B',
       },
@@ -43,5 +44,6 @@ export default {
   plugins: [
     require('@tailwindcss/forms')({ strategy: 'class' }),
     require('tailwind-scrollbar')({ nocompatible: true }),
+    require('@tailwindcss/typography'),
   ],
 }
