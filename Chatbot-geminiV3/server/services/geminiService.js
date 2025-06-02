@@ -11,7 +11,7 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 4096; // Default for chat and general analysis
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192; // Increased default for potentially longer thinking + answer
 const DEFAULT_MAX_OUTPUT_TOKENS_KG = 65536;   // Default specific for KG, might need adjustment
 
 const baseSafetySettings = [
@@ -25,7 +25,7 @@ const baseSafetySettings = [
 const generateContentWithHistory = async (
     chatHistory,
     systemPromptText = null,
-    customMaxOutputTokens = null // NEW: Optional parameter
+    customMaxOutputTokens = null 
 ) => {
     try {
         if (!Array.isArray(chatHistory) || chatHistory.length === 0) {
@@ -34,7 +34,6 @@ const generateContentWithHistory = async (
         // It's good practice to ensure history ends with a user role for many models
         // if (chatHistory[chatHistory.length - 1].role !== 'user') {
         //     console.warn("Warning: Chat history for Gemini API call does not end with a 'user' role. This might lead to unexpected behavior. Last role:", chatHistory[chatHistory.length - 1].role);
-        //     // Depending on strictness, you might throw an error or just proceed with caution.
         // }
 
         const effectiveMaxOutputTokens = customMaxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT;
@@ -50,17 +49,17 @@ const generateContentWithHistory = async (
             safetySettings: baseSafetySettings,
             ...(systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '' && {
                 systemInstruction: {
+                    // Gemini API expects systemInstruction to be an object with a 'parts' array
                     parts: [{ text: systemPromptText.trim() }]
                 }
              })
         };
         const model = genAI.getGenerativeModel(modelOptions);
 
-        // Ensure history is correctly formatted for the API
-        const historyForStartChat = chatHistory.slice(0, -1) // All but the last message which will be sent via sendMessage
+        const historyForStartChat = chatHistory.slice(0, -1) 
             .map(msg => ({
-                 role: msg.role, // Assuming role is already 'user' or 'model'
-                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: ''}] // Ensure parts is an array of objects with text
+                 role: msg.role, 
+                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: ''}] 
             }))
             .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
 
@@ -86,6 +85,9 @@ const generateContentWithHistory = async (
         if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
             const responseText = candidate?.content?.parts?.[0]?.text;
             if (typeof responseText === 'string') {
+                if (candidate.finishReason === 'MAX_TOKENS') {
+                    console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
+                }
                 return responseText;
             } else {
                  console.warn("Gemini response finished normally but text content is missing or invalid.", { finishReason: candidate?.finishReason, content: candidate?.content });
@@ -106,26 +108,26 @@ const generateContentWithHistory = async (
                  blockMessage += ` Reason: ${finishReason}.`;
              }
              const error = new Error(blockMessage);
-             error.status = 400; // Or a more specific status if available
+             error.status = 400; 
              throw error;
         }
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
         let clientMessage = "Failed to get response from AI service.";
-        // Check for specific error messages from Google AI SDK
         if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
         else if (error.message?.includes("blocked due to safety")) clientMessage = "AI response blocked due to safety settings.";
         else if (error.message?.includes("Invalid JSON payload")) clientMessage = "AI Service Error: Invalid request format sent to AI.";
-        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; // Use message if status is 400
+        else if (error.message?.includes("User location is not supported")) clientMessage = "AI Service Error: User location is not supported for this model.";
+        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; 
         
         const enhancedError = new Error(clientMessage);
-        enhancedError.status = error.status || 500; // HTTP status code
-        enhancedError.originalError = error; // Keep original error for server-side logs
+        enhancedError.status = error.status || 500; 
+        enhancedError.originalError = error; 
         throw enhancedError;
     }
 };
 
 module.exports = {
     generateContentWithHistory,
-    DEFAULT_MAX_OUTPUT_TOKENS_KG // Export this so KG service can use it
+    DEFAULT_MAX_OUTPUT_TOKENS_KG 
 };
