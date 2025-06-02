@@ -2,10 +2,9 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const axios = require('axios'); // For calling Python service
-const { tempAuth } = require('../middleware/authMiddleware');
-const User = require('../models/User'); // Import User model
-
+const { authMiddleware } = require('../middleware/authMiddleware');
+const User = require('../models/User');
+const axios = require('axios');
 const router = express.Router();
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
@@ -40,7 +39,6 @@ const ensureDirExists = async (dirPath) => {
     catch (error) { if (error.code !== 'EEXIST') { console.error(`Error creating dir ${dirPath}:`, error); throw error; } }
 };
 
-// --- New Helper Function to call Python Service for Deletions ---
 async function callPythonDeletionEndpoint(method, endpointPath, userId, originalName, logContext) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Fallback if not set
     if (!pythonServiceUrl) {
@@ -77,107 +75,42 @@ async function callPythonDeletionEndpoint(method, endpointPath, userId, original
         return { success: false, message: `Python service call failed for ${endpointPath}: ${errorMsg}` };
     }
 }
+// --- End Helper Functions ---
 
 
 // --- @route   GET /api/files ---
-// (Keep your existing GET /api/files route as is)
-router.get('/', tempAuth, async (req, res) => {
-    // req.user is guaranteed to exist here because of tempAuth middleware
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username);
-    if (!sanitizedUsername) {
-        console.warn("GET /api/files: Invalid user identifier after sanitization.");
-        return res.status(400).json({ message: 'Invalid user identifier.' });
-    }
-
-    const userAssetsDir = path.join(ASSETS_DIR, sanitizedUsername);
-    const fileTypes = ['docs', 'images', 'code', 'others'];
-    const userFiles = [];
-
+// Use authMiddleware middleware 
+// TO GET FILE NAMES
+router.get('/', authMiddleware, async (req, res) => {
+    
+    const userFiles = []
     try {
-        try { await fs.access(userAssetsDir); }
-        catch (e) {
-             if (e.code === 'ENOENT') { return res.status(200).json([]); }
-             throw e;
-        }
+        const userId = req.user._id.toString();
 
-        for (const type of fileTypes) {
-            const typeDir = path.join(userAssetsDir, type);
-            try {
-                const filesInDir = await fs.readdir(typeDir);
-                for (const filename of filesInDir) {
-                    const filePath = path.join(typeDir, filename);
-                    try {
-                        const stats = await fs.stat(filePath);
-                        if (stats.isFile()) {
-                            const parsed = parseServerFilename(filename);
-                            userFiles.push({
-                                serverFilename: filename, originalName: parsed.originalName, type: type,
-                                relativePath: path.join(type, filename).replace(/\\/g, '/'),
-                                size: stats.size, lastModified: stats.mtime,
-                            });
-                        }
-                    } catch (statError) { console.warn(`GET /api/files: Stat failed for ${filePath}:`, statError.message); }
-                }
-            } catch (err) { if (err.code !== 'ENOENT') { console.warn(`GET /api/files: Read failed for ${typeDir}:`, err.message); } }
-        }
-        userFiles.sort((a, b) => a.originalName.localeCompare(b.originalName));
-        res.status(200).json(userFiles);
+        // Find user by ID, select only uploadedDocuments to optimize
+        const user = await User.findById(userId).select('uploadedDocuments');
+
+        if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        // Extract filenames
+        const filenames = user.uploadedDocuments
+        .map(doc => doc.filename)
+        .filter(Boolean)  // filter out undefined or null filenames just in case
+        .reverse();       // reverse the order
+
+        return res.json({ filenames });
+
     } catch (error) {
-        console.error(`!!! Error in GET /api/files for user ${sanitizedUsername}:`, error);
-        res.status(500).json({ message: 'Failed to retrieve file list.' });
-    }
-});
-
-
-// --- @route   PATCH /api/files/:serverFilename ---
-// (Keep your existing PATCH /api/files/:serverFilename route as is)
-router.patch('/:serverFilename', tempAuth, async (req, res) => {
-    const { serverFilename } = req.params;
-    const { newOriginalName } = req.body;
-    const sanitizedUsername = sanitizeUsernameForDir(req.user.username);
-
-    if (!sanitizedUsername) return res.status(400).json({ message: 'Invalid user identifier.' });
-    if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
-    if (!newOriginalName || typeof newOriginalName !== 'string' || newOriginalName.trim() === '') return res.status(400).json({ message: 'New file name is required.' });
-    if (newOriginalName.includes('/') || newOriginalName.includes('\\') || newOriginalName.includes('..')) return res.status(400).json({ message: 'New file name contains invalid characters.' });
-
-    try {
-        const parsedOld = parseServerFilename(serverFilename);
-        if (!parsedOld.timestamp) return res.status(400).json({ message: 'Invalid server filename format (missing timestamp prefix).' });
-
-        let currentPath = null; let fileType = '';
-        const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
-        for (const type of fileTypesToSearch) {
-            const potentialPath = path.join(ASSETS_DIR, sanitizedUsername, type, serverFilename);
-            try { await fs.access(potentialPath); currentPath = potentialPath; fileType = type; break; }
-            catch (e) { if (e.code !== 'ENOENT') throw e; }
-        }
-        if (!currentPath) return res.status(404).json({ message: 'File not found or access denied.' });
-
-        const newExt = path.extname(newOriginalName) || parsedOld.extension;
-        const newBaseName = path.basename(newOriginalName, path.extname(newOriginalName));
-        const sanitizedNewBase = newBaseName.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const finalNewOriginalName = `${sanitizedNewBase}${newExt}`;
-        const newServerFilename = `${parsedOld.timestamp}-${finalNewOriginalName}`;
-        const newPath = path.join(ASSETS_DIR, sanitizedUsername, fileType, newServerFilename);
-
-        await fs.rename(currentPath, newPath);
-        res.status(200).json({
-            message: 'File renamed successfully!', oldFilename: serverFilename,
-            newFilename: newServerFilename, newOriginalName: finalNewOriginalName,
-        });
-    } catch (error) {
-        console.error(`!!! Error in PATCH /api/files/${serverFilename} for user ${sanitizedUsername}:`, error);
-        res.status(500).json({ message: 'Failed to rename the file.' });
+        console.log(error.message);
+        return res.status(500).json({ msg: 'Server error' });
     }
 });
 
 
 // --- @route   DELETE /api/files/:serverFilename ---
-// --- @desc    Deletes file metadata from MongoDB, associated data from Qdrant & Neo4j (via Python),
-// ---           and moves physical file to backup. ---
-// --- @access  Private (requires auth) ---
-router.delete('/:serverFilename', tempAuth, async (req, res) => {
+// Use authMiddleware middleware
+router.delete('/:serverFilename', authMiddleware, async (req, res) => {
+  
     const { serverFilename } = req.params;
     const userId = req.user._id.toString(); // Get userId from authenticated user
     const usernameForLog = req.user.username;

@@ -1,29 +1,19 @@
 // server/services/geminiService.js
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-// require('dotenv').config(); // Removed dotenv
 
-// Read API Key directly from environment variables
 const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash"; // Or read from env: process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash";
+const MODEL_NAME = "gemini-1.5-flash"; // Or "gemini-1.5-pro" if you switch
 
 if (!API_KEY) {
-    // This check is now primarily done in server.js before starting
-    // But keep a safeguard here.
     console.error("FATAL ERROR: GEMINI_API_KEY is not available in the environment. Server should have exited.");
-    // Throw an error instead of exiting here, let the caller handle it
     throw new Error("GEMINI_API_KEY is missing.");
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-const baseGenerationConfig = {
-    temperature: 0.7, // Moderate temperature for creative but grounded responses
-    maxOutputTokens: 4096, // Adjust as needed, Flash model limit might be higher
-    // topP: 0.9, // Example: Could add nucleus sampling
-    // topK: 40,  // Example: Could add top-k sampling
-};
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 4096; // Default for chat and general analysis
+const DEFAULT_MAX_OUTPUT_TOKENS_KG = 65536;   // Default specific for KG, might need adjustment
 
-// Stricter safety settings - adjust as needed for your use case
 const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
     { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -31,116 +21,111 @@ const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
-const generateContentWithHistory = async (chatHistory, systemPromptText = null, relevantDocs = []) => {
+// Modified function to accept maxTokens override
+const generateContentWithHistory = async (
+    chatHistory,
+    systemPromptText = null,
+    customMaxOutputTokens = null // NEW: Optional parameter
+) => {
     try {
         if (!Array.isArray(chatHistory) || chatHistory.length === 0) {
              throw new Error("Chat history must be a non-empty array.");
         }
-        // Gemini API requires history to end with a 'user' message for sendMessage
-        if (chatHistory[chatHistory.length - 1].role !== 'user') {
-            console.error("History for Gemini API must end with a 'user' role message.");
-            // Attempt to fix by removing trailing non-user messages if any? Risky.
-            // Or just throw error.
-            throw new Error("Internal error: Invalid chat history sequence for API call.");
-        }
+        // It's good practice to ensure history ends with a user role for many models
+        // if (chatHistory[chatHistory.length - 1].role !== 'user') {
+        //     console.warn("Warning: Chat history for Gemini API call does not end with a 'user' role. This might lead to unexpected behavior. Last role:", chatHistory[chatHistory.length - 1].role);
+        //     // Depending on strictness, you might throw an error or just proceed with caution.
+        // }
 
-        // --- Prepare Model Options ---
+        const effectiveMaxOutputTokens = customMaxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT;
+
+        const generationConfig = {
+            temperature: 0.7, // Or make this configurable too
+            maxOutputTokens: effectiveMaxOutputTokens,
+        };
+
         const modelOptions = {
             model: MODEL_NAME,
-            generationConfig: baseGenerationConfig,
+            generationConfig: generationConfig,
             safetySettings: baseSafetySettings,
-            // Add system instruction if provided
             ...(systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '' && {
                 systemInstruction: {
-                    // Gemini expects system instruction parts as an array
                     parts: [{ text: systemPromptText.trim() }]
                 }
              })
         };
         const model = genAI.getGenerativeModel(modelOptions);
 
-
-        // --- Prepare History for startChat ---
-        // History for startChat should NOT include the latest user message
-        const historyForStartChat = chatHistory.slice(0, -1)
-            .map(msg => ({ // Ensure correct format
-                 role: msg.role,
-                 parts: msg.parts.map(part => ({ text: part.text || '' }))
+        // Ensure history is correctly formatted for the API
+        const historyForStartChat = chatHistory.slice(0, -1) // All but the last message which will be sent via sendMessage
+            .map(msg => ({
+                 role: msg.role, // Assuming role is already 'user' or 'model'
+                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: ''}] // Ensure parts is an array of objects with text
             }))
-            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string'); // Basic validation
+            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
 
-        // --- Start Chat Session ---
         const chat = model.startChat({
             history: historyForStartChat,
         });
 
-        // --- Prepare the message to send ---
-        // Get the text from the last user message in the original history
-        let lastUserMessageText = chatHistory[chatHistory.length - 1].parts[0].text;
+        let lastUserMessageParts = chatHistory[chatHistory.length - 1]?.parts;
+        if (!Array.isArray(lastUserMessageParts) || lastUserMessageParts.length === 0 || typeof lastUserMessageParts[0].text !== 'string') {
+            console.error("Invalid last user message structure:", chatHistory[chatHistory.length - 1]);
+            throw new Error("Internal error: Last user message for API call is malformed.");
+        }
+        let lastUserMessageText = lastUserMessageParts[0].text;
 
-        // Optional: Add a subtle hint for citation if RAG was used (Gemini might pick it up)
-        // if (relevantDocs.length > 0) {
-        //     const citationHint = ` (Remember to cite sources like ${relevantDocs.map((doc, i) => `[${i+1}] ${doc.documentName}`).slice(0,2).join(', ')} if applicable)`;
-        //     lastUserMessageText += citationHint;
-        // }
 
-        console.log(`Sending message to Gemini. History length sent to startChat: ${historyForStartChat.length}. System Prompt Used: ${!!modelOptions.systemInstruction}`);
-        // console.log("Last User Message Text Sent:", lastUserMessageText.substring(0, 200) + "..."); // Log truncated message
+        console.log(`Sending message to Gemini. History sent to startChat: ${historyForStartChat.length}. System Prompt: ${!!modelOptions.systemInstruction}. Max Output Tokens: ${effectiveMaxOutputTokens}`);
+        // console.log("Last User Message Text Sent to Gemini (first 200 chars):", lastUserMessageText.substring(0, 200) + "...");
 
-        // --- Send Message ---
         const result = await chat.sendMessage(lastUserMessageText);
-
-        // --- Process Response ---
         const response = result.response;
         const candidate = response?.candidates?.[0];
 
-        // --- Validate Response ---
-        if (!candidate || candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS') {
-            // Normal completion or max tokens reached
+        if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
             const responseText = candidate?.content?.parts?.[0]?.text;
             if (typeof responseText === 'string') {
-                return responseText; // Success
+                return responseText;
             } else {
                  console.warn("Gemini response finished normally but text content is missing or invalid.", { finishReason: candidate?.finishReason, content: candidate?.content });
                  throw new Error("Received an empty or invalid response from the AI service.");
             }
         } else {
-             // Handle blocked responses or other issues
              const finishReason = candidate?.finishReason || 'Unknown';
              const safetyRatings = candidate?.safetyRatings;
              console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
-
              let blockMessage = `AI response generation failed or was blocked.`;
-             if (finishReason) blockMessage += ` Reason: ${finishReason}.`;
-             if (safetyRatings) {
-                const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
-                if (blockedCategories) {
-                    blockMessage += ` Blocked Categories: ${blockedCategories}.`;
-                }
+             if (finishReason === 'SAFETY') {
+                 blockMessage += ` Reason: SAFETY.`;
+                 if (safetyRatings) {
+                    const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
+                    if (blockedCategories) blockMessage += ` Blocked Categories: ${blockedCategories}.`;
+                 }
+             } else if (finishReason) {
+                 blockMessage += ` Reason: ${finishReason}.`;
              }
-
              const error = new Error(blockMessage);
-             error.status = 400; // Treat as a bad request or policy issue
+             error.status = 400; // Or a more specific status if available
              throw error;
         }
-
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
-        // Improve error message for client
         let clientMessage = "Failed to get response from AI service.";
-        if (error.message?.includes("API key not valid")) {
-            clientMessage = "AI Service Error: Invalid API Key.";
-        } else if (error.message?.includes("blocked")) {
-            clientMessage = error.message; // Use the specific block message
-        } else if (error.status === 400) {
-             clientMessage = `AI Service Error: ${error.message}`;
-        }
-
+        // Check for specific error messages from Google AI SDK
+        if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
+        else if (error.message?.includes("blocked due to safety")) clientMessage = "AI response blocked due to safety settings.";
+        else if (error.message?.includes("Invalid JSON payload")) clientMessage = "AI Service Error: Invalid request format sent to AI.";
+        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; // Use message if status is 400
+        
         const enhancedError = new Error(clientMessage);
-        enhancedError.status = error.status || 500; // Keep original status if available
-        enhancedError.originalError = error; // Attach original error if needed for server logs
+        enhancedError.status = error.status || 500; // HTTP status code
+        enhancedError.originalError = error; // Keep original error for server-side logs
         throw enhancedError;
     }
 };
 
-module.exports = { generateContentWithHistory };
+module.exports = {
+    generateContentWithHistory,
+    DEFAULT_MAX_OUTPUT_TOKENS_KG // Export this so KG service can use it
+};

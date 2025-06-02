@@ -1,6 +1,5 @@
-Flask
+flask
 requests
-sentence-transformers
 faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
@@ -16,14 +15,23 @@ pdfplumber
 fitz # PyMuPDF for PDF parsing
 pytesseract
 nltk
-spacy
 spacy-layout
 pandas
 numpy
 typing
+<<<<<<< HEAD
+=======
+
+>>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 pytesseract # OCR
 pillow
 qdrant-client
 neo4j
+<<<<<<< HEAD
+=======
+sentence_transformers
+spacy
+
+>>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 
 
