@@ -12,7 +12,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis } = useAppState(); 
     const [useRag, setUseRag] = useState(false); 
     const [isSending, setIsSending] = useState(false);
-    
+    const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false); // New state for CT
+
     const handleSendMessage = async (inputText) => {
         if (!inputText.trim() || !token || !currentSessionId || isSending) {
             if (!currentSessionId) toast.error("No active session. Try 'New Chat'.");
@@ -21,33 +22,34 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
 
         const clientSideId = `user-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const userMessage = {
-            id: clientSideId, // Client-side ID for optimistic update
+            id: clientSideId, 
             sender: 'user',
-            role: 'user', // For backend
+            role: 'user', 
             text: inputText.trim(),
-            parts: [{ text: inputText.trim() }], // For backend
+            parts: [{ text: inputText.trim() }], 
             timestamp: new Date().toISOString()
         };
         
-        // Optimistic UI update
         setMessages(prev => [...prev, userMessage]);
         
         setIsSending(true);
         let currentThinkingStatus = "Connecting to AI...";
-        if (useRag) {
+        if (useRag && criticalThinkingEnabled) {
+            currentThinkingStatus = `Searching docs, retrieving KG & Contacting ${selectedLLM.toUpperCase()} (RAG + CT)...`;
+        } else if (useRag) {
             currentThinkingStatus = `Searching documents & Contacting ${selectedLLM.toUpperCase()} (RAG)...`;
+        } else if (criticalThinkingEnabled) {
+            currentThinkingStatus = `Retrieving KG & Contacting ${selectedLLM.toUpperCase()} (CT)...`;
         } else {
             currentThinkingStatus = `Contacting ${selectedLLM.toUpperCase()}...`;
         }
         setChatStatus(currentThinkingStatus);
 
-        // Prepare history for backend (exclude the current optimistic user message)
         const historyForBackend = messages.map(m => ({
-            // Backend expects: role, parts, timestamp (optionally thinking, references, source_pipeline for model messages)
             role: m.sender === 'bot' ? 'model' : 'user',
-            parts: m.parts || [{ text: m.text }], // Ensure parts format
+            parts: m.parts || [{ text: m.text }], 
             timestamp: m.timestamp,
-            ...(m.sender === 'bot' && { // Include these if they exist for bot messages
+            ...(m.sender === 'bot' && { 
                 thinking: m.thinking,
                 references: m.references,
                 source_pipeline: m.source_pipeline
@@ -55,27 +57,24 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
         }));
         
         const payload = {
-            query: inputText.trim(), // This is the user's actual query text
+            query: inputText.trim(), 
             history: historyForBackend,
             sessionId: currentSessionId,
             useRag: useRag,
             llmProvider: selectedLLM, 
             systemPrompt: systemPrompt,
-            // If RAG is enabled and a document is selected for analysis, you might pass its name
-            // The backend's /api/chat/message can then use this to filter RAG results
-            ...(useRag && selectedDocumentForAnalysis && { 
-                ragFilter: { document_name: selectedDocumentForAnalysis } // Example filter
-            })
+            useCriticalThinking: criticalThinkingEnabled, // Pass CT state
+            documentContextName: selectedDocumentForAnalysis || null, // Pass selected doc for KG or RAG filter
         };
             
         try {
             console.log("CenterPanel: Sending payload to /api/chat/message:", payload);
-            const response = await api.sendMessage(payload); // Backend returns { reply: AIMessageObject }
+            const response = await api.sendMessage(payload); 
             
             if (response && response.reply) {
                 const aiReply = {
-                    ...response.reply, // Includes sender, text, parts, timestamp, thinking, references, source_pipeline
-                    id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}` // Client-side ID
+                    ...response.reply, 
+                    id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}` 
                 };
                 setMessages(prev => [...prev, aiReply]);
                 setChatStatus(`Responded via ${aiReply.source_pipeline || selectedLLM.toUpperCase()}.`);
@@ -87,7 +86,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
             console.error("Error sending message:", error);
             const errorText = error.response?.data?.message || error.message || 'Failed to get response from AI.';
             
-            // If backend sends a structured error reply, use it, otherwise create one
             let errorReplyMessage;
             if (error.response?.data?.reply) {
                 errorReplyMessage = {
@@ -113,7 +111,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
         }
     };
     
-    // Effect to update chat status if session ID changes or messages clear
     useEffect(() => {
         if (!currentSessionId) {
             setChatStatus("Please login or start a new chat.");
@@ -141,9 +138,13 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
                                 Analysis Target: <span className="font-medium text-primary dark:text-primary-light">{selectedDocumentForAnalysis}</span>
                             </p>
                         )}
-                        <p className="mt-2">
-                            {useRag ? <span>RAG is <span className="text-green-500 font-semibold">ON</span>. Using your documents.</span> 
-                                  : <span>RAG is <span className="text-red-500 font-semibold">OFF</span>. Chatting directly with LLM.</span>}
+                        <p className="mt-1">
+                            {useRag ? <span>RAG is <span className="text-green-500 font-semibold">ON</span>. Using document context.</span> 
+                                  : <span>RAG is <span className="text-red-500 font-semibold">OFF</span>. Chatting directly.</span>}
+                        </p>
+                        <p> {/* New status for Critical Thinking */}
+                            {criticalThinkingEnabled ? <span>Critical Thinking (KG) is <span className="text-purple-500 font-semibold">ON</span>.</span> 
+                                  : <span>Critical Thinking (KG) is <span className="text-gray-500 font-semibold">OFF</span>.</span>}
                         </p>
                     </div>
                 </div>
@@ -156,6 +157,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
                 currentStatus={chatStatus}
                 useRag={useRag}
                 setUseRag={setUseRag}
+                criticalThinkingEnabled={criticalThinkingEnabled} // Pass state
+                setCriticalThinkingEnabled={setCriticalThinkingEnabled} // Pass setter
             />
         </div>
     );

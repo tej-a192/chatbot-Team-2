@@ -15,8 +15,8 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) {
         return []; // Return empty if RAG is not configured, allowing fallback to direct LLM
     }
     const searchUrl = `${pythonServiceUrl}/query`;
-    console.log(`Querying Python RAG: User ${userId}, Query (first 50): "${query.substring(0,50)}...", k=${k}`);
-    
+    console.log(`Querying Python RAG: User ${userId}, Query (first 50): "${query.substring(0, 50)}...", k=${k}`);
+
     const payload = {
         query: query,
         k: k,
@@ -49,7 +49,7 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) {
     } catch (error) {
         console.error(`Error querying Python RAG service at ${searchUrl}:`, error.message);
         // Do not throw here, allow fallback to direct LLM
-        return []; 
+        return [];
     }
 }
 
@@ -60,7 +60,7 @@ async function queryPythonRagService(userId, query, k = 5, filter = null) {
 router.post('/message', async (req, res) => {
     // Payload from frontend's CenterPanel:
     // { query, history, sessionId, useRag, llmProvider, systemPrompt }
-    const { query, history, sessionId, useRag, llmProvider, systemPrompt } = req.body;
+    const { query, history, sessionId, useRag, llmProvider, useCriticalThinking, systemPrompt } = req.body;
     const userId = req.user._id; // From authMiddleware
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
@@ -70,7 +70,7 @@ router.post('/message', async (req, res) => {
         return res.status(400).json({ message: 'Session ID required.' });
     }
     if (!Array.isArray(history)) {
-        return res.status(400).json({ message: 'Invalid history format.'});
+        return res.status(400).json({ message: 'Invalid history format.' });
     }
 
     const currentTimestamp = new Date();
@@ -81,7 +81,7 @@ router.post('/message', async (req, res) => {
         // Note: 'id' for frontend display is generated client-side
     };
 
-    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}. Query: "${query.substring(0,50)}..."`);
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}. Query: "${query.substring(0, 50)}..."`);
 
     try {
         let aiResponseMessageText;
@@ -95,13 +95,14 @@ router.post('/message', async (req, res) => {
         if (useRag) {
             thinkingForAI = `Initiating RAG process for query...`;
             actualSourcePipeline = `${llmProvider || 'gemini'}-rag`;
-            
+
             // Call Python RAG service. Pass userId as string.
             relevantDocsFromRag = await queryPythonRagService(userId.toString(), query.trim());
 
             if (relevantDocsFromRag && relevantDocsFromRag.length > 0) {
                 thinkingForAI += ` Found ${relevantDocsFromRag.length} relevant document chunks. Constructing context.`;
-                contextForLLM = "Answer the user's question based primarily on the following context documents. If the context is insufficient, clearly state that before providing a general answer.\n\n--- Context Documents ---\n";
+                contextForLLM = "You are provided with context documents below. First, rely on the information in these documents to answer the question. If the context is insufficient, you may use your own external knowledge, but clearly indicate when you are doing so. Always provide a clear, step-by-step chain of thought in your answer.\n\n--- Context Documents ---\n";
+
                 relevantDocsFromRag.forEach((doc, index) => {
                     contextForLLM += `\n[${index + 1}] Source: ${doc.documentName} (Score: ${doc.score ? doc.score.toFixed(3) : 'N/A'})\nContent:\n${doc.content}\n---\n`;
                     referencesForResponse.push({
@@ -110,7 +111,8 @@ router.post('/message', async (req, res) => {
                         content_preview: doc.content.substring(0, 100) + (doc.content.length > 100 ? "..." : "")
                     });
                 });
-                contextForLLM += "\n--- End of Context ---\n\nWhen referencing information ONLY from the context documents provided above, please cite the source using the format [Number] Document Name.\n\nUSER QUESTION: ";
+
+                contextForLLM += "\n--- End of Context ---\n\nWhen referencing information ONLY from the context documents above, please cite the source using the format [Number] Document Name. If using your own knowledge due to insufficient context, state this clearly and provide your reasoning.\n\nUSER QUESTION: ";
             } else {
                 thinkingForAI += ` No relevant document chunks found by RAG. Proceeding with direct LLM call.`;
             }
@@ -132,9 +134,9 @@ router.post('/message', async (req, res) => {
             ...historyForLLM,
             { role: 'user', parts: [{ text: queryForLLM }] }
         ];
-        
+
         console.log(`   Calling ${llmProvider || 'Gemini'} API. History length for LLM: ${fullHistoryForLLM.length}. System Prompt Used: ${!!systemPrompt}`);
-        
+
         // For V1, we'll assume Gemini. Later, you can use llmProvider to switch services.
         aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, systemPrompt);
         thinkingForAI += ` LLM call successful. Response generated.`;
@@ -160,22 +162,22 @@ router.post('/message', async (req, res) => {
 
         await ChatHistory.findOneAndUpdate(
             { sessionId: sessionId, userId: userId },
-            { 
+            {
                 $push: { messages: { $each: [dbUserMessage, dbAiMessage] } },
                 $set: { updatedAt: new Date() } // Explicitly set updatedAt
             },
             { upsert: true, new: true, setDefaultsOnInsert: true } // upsert will create if not found
         );
-        
+
         console.log(`<<< POST /api/chat/message successful for Session ${sessionId}.`);
         // Send the frontend-compatible message structure
-        res.status(200).json({ reply: aiMessageForDbAndClient }); 
+        res.status(200).json({ reply: aiMessageForDbAndClient });
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
         let statusCode = error.status || error.response?.status || 500;
         let clientMessage = error.message || error.response?.data?.message || "Failed to get response from AI service.";
-        
+
         const errorMessageForChat = {
             sender: 'bot',
             role: 'model',
@@ -185,7 +187,7 @@ router.post('/message', async (req, res) => {
             thinking: `Error occurred during processing: ${error.message}`,
             source_pipeline: 'error-pipeline'
         };
-        
+
         // Attempt to save the user's message and this error message to history
         try {
             const dbUserMessageOnError = { role: 'user', parts: userMessageForDb.parts, timestamp: userMessageForDb.timestamp };
@@ -193,7 +195,7 @@ router.post('/message', async (req, res) => {
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { 
+                {
                     $push: { messages: { $each: [dbUserMessageOnError, dbAiErrorMsg] } },
                     $set: { updatedAt: new Date() }
                 },
@@ -212,7 +214,7 @@ router.post('/message', async (req, res) => {
 // ---           Can also save an entire batch of messages if needed, but /message handles incremental.
 // --- @access  Private ---
 router.post('/history', async (req, res) => {
-    const { sessionId, messages } = req.body; 
+    const { sessionId, messages } = req.body;
     const userId = req.user._id;
 
     // Case 1: Client requests a new session ID (typical for "New Chat")
@@ -225,7 +227,7 @@ router.post('/history', async (req, res) => {
         // The first call to /api/chat/message with this newServerSessionId will upsert it.
         return res.status(200).json({
             message: 'New session ID generated.',
-            savedSessionId: null, 
+            savedSessionId: null,
             newSessionId: newServerSessionId // Key for the client
         });
     }
@@ -235,7 +237,7 @@ router.post('/history', async (req, res) => {
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ message: 'No valid messages provided to save for existing session.' });
     }
-    
+
     console.log(`>>> POST /api/chat/history (Explicit Save): User=${userId}, Session=${sessionId}, Messages=${messages.length}`);
     try {
         // Validate and format messages for DB
@@ -246,7 +248,7 @@ router.post('/history', async (req, res) => {
             m.timestamp
         ).map(m => ({
             role: m.sender === 'user' ? 'user' : 'model', // Convert sender to role
-            parts: m.parts.map(p => ({ text: p.text || ''})), // Ensure parts structure
+            parts: m.parts.map(p => ({ text: p.text || '' })), // Ensure parts structure
             timestamp: new Date(m.timestamp),
             thinking: m.thinking || undefined,
             references: m.references || undefined,
@@ -262,7 +264,7 @@ router.post('/history', async (req, res) => {
             { $set: { userId: userId, sessionId: sessionId, messages: validMessagesForDb, updatedAt: Date.now() } },
             { new: true, upsert: true, setDefaultsOnInsert: true } // Upsert ensures it creates if not found
         );
-        
+
         console.log(`<<< POST /api/chat/history (Explicit Save): History saved for session ${savedHistory.sessionId}.`);
         res.status(200).json({
             message: 'Chat history explicitly saved successfully.',
@@ -285,9 +287,9 @@ router.get('/sessions', async (req, res) => {
     console.log(`>>> GET /api/chat/sessions: User=${userId}`);
     try {
         const sessions = await ChatHistory.find({ userId: userId })
-            .sort({ updatedAt: -1 }) 
-            .select('sessionId createdAt updatedAt messages') 
-            .lean(); 
+            .sort({ updatedAt: -1 })
+            .select('sessionId createdAt updatedAt messages')
+            .lean();
 
         const sessionSummaries = sessions.map(session => {
             const firstUserMessage = session.messages?.find(m => m.role === 'user');
@@ -296,7 +298,7 @@ router.get('/sessions', async (req, res) => {
                 preview = firstUserMessage.parts[0].text.substring(0, 75);
                 if (firstUserMessage.parts[0].text.length > 75) preview += '...';
             } else if (session.messages?.length > 0 && session.messages[0]?.parts?.[0]?.text) {
-                preview = session.messages[0].parts[0].text.substring(0,75) + (session.messages[0].parts[0].text.length > 75 ? "..." : "");
+                preview = session.messages[0].parts[0].text.substring(0, 75) + (session.messages[0].parts[0].text.length > 75 ? "..." : "");
             }
 
             return {
@@ -345,7 +347,7 @@ router.get('/session/:sessionId', async (req, res) => {
             timestamp: msg.timestamp,
             source_pipeline: msg.source_pipeline
         }));
-        
+
         res.status(200).json({ ...session, messages: messagesForFrontend }); // Send modified session
     } catch (error) {
         console.error(`!!! Error fetching chat session ${sessionId} for user ${userId}:`, error);
@@ -363,7 +365,7 @@ router.post('/rag', async (req, res) => {
     if (!message || typeof message !== 'string' || message.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
     }
-    console.log(`>>> POST /api/chat/rag (Direct Test): User=${userId}. Query: "${message.substring(0,50)}..."`);
+    console.log(`>>> POST /api/chat/rag (Direct Test): User=${userId}. Query: "${message.substring(0, 50)}..."`);
     try {
         const kValue = parseInt(process.env.RAG_DEFAULT_K) || 5;
         const clientFilter = filter && typeof filter === 'object' ? filter : null;
