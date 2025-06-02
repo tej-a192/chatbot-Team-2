@@ -12,49 +12,39 @@ import { marked } from 'marked';
 import MindmapViewer from './MindmapViewer.jsx';
 import DOMPurify from 'dompurify';
 import Prism from 'prismjs'; // Ensure Prism is imported or available globally
-import { renderMathInHtml } from '../../utils/markdownUtils';
+import { renderMathInHtml } from '../../utils/markdownUtils'; // Assuming you have this
 
+// marked options and createMarkup should be defined once.
+// If createMarkup is identical to the one in MessageBubble, consider moving it to markdownUtils.js
 marked.setOptions({
   breaks: true,
   gfm: true,
 });
 
+// This createMarkup function should be robust for Markdown, KaTeX, and then sanitization.
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
-
-    console.log("createMarkup: Original Markdown:\n", markdownText);
+    // console.log("[ATR] createMarkup: Original Markdown:\n", markdownText); // For debugging
 
     let html = marked.parse(markdownText);
+    // console.log("[ATR] createMarkup: HTML after marked.parse():\n", html); // For debugging
 
-    html = renderMathInHtml(html);
+    html = renderMathInHtml(html); // Process KaTeX
+    // console.log("[ATR] createMarkup: HTML after renderMathInHtml():\n", html); // For debugging
 
-    const cleanHtml = DOMPurify.sanitize(html, { 
-        ADD_TAGS: [
-            'iframe', 'math', 'mtable', 'mtr', 'mtd', 'mrow', 'mi', 'mo', 'mn', 'mtext',
-            'msup', 'msub', 'mfrac', 'msqrt', 'munderover', 'mstyle',
-            'semantics', 'annotation', '표', 'annotation-xml',
-            'span',
-        ],
-        ADD_ATTR: [
-            'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'encoding', 'style',
-            'xmlns', 'display', 'class', 'role', 'aria-hidden', 'mathvariant',
-            'mathsize', 'fontstyle', 'fontweight', 'color', 'background', 'href',
-            'accent', 'accentunder', 'align', 'columnalign', 'columnlines',
-            'columnspacing', 'columnspan', 'displaystyle', 'equalcolumns',
-            'equalrows', 'fence', 'fontfamily', 'fontsize', 'frame', 'height',
-            'linethickness', 'lspace', 'mathbackground', 'mathcolor',
-            'maxwidth', 'minlabelspacing', 'movablelimits', 'notation', 'rowalign',
-            'rowlines', 'rowspacing', 'rowspan', 'rspace', 'scriptlevel',
-            'selection', 'separator', 'stretchy', 'symmetric', 'width', 'xlink:href',
-        ],
+    const cleanHtml = DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true, mathMl: true, svg: true }, // Recommended for KaTeX
+        ADD_TAGS: ['iframe'], // For any other specific tags you need
+        ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'], // For iframes
     });
+    // console.log("[ATR] createMarkup: HTML after DOMPurify.sanitize():\n", cleanHtml); // For debugging
     return { __html: cleanHtml };
 };
 
 
+// escapeHtml is used if you ever display raw content that shouldn't be interpreted as HTML
 const escapeHtml = (unsafe) => {
     if (typeof unsafe !== 'string') return '';
-    // More robust HTML escaping
     return unsafe
         .replace(/&/g, "&")
         .replace(/</g, "<")
@@ -71,18 +61,18 @@ const ENGAGEMENT_TEXTS = {
 };
 
 function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilename }) {
-    const [isSectionOpen, setIsSectionOpen] = useState(true); // Default to open if a doc might be pre-selected
+    const [isSectionOpen, setIsSectionOpen] = useState(true);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [analysisContent, setAnalysisContent] = useState(null);
-    const [aiReasoning, setAiReasoning] = useState(null);
+    const [aiReasoning, setAiReasoning] = useState(null); // This will be Markdown
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentEngagementText, setCurrentEngagementText] = useState('');
 
     const IconComponent = LucideIcons[iconName] || DefaultIcon;
     const modalAnalysisContentRef = useRef(null);
-    const aiReasoningRef = useRef(null);
+    const aiReasoningContentRef = useRef(null); // Ref for the AI reasoning content div
 
     useEffect(() => {
         let intervalId;
@@ -102,44 +92,38 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
     useEffect(() => {
         if (!selectedDocumentFilename) {
+            // Resetting when no document is selected
             setIsLoading(false);
             setError('');
             setAnalysisContent(null);
             setAiReasoning(null);
             setIsDropdownOpen(false);
-            // setIsSectionOpen(false); // Keep section open if desired, or close it
-        } else {
-            // setIsSectionOpen(true); // Keep section open if desired
-            // Optionally clear previous results when a NEW document is selected,
-            // but not if the same document is re-selected (depends on desired UX)
-            // For now, let's assume results are tied to the selected document and don't auto-clear on re-selection here
-            // Clearing happens in handleRunAnalysis before fetching new data.
         }
+        // No need to explicitly set isSectionOpen here, it's user-controlled
     }, [selectedDocumentFilename]);
 
+    // useEffect for modal content Prism highlighting
     useEffect(() => {
         if (isModalOpen && analysisContent && modalAnalysisContentRef.current) {
             const timer = setTimeout(() => {
                 if (modalAnalysisContentRef.current) {
                     Prism.highlightAllUnder(modalAnalysisContentRef.current);
                 }
-            }, 50); // Slightly increased delay for modal animations
+            }, 50);
             return () => clearTimeout(timer);
         }
     }, [isModalOpen, analysisContent]);
 
+    // useEffect for AI Reasoning content Prism highlighting
     useEffect(() => {
-        // This effect is for the AI Reasoning <pre> block if it contains Markdown.
-        // Currently, it's set up to display plain text.
-        // If aiReasoning were Markdown and rendered via createMarkup:
-        if (aiReasoningRef.current && aiReasoning && isDropdownOpen) {
-            const codeElement = aiReasoningRef.current.querySelector('code');
-            // If the code element exists and has a language class (e.g., for plain text)
-            if (codeElement && codeElement.className.includes('language-')) {
-                Prism.highlightElement(codeElement);
-            }
-            // If the entire pre block was rendered from markdown with multiple code blocks:
-            // Prism.highlightAllUnder(aiReasoningRef.current);
+        if (aiReasoningContentRef.current && aiReasoning && isDropdownOpen) {
+            // aiReasoning is now Markdown, so Prism.highlightAllUnder will scan its rendered HTML
+            const timer = setTimeout(() => {
+                if (aiReasoningContentRef.current) {
+                    Prism.highlightAllUnder(aiReasoningContentRef.current);
+                }
+            }, 0); // Can be 0ms, Prism will execute after current JS stack
+            return () => clearTimeout(timer);
         }
     }, [aiReasoning, isDropdownOpen]);
 
@@ -150,8 +134,8 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
         setIsLoading(true);
         setError('');
-        setAnalysisContent(null); // Clear previous content
-        setAiReasoning(null);   // Clear previous reasoning
+        setAnalysisContent(null);
+        setAiReasoning(null);
         setIsDropdownOpen(false);
 
         const payload = { filename: selectedDocumentFilename, analysis_type: toolType };
@@ -159,7 +143,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
         try {
             const response = await api.requestAnalysis(payload);
-            toast.dismiss(toastId); // Dismiss loading toast before showing success/error
+            toast.dismiss(toastId);
 
             if (response) {
                 if (response.content && response.content.trim() !== "" && !response.content.startsWith("Error:")) {
@@ -173,12 +157,13 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                     toast.warn(`No content was generated for ${title}.`);
                 }
 
+                // Assuming response.thinking is now also Markdown
                 if (response.thinking && response.thinking.trim() !== "") {
                     setAiReasoning(response.thinking);
                 } else {
-                    setAiReasoning(response.content ? "Analysis complete. No detailed reasoning provided." : "AI reasoning not available.");
+                    setAiReasoning(response.content ? "*Analysis complete. No detailed reasoning provided by AI.*" : "*AI reasoning not available.*");
                 }
-                setIsDropdownOpen(true); // Show dropdown with results/reasoning
+                setIsDropdownOpen(true);
             } else {
                 throw new Error("Empty response from analysis service.");
             }
@@ -282,17 +267,16 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                             </span>
                                             <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
                                         </summary>
-                                        <pre
-                                            ref={aiReasoningRef}
-                                            className="p-2.5 bg-gray-50 dark:bg-gray-900/50 rounded-b-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-40 overflow-y-auto custom-scrollbar"
-                                        >
-                                            {/* For plain text reasoning. If it can contain specific code, add language-xxx class */}
-                                            <code className="language-text">{escapeHtml(aiReasoning)}</code>
-                                        </pre>
+                                        {/* MODIFIED AI REASONING RENDERING */}
+                                        <div
+                                            ref={aiReasoningContentRef}
+                                            className="p-2.5 prose prose-xs dark:prose-invert max-w-none text-text-light dark:text-text-dark max-h-60 overflow-y-auto custom-scrollbar text-[0.75rem] leading-relaxed bg-gray-50 dark:bg-gray-900/50 rounded-b-md"
+                                            dangerouslySetInnerHTML={createMarkup(aiReasoning)}
+                                        />
                                     </details>
                                 )}
 
-                                {analysisContent && toolType !== 'mindmap' && ( // Don't show view button for mindmap if it's already rendered inline
+                                {analysisContent && toolType !== 'mindmap' && (
                                      <Button
                                         onClick={() => setIsModalOpen(true)}
                                         variant="outline"
@@ -316,7 +300,6 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                 )}
             </AnimatePresence>
 
-            {/* Modal for Displaying Full Analysis Content */}
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
