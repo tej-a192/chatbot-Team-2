@@ -743,7 +743,7 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
         return document_chunks
 
     try:
-        embeddings_np_array = document_embedding_model.encode(texts_to_embed, show_progress_bar=False) # Set to True for long lists
+        embeddings_np_array = document_embedding_model.encode(texts_to_embed, show_progress_bar=True, batch_size=32)
         
         for i, original_chunk_idx in enumerate(valid_chunk_indices):
             if i < len(embeddings_np_array):
