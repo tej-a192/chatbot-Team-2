@@ -1,21 +1,36 @@
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid'); // For default message ID if needed
 
 const MessageSchema = new mongoose.Schema({
-    role: {
+    // id: { type: String, default: uuidv4 }, // Client usually generates this for optimistic updates
+    role: { // 'user' or 'model' (for Gemini compatibility)
         type: String,
-        enum: ['user', 'model'], // Gemini roles
+        enum: ['user', 'model'],
         required: true
     },
-    parts: [{
+    parts: [{ // Gemini structure
         text: {
             type: String,
             required: true
-        }
+        },
         // _id: false // Mongoose adds _id by default, can disable if truly not needed per part
     }],
     timestamp: {
         type: Date,
         default: Date.now
+    },
+    // Optional fields from AI response
+    thinking: {
+        type: String,
+        default: ''
+    },
+    references: {
+        type: Array, // Array of objects like { number, source, content_preview }
+        default: []
+    },
+    source_pipeline: { // e.g., "gemini-direct", "gemini-rag"
+        type: String,
+        default: ''
     }
 }, { _id: false }); // Don't create separate _id for each message object in the array
 
@@ -32,7 +47,7 @@ const ChatHistorySchema = new mongoose.Schema({
         unique: true,
         index: true,
     },
-    messages: [MessageSchema], // Array of message objects
+    messages: [MessageSchema],
     createdAt: {
         type: Date,
         default: Date.now,
@@ -43,21 +58,17 @@ const ChatHistorySchema = new mongoose.Schema({
     }
 });
 
-// Update `updatedAt` timestamp before saving any changes
 ChatHistorySchema.pre('save', function (next) {
-    if (this.isModified()) { // Only update if document changed
+    if (this.isModified()) {
       this.updatedAt = Date.now();
     }
     next();
 });
 
-// Also update `updatedAt` on findOneAndUpdate operations if messages are modified
 ChatHistorySchema.pre('findOneAndUpdate', function(next) {
   this.set({ updatedAt: new Date() });
   next();
 });
 
-
 const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
-
 module.exports = ChatHistory;

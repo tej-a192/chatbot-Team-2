@@ -1,166 +1,153 @@
 // server/services/kgService.js
-const geminiService = require('./geminiService'); // Assuming it's in the same folder or adjust path
-const { v4: uuidv4 } = require('uuid'); // For generating unique IDs if needed, or rely on LLM
+const geminiService = require('./geminiService');
+const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
+// --- IMPORT THE PROMPTS ---
+const {
+    KG_GENERATION_SYSTEM_PROMPT,
+    KG_BATCH_USER_PROMPT_TEMPLATE // Import the new template
+} = require('../config/promptTemplates');
 
-const KG_GENERATION_SYSTEM_PROMPT = `You are an expert academic in the field relevant to the provided text. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment.
-The output MUST be a valid JSON object with "nodes" and "edges" sections.
-
-Instructions for Node Creation:
-1.  Identify CORE CONCEPTS or main topics discussed in the chunk. These should be 'major' nodes (parent: null).
-2.  Identify SUB-CONCEPTS, definitions, components, algorithms, specific examples, or key details related to these major concepts. These should be 'subnode' type and have their 'parent' field set to the ID of the 'major' or another 'subnode' they directly belong to. Aim for a granular breakdown.
-3.  Node 'id': Use a concise, descriptive, and specific term for the concept (e.g., "Linear Regression", "LMS Update Rule", "Feature Selection"). Capitalize appropriately.
-4.  Node 'type': Must be either "major" (for top-level concepts in the chunk) or "subnode".
-5.  Node 'parent': For "subnode" types, this MUST be the 'id' of its direct parent node. For "major" nodes, this MUST be null.
-6.  Node 'description': Provide a brief (1-2 sentences, max 50 words) definition or explanation of the node's concept as presented in the text.
-
-Instructions for Edge Creation:
-1.  Edges represent relationships BETWEEN the nodes you've identified.
-2.  The 'from' field should be the 'id' of the child/more specific node.
-3.  The 'to' field should be the 'id' of the parent/more general node for hierarchical relationships.
-4.  Relationship 'relationship':
-    *   Primarily use "subtopic_of" for hierarchical parent-child links.
-    *   Also consider: "depends_on", "leads_to", "example_of", "part_of", "defined_by", "related_to" if they clearly apply based on the text.
-5.  Ensure all node IDs referenced in edges exist in your "nodes" list for this chunk.
-
-Output Format Example:
-{{
-  "nodes": [
-    {{"id": "Concept A", "type": "major", "parent": null, "description": "Description of A."}},
-    {{"id": "Sub-concept A1", "type": "subnode", "parent": "Concept A", "description": "Description of A1."}},
-    {{"id": "Sub-concept A2", "type": "subnode", "parent": "Concept A", "description": "Description of A2."}},
-    {{"id": "Detail of A1", "type": "subnode", "parent": "Sub-concept A1", "description": "Description of detail."}}
-  ],
-  "edges": [
-    {{"from": "Sub-concept A1", "to": "Concept A", "relationship": "subtopic_of"}},
-    {{"from": "Sub-concept A2", "to": "Concept A", "relationship": "subtopic_of"}},
-    {{"from": "Detail of A1", "to": "Sub-concept A1", "relationship": "subtopic_of"}},
-    {{"from": "Sub-concept A1", "to": "Sub-concept A2", "relationship": "related_to"}} // Example of a non-hierarchical link
-  ]
-}}
-
-Analyze the provided text chunk carefully and generate the JSON. Be thorough in identifying distinct concepts and their relationships to create a rich graph.
-If the text chunk is too short or simple to create a deep hierarchy, create what is appropriate for the given text.
-`;
-
-
-function constructKgPromptForChunk(chunkText) {
-    return `
-Text chunk to process:
----
+// --- MODIFIED: Function to construct the user prompt for a BATCH of chunks ---
+function constructKgPromptForBatch(chunkTexts) {
+    // chunkTexts is an array of strings, where each string is the text_content of a chunk.
+    let formattedChunkTexts = "";
+    chunkTexts.forEach((chunkText, index) => {
+        formattedChunkTexts += `
+--- START OF CHUNK ${index + 1} ---
 ${chunkText}
----
-Based on the instructions provided in the system prompt, generate the JSON output for nodes and edges from this text chunk.
+--- END OF CHUNK ${index + 1} ---
 `;
+    });
+
+    // Replace the placeholder in the template with the actual formatted chunk texts
+    return KG_BATCH_USER_PROMPT_TEMPLATE.replace('{BATCHED_CHUNK_TEXTS_HERE}', formattedChunkTexts);
 }
 
+// --- NEW: Internal function to process a single BATCH of chunks ---
+// (This function _processBatchOfChunksForKg remains the same as in the previous good answer)
+async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex) {
+    // batchOfChunkObjects is an array of the original chunk objects
+    // e.g., [{ text_content: "...", metadata: {...} }, ...]
+    const logPrefix = `[KG Service Batch ${batchIndex}]`;
 
+    const chunkTextsForPrompt = batchOfChunkObjects.map(chunk => chunk.text_content);
 
-async function _processSingleChunkForKg(chunkTextContent, chunkMetadata, chunkIndex) {
-    const userPrompt = constructKgPromptForChunk(chunkTextContent);
-    // For this specific task, history is just the current request for the chunk
+    if (chunkTextsForPrompt.length === 0) {
+        console.log(`${logPrefix} No text content in this batch. Skipping.`);
+        return [];
+    }
+
+    const userPromptForBatch = constructKgPromptForBatch(chunkTextsForPrompt); // Uses the new templated function
     const chatHistory = [
-        { role: 'user', parts: [{ text: userPrompt }] }
+        { role: 'user', parts: [{ text: userPromptForBatch }] }
     ];
 
     try {
-        console.log(`[KG Service] Processing chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`} for KG generation.`);
+        console.log(`${logPrefix} Processing ${chunkTextsForPrompt.length} chunks for KG generation.`);
         const responseText = await geminiService.generateContentWithHistory(
             chatHistory,
-            KG_GENERATION_SYSTEM_PROMPT
+            KG_GENERATION_SYSTEM_PROMPT, // System prompt applies to EACH chunk's processing logic
+            geminiService.DEFAULT_MAX_OUTPUT_TOKENS_KG
         );
 
         if (!responseText) {
-            console.warn(`[KG Service] Empty response from Gemini for chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}.`);
-            return null;
+            console.warn(`${logPrefix} Empty response from Gemini for batch.`);
+            return [];
         }
 
-        // Attempt to parse the JSON response
-        // Gemini might sometimes wrap JSON in ```json ... ```
         let cleanedResponseText = responseText.trim();
+        // More robust cleaning for ```json ... ``` or ``` ... ``` blocks
         if (cleanedResponseText.startsWith("```json")) {
-            cleanedResponseText = cleanedResponseText.substring(7);
+            cleanedResponseText = cleanedResponseText.substring(7); // Remove ```json
             if (cleanedResponseText.endsWith("```")) {
-                cleanedResponseText = cleanedResponseText.slice(0, -3);
+                cleanedResponseText = cleanedResponseText.slice(0, -3); // Remove ```
             }
-            cleanedResponseText = cleanedResponseText.trim();
         } else if (cleanedResponseText.startsWith("```")) {
-            cleanedResponseText = cleanedResponseText.substring(3);
+            cleanedResponseText = cleanedResponseText.substring(3); // Remove ```
             if (cleanedResponseText.endsWith("```")) {
-                cleanedResponseText = cleanedResponseText.slice(0, -3);
+                cleanedResponseText = cleanedResponseText.slice(0, -3); // Remove ```
             }
-            cleanedResponseText = cleanedResponseText.trim();
+        }
+        cleanedResponseText = cleanedResponseText.trim();
+        console.log("-----------------------------------------------------------------------------------------------------");
+        console.log(cleanedResponseText);
+        const graphFragmentsArray = JSON.parse(cleanedResponseText);
+
+        if (!Array.isArray(graphFragmentsArray)) {
+            console.warn(`${logPrefix} Gemini response was not a JSON array. Response (first 200 chars):`, cleanedResponseText.substring(0, 200));
+            return [];
         }
 
-
-        const graphData = JSON.parse(cleanedResponseText);
-
-        // Validate structure
-        if (graphData && typeof graphData === 'object' && Array.isArray(graphData.nodes) && Array.isArray(graphData.edges)) {
-            // Optionally, add chunk reference to nodes/edges for easier debugging or advanced merging
-            // graphData.nodes.forEach(node => node.source_chunk_ref = chunkMetadata?.chunk_reference_name);
-            // graphData.edges.forEach(edge => edge.source_chunk_ref = chunkMetadata?.chunk_reference_name);
-            return graphData;
-        } else {
-            console.warn(`[KG Service] Invalid graph structure from Gemini for chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}. Response:`, cleanedResponseText.substring(0, 200));
-            return null;
+        if (graphFragmentsArray.length !== batchOfChunkObjects.length) {
+            console.warn(`${logPrefix} Mismatch: Expected ${batchOfChunkObjects.length} KG fragments, but received ${graphFragmentsArray.length}. Results might be misaligned.`);
         }
+        
+        const validFragments = [];
+        graphFragmentsArray.forEach((fragment, i) => {
+            if (fragment && typeof fragment === 'object' && Array.isArray(fragment.nodes) && Array.isArray(fragment.edges)) {
+                validFragments.push(fragment);
+            } else {
+                const chunkRef = batchOfChunkObjects[i]?.metadata?.chunk_reference_name || `chunk index ${i} in batch`;
+                console.warn(`${logPrefix} Invalid graph structure from Gemini for ${chunkRef}. Discarding this fragment. Fragment:`, JSON.stringify(fragment).substring(0,100));
+            }
+        });
+        console.log(`${logPrefix} Successfully parsed ${validFragments.length} valid KG fragments from Gemini response.`);
+        return validFragments;
+
     } catch (error) {
-        console.error(`[KG Service] Error processing chunk ${chunkMetadata?.chunk_reference_name || `index ${chunkIndex}`}:`, error.message);
-        if (error.originalError) console.error("[KG Service] Original Gemini error:", error.originalError);
-        // console.error("[KG Service] Full text that caused error:", userPrompt.substring(0,500)); // Be careful with logging full text
-        return null;
+        console.error(`${logPrefix} Error processing batch:`, error.message);
+        if (error.originalError) console.error(`${logPrefix} Original Gemini error:`, error.originalError);
+        if (error.response?.data) console.error(`${logPrefix} Gemini error data:`, error.response.data);
+        return [];
     }
 }
 
 
+// --- MERGE FUNCTION (remains the same as your provided version or my previous good one) ---
 function _mergeGraphFragments(graphFragments) {
     console.log(`[KG Service] Merging ${graphFragments.length} graph fragments...`);
-    const finalNodesMap = new Map(); // Using Map for easier get/set
-    const finalEdgesSet = new Set(); // To store unique edge strings like "from|to|relationship"
+    const finalNodesMap = new Map();
+    const finalEdgesSet = new Set(); // Using a Set to store unique stringified edges
 
     for (const fragment of graphFragments) {
         if (!fragment || !fragment.nodes || !fragment.edges) {
-            console.warn("[KG Service] Skipping invalid or null graph fragment during merge.");
+            console.warn("[KG Service Merge] Skipping invalid or null graph fragment.");
             continue;
         }
-
-        // Merge Nodes
+        
+        // Process Nodes
         for (const node of fragment.nodes) {
             if (!node || typeof node.id !== 'string' || !node.id.trim()) {
-                console.warn("[KG Service] Skipping invalid node during merge:", node);
+                console.warn("[KG Service Merge] Skipping invalid node (missing/empty ID):", node);
                 continue;
             }
             const nodeId = node.id.trim();
             if (!finalNodesMap.has(nodeId)) {
-                finalNodesMap.set(nodeId, { ...node, id: nodeId }); // Store a copy
+                finalNodesMap.set(nodeId, { ...node, id: nodeId });
             } else {
                 const existingNode = finalNodesMap.get(nodeId);
-                // Update description if new one is longer/more descriptive (simple heuristic)
                 if (node.description && typeof node.description === 'string' &&
                     (!existingNode.description || node.description.length > existingNode.description.length)) {
                     existingNode.description = node.description;
                 }
-                // Prefer a more specific type if current is generic or null
-                if (node.type && (!existingNode.type || existingNode.type === "generic")) {
+                if (node.type && (!existingNode.type || existingNode.type === "generic" || existingNode.type.toLowerCase() === "unknown")) {
                     existingNode.type = node.type;
                 }
-                // If existing node doesn't have a parent but new one does
                 if (node.parent && !existingNode.parent) {
                     existingNode.parent = node.parent;
                 }
-                // You might add more sophisticated merging logic here if needed
             }
         }
 
-        // Merge Edges
+        // Process Edges
         for (const edge of fragment.edges) {
             if (!edge || typeof edge.from !== 'string' || typeof edge.to !== 'string' || typeof edge.relationship !== 'string' ||
                 !edge.from.trim() || !edge.to.trim() || !edge.relationship.trim()) {
-                console.warn("[KG Service] Skipping invalid edge during merge:", edge);
+                console.warn("[KG Service Merge] Skipping invalid edge (missing from/to/relationship or empty):", edge);
                 continue;
             }
-            const edgeKey = `${edge.from.trim()}|${edge.to.trim()}|${edge.relationship.trim()}`;
+            const edgeKey = `${edge.from.trim()}|${edge.to.trim()}|${edge.relationship.trim().toUpperCase()}`;
             finalEdgesSet.add(edgeKey);
         }
     }
@@ -171,103 +158,81 @@ function _mergeGraphFragments(graphFragments) {
         return { from, to, relationship };
     });
 
-    console.log(`[KG Service] Merged into ${mergedNodes.length} nodes and ${mergedEdges.length} edges.`);
+    console.log(`[KG Service Merge] Merged into ${mergedNodes.length} nodes and ${mergedEdges.length} edges.`);
     return { nodes: mergedNodes, edges: mergedEdges };
 }
 
-
-/**
- * Generates a knowledge graph from chunks of text using Gemini and merges the results.
- * @param {Array<Object>} chunksForKg - Array of chunks, e.g., [{id, text_content, metadata}, ...]
- * @param {string} userId - The ID of the user.
- * @param {string} originalName - The original name of the uploaded file.
- * @returns {Promise<Object|null>} The merged knowledge graph {nodes, edges} or null on failure.
- */
-
-
-
-
+// --- MODIFIED: Main function for KG generation and storage ---
+// (This function generateAndStoreKg remains the same as in the previous good answer)
 async function generateAndStoreKg(chunksForKg, userId, originalName) {
-    console.log(`[KG Service] Starting KG generation for document: ${originalName} (User: ${userId}) with ${chunksForKg.length} chunks.`);
+    const logPrefix = `[KG Service Doc: ${originalName}, User: ${userId}]`;
+    console.log(`${logPrefix} Starting KG generation with ${chunksForKg.length} initial chunks.`);
 
     if (!chunksForKg || chunksForKg.length === 0) {
-        console.warn("[KG Service] No chunks provided for KG generation.");
-        return null;
+        console.warn(`${logPrefix} No chunks provided for KG generation.`);
+        return { success: true, message: "No chunks to process for KG.", finalKgNodesCount: 0, finalKgEdgesCount: 0 };
     }
 
-    const graphFragments = [];
-    // Process chunks sequentially to avoid overwhelming Gemini or hitting rate limits quickly.
-    // For parallel processing with controlled concurrency, libraries like 'p-limit' can be used.
-    // For now, let's do it sequentially for simplicity and rate-limit safety. If you have many chunks, consider p-limit.
-    let chunkIndex = 0;
-    for (const chunk of chunksForKg) {
-        if (!chunk || !chunk.text_content) {
-            console.warn(`[KG Service] Skipping chunk index ${chunkIndex} due to missing text_content.`);
-            chunkIndex++;
+    const allGraphFragments = [];
+    const BATCH_SIZE = parseInt(process.env.KG_GENERATION_BATCH_SIZE) || 50;
+    console.log(`${logPrefix} Using batch size: ${BATCH_SIZE}`);
+    let batchIndex = 0;
+
+    for (let i = 0; i < chunksForKg.length; i += BATCH_SIZE) {
+        batchIndex++;
+        const currentBatchOfChunks = chunksForKg.slice(i, i + BATCH_SIZE);
+        
+        const validChunksInBatch = currentBatchOfChunks.filter(chunk => chunk && chunk.text_content && chunk.text_content.trim() !== '');
+        if (validChunksInBatch.length === 0) {
+            console.log(`${logPrefix} Batch ${batchIndex} has no valid chunks with text. Skipping.`);
             continue;
         }
-        const fragment = await _processSingleChunkForKg(chunk.text_content, chunk.metadata, chunkIndex);
-        if (fragment) {
-            graphFragments.push(fragment);
+        
+        console.log(`${logPrefix} Processing batch ${batchIndex} (chunks ${i} to ${Math.min(i + BATCH_SIZE - 1, chunksForKg.length - 1)}), ${validChunksInBatch.length} valid chunks.`);
+        
+        const fragmentsFromBatch = await _processBatchOfChunksForKg(validChunksInBatch, batchIndex); // Calls the new batch processor
+        if (fragmentsFromBatch && fragmentsFromBatch.length > 0) {
+            allGraphFragments.push(...fragmentsFromBatch);
+        } else {
+            console.warn(`${logPrefix} Batch ${batchIndex} yielded no valid graph fragments.`);
         }
-        chunkIndex++;
-        // Optional: Add a small delay if you're concerned about hitting API rate limits rapidly
-        // await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay
     }
 
-
-    // Alternative: Parallel processing with Promise.all (can be faster, but watch for rate limits)
-    /*
-    const processingPromises = chunksForKg.map((chunk, index) => {
-        if (!chunk || !chunk.text_content) {
-            console.warn(`[KG Service] Skipping chunk index ${index} due to missing text_content.`);
-            return Promise.resolve(null); // Resolve with null for invalid chunks
-        }
-        return _processSingleChunkForKg(chunk.text_content, chunk.metadata, index);
-    });
-
-    const settledFragments = await Promise.allSettled(processingPromises);
-    const graphFragments = settledFragments
-        .filter(result => result.status === 'fulfilled' && result.value)
-        .map(result => result.value);
-
-    settledFragments.forEach(result => {
-        if (result.status === 'rejected') {
-            console.error("[KG Service] A chunk processing promise was rejected:", result.reason);
-        }
-    });
-    */
-
-
-    if (graphFragments.length === 0) {
-        console.warn(`[KG Service] No valid graph fragments were generated for ${originalName}.`);
-        return null;
+    if (allGraphFragments.length === 0) {
+        console.warn(`${logPrefix} No valid graph fragments were generated from any batch.`);
+        return { success: true, message: "No KG data extracted from any document chunks.", finalKgNodesCount: 0, finalKgEdgesCount: 0 };
     }
 
-    const finalKg = _mergeGraphFragments(graphFragments);
-
-    // --- THIS IS WHERE YOU'D INTEGRATE NEO4J LATER ---
-    // For now, we just log it.
-    // console.log(`[KG Service] Successfully generated KG for document: ${originalName}`);
-    // console.log("[KG Service] Final Merged KG (Nodes):", JSON.stringify(finalKg.nodes.slice(0, 5), null, 2) + (finalKg.nodes.length > 5 ? "\n..." : "")); // Log first 5 nodes
-    // console.log("[KG Service] Final Merged KG (Edges):", JSON.stringify(finalKg.edges.slice(0, 5), null, 2) + (finalKg.edges.length > 5 ? "\n..." : "")); // Log first 5 edges
-    // To see the full graph: console.log("[KG Service] Full Final Merged KG:", JSON.stringify(finalKg, null, 2));
-    console.log("[KG Service] Full Final Merged KG : ", finalKg);
+    console.log(`${logPrefix} Generated a total of ${allGraphFragments.length} raw graph fragments. Merging...`);
+    const finalKg = _mergeGraphFragments(allGraphFragments);
     
+    if (!finalKg || finalKg.nodes.length === 0) {
+        console.warn(`${logPrefix} Merged KG has no nodes. Nothing to store.`);
+         return { success: true, message: "Merged KG was empty after processing all fragments.", finalKgNodesCount: 0, finalKgEdgesCount: 0 };
+    }
+    console.log(`${logPrefix} Merged KG successfully. Nodes: ${finalKg.nodes.length}, Edges: ${finalKg.edges.length}.`);
 
+<<<<<<< HEAD
         // --- Determine and Call the KG Ingestion API ---
     const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Use default if not set
     const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`; // Ensure no double slash and append /kg
+=======
+    // --- Storing the KG (your existing logic) ---
+    const baseRagUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002';
+    const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`;
+>>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 
-    if (!kgIngestionApiUrl.startsWith('http')) { // Basic check if a valid URL was formed
-        console.error("[KG Service] KG Ingestion API URL could not be determined properly. Check DEFAULT_PYTHON_RAG_URL. Current URL:", kgIngestionApiUrl);
+    if (!kgIngestionApiUrl.startsWith('http')) {
+        console.error(`${logPrefix} KG Ingestion API URL is invalid: ${kgIngestionApiUrl}. Check PYTHON_RAG_SERVICE_URL.`);
         return {
             success: false,
             message: "KG generated, but KG Ingestion API URL is invalid. KG not stored.",
+            finalKgNodesCount: finalKg.nodes.length,
+            finalKgEdgesCount: finalKg.edges.length
         };
     }
 
-    console.log(`[KG Service] Sending KG for '${originalName}' to KG Ingestion API: ${kgIngestionApiUrl}`);
+    console.log(`${logPrefix} Sending final merged KG to Ingestion API: ${kgIngestionApiUrl}`);
     try {
         const payload = {
             userId: userId,
@@ -277,44 +242,48 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
         };
 
         const serviceResponse = await axios.post(kgIngestionApiUrl, payload, {
-            timeout: 180000 // 3 minute timeout
+            timeout: 300000
         });
 
         const responseData = serviceResponse.data;
-        console.log(`[KG Service] KG Ingestion API response for '${originalName}':`, responseData);
-
-        // --- Define how to determine success from your API's response ---
-        // Example: expecting { "document-name": "...", "status": "completed", "userId": "..." }
-        const API_SUCCESS_STATUS_VALUE = "completed"; // <<<< IMPORTANT: CHANGE THIS to your API's actual success status string
-        // ---
+        const API_SUCCESS_STATUS_VALUE = "completed";
 
         if (serviceResponse.status >= 200 && serviceResponse.status < 300 && responseData && responseData.status === API_SUCCESS_STATUS_VALUE) {
-            if (responseData['document-name'] !== originalName || responseData.userId !== userId) {
-                console.warn(`[KG Service] Mismatch in KG API response for '${originalName}'. Expected doc/user: ${originalName}/${userId}, Got: ${responseData['document-name']}/${responseData.userId}`);
+            if (responseData['documentName'] !== originalName || responseData.userId !== userId) {
+                console.warn(`${logPrefix} Mismatch in KG API response. Expected doc/user: ${originalName}/${userId}, Got: ${responseData['documentName']}/${responseData.userId}`);
             }
-            const successMessage = `KG for '${originalName}' successfully processed by Ingestion API. Status: ${responseData.status}.`;
-            console.log(`[KG Service] ${successMessage}`);
+            const successMessage = `KG for '${originalName}' successfully processed by Ingestion API. Status: ${responseData.status}. Nodes: ${finalKg.nodes.length}, Edges: ${finalKg.edges.length}`;
+            console.log(`${logPrefix} ${successMessage}`);
             return {
                 success: true,
                 message: successMessage,
-                serviceResponseData: responseData // Pass back the API's response data
+                serviceResponseData: responseData,
+                finalKgNodesCount: finalKg.nodes.length,
+                finalKgEdgesCount: finalKg.edges.length
             };
         } else {
-            const failureMessage = `KG Ingestion API for '${originalName}' indicated failure or unexpected status. HTTP: ${serviceResponse.status}, API Status: '${responseData?.status || "N/A"}'. Response Msg: ${responseData?.message || responseData?.error || 'No specific error from API.'}`;
-            console.warn(`[KG Service] ${failureMessage}`);
+            const failureMessage = `KG Ingestion API for '${originalName}' indicated failure or unexpected status. HTTP: ${serviceResponse.status}, API Status: '${responseData?.status || "N/A"}'. API Msg: ${responseData?.message || responseData?.error || 'No specific error from API.'}`;
+            console.warn(`${logPrefix} ${failureMessage}`);
             return {
                 success: false,
                 message: failureMessage,
-                serviceResponseData: responseData
+                serviceResponseData: responseData,
+                finalKgNodesCount: finalKg.nodes.length,
+                finalKgEdgesCount: finalKg.edges.length
             };
         }
     } catch (error) {
         const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || "Unknown error calling KG Ingestion API";
-        console.error(`[KG Service] Error calling KG Ingestion API for '${originalName}':`, errorMsg);
-        if (error.response?.data) console.error("[KG Service] KG API Error Response Data:", error.response.data);
+        console.error(`${logPrefix} Error calling KG Ingestion API:`, errorMsg);
+        if (error.response?.data) console.error(`${logPrefix} KG API Error Response Data:`, error.response.data);
+        if (error.code === 'ECONNABORTED' || error.message.toLowerCase().includes('timeout')) {
+            console.error(`${logPrefix} KG Ingestion API call timed out.`);
+        }
         return {
             success: false,
             message: `KG generated, but error calling KG Ingestion API: ${errorMsg}`,
+            finalKgNodesCount: finalKg.nodes.length,
+            finalKgEdgesCount: finalKg.edges.length
         };
     }
 }

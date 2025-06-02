@@ -1,0 +1,163 @@
+// src/components/layout/CenterPanel.jsx
+import React, { useState, useEffect } from 'react';
+import ChatHistory from '../chat/ChatHistory';
+import ChatInput from '../chat/ChatInput';
+import api from '../../services/api';
+import { useAuth } from '../../hooks/useAuth';
+import { useAppState } from '../../contexts/AppStateContext';
+import toast from 'react-hot-toast';
+
+function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setChatStatus }) {
+    const { token, user } = useAuth();
+    const { selectedLLM, systemPrompt, selectedDocumentForAnalysis } = useAppState(); 
+    const [useRag, setUseRag] = useState(false); 
+    const [isSending, setIsSending] = useState(false);
+    
+    const handleSendMessage = async (inputText) => {
+        if (!inputText.trim() || !token || !currentSessionId || isSending) {
+            if (!currentSessionId) toast.error("No active session. Try 'New Chat'.");
+            return;
+        }
+
+        const clientSideId = `user-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const userMessage = {
+            id: clientSideId, // Client-side ID for optimistic update
+            sender: 'user',
+            role: 'user', // For backend
+            text: inputText.trim(),
+            parts: [{ text: inputText.trim() }], // For backend
+            timestamp: new Date().toISOString()
+        };
+        
+        // Optimistic UI update
+        setMessages(prev => [...prev, userMessage]);
+        
+        setIsSending(true);
+        let currentThinkingStatus = "Connecting to AI...";
+        if (useRag) {
+            currentThinkingStatus = `Searching documents & Contacting ${selectedLLM.toUpperCase()} (RAG)...`;
+        } else {
+            currentThinkingStatus = `Contacting ${selectedLLM.toUpperCase()}...`;
+        }
+        setChatStatus(currentThinkingStatus);
+
+        // Prepare history for backend (exclude the current optimistic user message)
+        const historyForBackend = messages.map(m => ({
+            // Backend expects: role, parts, timestamp (optionally thinking, references, source_pipeline for model messages)
+            role: m.sender === 'bot' ? 'model' : 'user',
+            parts: m.parts || [{ text: m.text }], // Ensure parts format
+            timestamp: m.timestamp,
+            ...(m.sender === 'bot' && { // Include these if they exist for bot messages
+                thinking: m.thinking,
+                references: m.references,
+                source_pipeline: m.source_pipeline
+            })
+        }));
+        
+        const payload = {
+            query: inputText.trim(), // This is the user's actual query text
+            history: historyForBackend,
+            sessionId: currentSessionId,
+            useRag: useRag,
+            llmProvider: selectedLLM, 
+            systemPrompt: systemPrompt,
+            // If RAG is enabled and a document is selected for analysis, you might pass its name
+            // The backend's /api/chat/message can then use this to filter RAG results
+            ...(useRag && selectedDocumentForAnalysis && { 
+                ragFilter: { document_name: selectedDocumentForAnalysis } // Example filter
+            })
+        };
+            
+        try {
+            console.log("CenterPanel: Sending payload to /api/chat/message:", payload);
+            const response = await api.sendMessage(payload); // Backend returns { reply: AIMessageObject }
+            
+            if (response && response.reply) {
+                const aiReply = {
+                    ...response.reply, // Includes sender, text, parts, timestamp, thinking, references, source_pipeline
+                    id: `bot-${Date.now()}-${Math.random().toString(16).slice(2)}` // Client-side ID
+                };
+                setMessages(prev => [...prev, aiReply]);
+                setChatStatus(`Responded via ${aiReply.source_pipeline || selectedLLM.toUpperCase()}.`);
+            } else {
+                throw new Error("Invalid or empty response structure from AI service.");
+            }
+
+        } catch (error) {
+            console.error("Error sending message:", error);
+            const errorText = error.response?.data?.message || error.message || 'Failed to get response from AI.';
+            
+            // If backend sends a structured error reply, use it, otherwise create one
+            let errorReplyMessage;
+            if (error.response?.data?.reply) {
+                errorReplyMessage = {
+                    ...error.response.data.reply,
+                    id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`
+                };
+            } else {
+                errorReplyMessage = { 
+                    id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`, 
+                    sender: 'bot', 
+                    text: `Error: ${errorText}`,
+                    parts: [{ text: `Error: ${errorText}` }],
+                    timestamp: new Date().toISOString(),
+                    thinking: "Error processing request.",
+                    source_pipeline: "error"
+                };
+            }
+            setMessages(prev => [...prev, errorReplyMessage]);
+            setChatStatus(`Error: ${errorText.substring(0,70)}...`);
+            toast.error(errorText);
+        } finally {
+            setIsSending(false);
+        }
+    };
+    
+    // Effect to update chat status if session ID changes or messages clear
+    useEffect(() => {
+        if (!currentSessionId) {
+            setChatStatus("Please login or start a new chat.");
+        } else if (messages.length === 0 && !isSending) {
+            setChatStatus("Ready. Send a message to start!");
+        }
+    }, [currentSessionId, messages, isSending]);
+
+
+    return (
+        <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
+            {messages.length === 0 && !isSending && currentSessionId && (
+                 <div className="p-6 sm:p-8 text-center text-text-muted-light dark:text-text-muted-dark animate-fadeIn">
+                    <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-text-light dark:text-text-dark">
+                        AI Engineering Tutor
+                    </h2>
+                    <p className="text-base sm:text-lg mb-3">Session ID: {currentSessionId.substring(0,8)}...</p>
+                    <div className="text-xs sm:text-sm space-y-1">
+                        <p>Current LLM: <span className="font-semibold text-accent">{selectedLLM.toUpperCase()}</span>.</p>
+                        <p className="max-w-md mx-auto">
+                            Assistant Mode: <span className="italic">"{systemPrompt.length > 60 ? systemPrompt.substring(0,60)+'...' : systemPrompt}"</span>
+                        </p>
+                        {selectedDocumentForAnalysis && (
+                            <p className="mt-1">
+                                Analysis Target: <span className="font-medium text-primary dark:text-primary-light">{selectedDocumentForAnalysis}</span>
+                            </p>
+                        )}
+                        <p className="mt-2">
+                            {useRag ? <span>RAG is <span className="text-green-500 font-semibold">ON</span>. Using your documents.</span> 
+                                  : <span>RAG is <span className="text-red-500 font-semibold">OFF</span>. Chatting directly with LLM.</span>}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <ChatHistory messages={messages} isLoading={isSending} />
+            <ChatInput 
+                onSendMessage={handleSendMessage} 
+                isLoading={isSending} 
+                currentStatus={chatStatus}
+                useRag={useRag}
+                setUseRag={setUseRag}
+            />
+        </div>
+    );
+}
+export default CenterPanel;

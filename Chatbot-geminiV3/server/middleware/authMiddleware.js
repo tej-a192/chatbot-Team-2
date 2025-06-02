@@ -1,45 +1,46 @@
 // server/middleware/authMiddleware.js
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+require('dotenv').config();
 
-// TEMPORARY Authentication Middleware (INSECURE - for debugging only)
-// Checks for 'X-User-ID' header and attaches user to req.user
-const tempAuth = async (req, res, next) => {
-    const userId = req.headers['x-user-id']; // Read custom header (lowercase)
+const authMiddleware = async (req, res, next) => {
+    const authHeader = req.header('Authorization');
 
-    // console.log("TempAuth Middleware: Checking for X-User-ID:", userId); // Debug log
-
-    if (!userId) {
-        console.warn("TempAuth Middleware: Missing X-User-ID header.");
-        // Send 401 immediately if header is missing
-        return res.status(401).json({ message: 'Unauthorized: Missing User ID header' });
+    if (!authHeader) {
+        console.warn("Auth Middleware: No Authorization header found.");
+        return res.status(401).json({ message: 'Not authorized, no token' });
     }
 
+    const parts = authHeader.split(' ');
+
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+        console.warn("Auth Middleware: Token format is 'Bearer <token>', received:", authHeader);
+        return res.status(401).json({ message: 'Token format is invalid' });
+    }
+
+    const token = parts[1];
+
     try {
-        // Find user by the ID provided in the header
-        // Ensure Mongoose is connected before this runs (handled by server.js)
-        const user = await User.findById(userId).select('-password'); // Exclude password
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findById(decoded.userId).select('-password');
 
         if (!user) {
-            console.warn(`TempAuth Middleware: User not found for ID: ${userId}`);
-            // Send 401 if user ID is provided but not found in DB
-            return res.status(401).json({ message: 'Unauthorized: User not found' });
+            console.warn(`Auth Middleware: User not found for ID: ${decoded.userId} from token.`);
+            return res.status(401).json({ message: 'User not found, token invalid' });
         }
 
-        // Attach user object to the request
         req.user = user;
-        // console.log("TempAuth Middleware: User attached:", req.user.username); // Debug log
-        next(); // Proceed to the next middleware or route handler
-
+        next();
     } catch (error) {
-        console.error('TempAuth Middleware: Error fetching user:', error);
-        // Handle potential invalid ObjectId format errors
-        if (error.name === 'CastError' && error.kind === 'ObjectId') {
-             return res.status(400).json({ message: 'Bad Request: Invalid User ID format' });
+        console.warn("Auth Middleware: Token verification failed:", error.message);
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({ message: 'Token expired' });
         }
-        // Send 500 for other unexpected errors during auth check
-        res.status(500).json({ message: 'Server error during temporary authentication' });
+        if (error.name === 'JsonWebTokenError') {
+            return res.status(401).json({ message: 'Token is not valid' });
+        }
+        res.status(401).json({ message: 'Not authorized, token verification failed' });
     }
 };
 
-// Export the temporary middleware
-module.exports = { tempAuth };
+module.exports = { authMiddleware }; // ONLY export this

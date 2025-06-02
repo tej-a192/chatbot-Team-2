@@ -1,70 +1,97 @@
-// File: server/workers/kgWorker.js
+// server/workers/kgWorker.js
 const { workerData, parentPort } = require('worker_threads');
+const mongoose = require('mongoose');
 
-// Adjust the path to YOUR kgService.js file
-// If kgWorker.js is in 'server/workers/' and kgService.js is in 'server/services/'
-// then the path would be '../services/kgService'.
-const kgService = require('../services/kgService'); // <<<< IMPORTANT: CHECK THIS PATH
+const User = require('../models/User');
+const connectDB = require('../config/db');
+const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    const { chunksForKg, userId, originalName } = workerData;
-
-    console.log(`[KG Worker ${process.pid}] Received task. Starting KG generation via kgService for:`);
-    console.log(`  User ID: ${userId}`);
-    console.log(`  Original Filename: ${originalName}`);
-    console.log(`  Number of Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
+    const { chunksForKg: allInitialChunks, userId, originalName } = workerData;
+    let dbConnected = false;
+    let overallSuccess = false;
+    let finalMessage = "KG processing encountered an issue.";
+    const logPrefix = `[KG Worker ${process.pid}, Doc: ${originalName}]`;
 
     try {
-        if (!chunksForKg || chunksForKg.length === 0) {
-            throw new Error("No chunksForKg provided to worker.");
-        }
+        console.log(`${logPrefix} Received task. User: ${userId}, Initial Chunks: ${allInitialChunks ? allInitialChunks.length : 0}`);
+        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in KG worker environment.");
+        if (!userId || !originalName) throw new Error("Missing userId or originalName in KG workerData.");
 
-        // Call the main function from your kgService
-        const result = await kgService.generateAndStoreKg(chunksForKg, userId, originalName);
+        await connectDB(process.env.MONGO_URI);
+        dbConnected = true;
+        console.log(`${logPrefix} DB Connected.`);
 
-        if (result && result.success) {
-            console.log(`[KG Worker ${process.pid}] KG generation successful for document: ${originalName}`);
-            if (parentPort) {
-                parentPort.postMessage({
-                    success: true,
-                    message: "KG generation completed successfully by worker.",
-                    // Optionally, send back a summary if needed by the main thread
-                    // knowledgeGraphSummary: {
-                    //     nodes: result.knowledgeGraph.nodes.length,
-                    //     edges: result.knowledgeGraph.edges.length
-                    // }
-                });
-            }
+        await User.updateOne(
+            { _id: userId, "uploadedDocuments.filename": originalName },
+            { $set: { "uploadedDocuments.$.kgStatus": "processing" } }
+        );
+        console.log(`${logPrefix} Status set to 'processing'.`);
+
+        if (!allInitialChunks || allInitialChunks.length === 0) {
+            console.log(`${logPrefix} No chunks provided for KG generation. Marking as skipped.`);
+            await User.updateOne(
+                { _id: userId, "uploadedDocuments.filename": originalName },
+                { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks", "uploadedDocuments.$.kgTimestamp": new Date() } }
+            );
+            finalMessage = "No chunks provided for KG generation.";
+            overallSuccess = true; // Not a failure of this worker's process
         } else {
-            const errorMessage = (result && result.message) ? result.message : "KG generation process failed in service or returned no result.";
-            console.error(`[KG Worker ${process.pid}] KG generation failed for document: ${originalName}. Error: ${errorMessage}`);
-            if (parentPort) {
-                parentPort.postMessage({
-                    success: false,
-                    error: errorMessage,
-                    document: originalName
-                });
+            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName);
+
+            if (kgExtractionResult && kgExtractionResult.success) {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: {
+                        "uploadedDocuments.$.kgStatus": "completed",
+                        "uploadedDocuments.$.kgNodesCount": kgExtractionResult.finalKgNodesCount,
+                        "uploadedDocuments.$.kgEdgesCount": kgExtractionResult.finalKgEdgesCount,
+                        "uploadedDocuments.$.kgTimestamp": new Date()
+                        }
+                    }
+                );
+                overallSuccess = true;
+                finalMessage = kgExtractionResult.message || "KG generation and storage completed successfully.";
+                console.log(`${logPrefix} SUCCESS: ${finalMessage}`);
+            } else {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.kgStatus": "failed_extraction" } }
+                );
+                finalMessage = (kgExtractionResult && kgExtractionResult.message) ? kgExtractionResult.message : "KG detailed extraction or storage failed.";
+                console.error(`${logPrefix} FAILED (Extraction/Store): ${finalMessage}`);
+                overallSuccess = false;
             }
         }
-    } catch (error) {
-        console.error(`[KG Worker ${process.pid}] Critical error during KG generation task for document: ${originalName}:`, error);
+
         if (parentPort) {
-            parentPort.postMessage({
-                success: false,
-                error: error.message || "Unknown critical error in KG worker.",
-                document: originalName
-            });
+            parentPort.postMessage({ success: overallSuccess, originalName, message: finalMessage });
+        }
+
+    } catch (error) {
+        console.error(`${logPrefix} CRITICAL error:`, error.message, error.stack);
+        finalMessage = error.message || "Unknown critical error in KG worker.";
+        overallSuccess = false;
+        if (dbConnected && userId && originalName) {
+            try {
+                await User.updateOne(
+                    { _id: userId, "uploadedDocuments.filename": originalName },
+                    { $set: { "uploadedDocuments.$.kgStatus": "failed_critical" } }
+                );
+            } catch (dbUpdateError) {
+                console.error(`${logPrefix} DB update error on critical fail:`, dbUpdateError);
+            }
+        }
+        if (parentPort) {
+            parentPort.postMessage({ success: false, originalName, error: finalMessage });
         }
     } finally {
-        // If not using parentPort.postMessage , the worker might exit.
-        // If parentPort is used, the main thread controls when the worker instance might be terminated
-        // or if the worker should explicitly close itself (e.g., if it's designed for one-off tasks).
-        // For simple fire-and-forget, this is okay.
-        if (!parentPort) { // If run directly, not as a worker
-            process.exit(error ? 1 : 0);
+        if (dbConnected) {
+            await mongoose.disconnect().catch(e => console.error(`${logPrefix} Error disconnecting DB:`, e));
+            console.log(`${logPrefix} DB Disconnected.`);
         }
+        console.log(`${logPrefix} Finished task. Overall Success: ${overallSuccess}`);
     }
 }
 
-// Start the generation process when the worker is invoked
 runKgGeneration();

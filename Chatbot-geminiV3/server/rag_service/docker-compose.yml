@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 version: '3.3' # Specifies the version of the Docker Compose file format
+=======
+version: '3.8' # Specifies the version of the Docker Compose file format
+>>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 
 services:
   # Qdrant Service Definition
@@ -55,7 +59,11 @@ services:
   #     - qdrant
   #     - neo4j
   #   restart: unless-stopped
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 # Top-Level Volumes Declaration
 # This section explicitly defines the named volumes that will be used for persistent storage.
 # Docker Compose will create these volumes automatically if they don't already exist.
