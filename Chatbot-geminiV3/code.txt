@@ -6813,13 +6813,31 @@ export default [
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite + React</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-lib@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-view@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markmap-toolbar@latest"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/markmap-toolbar@latest/dist/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@latest/dist/mermaid.min.js"></script>
+    
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        if (typeof mermaid !== 'undefined') {
+          mermaid.initialize({ startOnLoad: false, theme: 'neutral' }); 
+          console.log("Mermaid.js initialized globally with 'neutral' theme via index.html.");
+        } else {
+          console.error("Mermaid.js not found on window after script load. Mermaid diagrams may not render.");
+        }
+      });
+    </script>
+
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
-
 ```
 
 `frontend/o.txt`
@@ -7375,16 +7393,17 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon, Download } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import { marked } from 'marked';
-import MindmapViewer from './MindmapViewer.jsx';
+import MindmapViewer from './MindmapViewer.jsx'; 
 import DOMPurify from 'dompurify';
-import Prism from 'prismjs'; // Ensure Prism is imported or available globally
+import Prism from 'prismjs'; 
 import { renderMathInHtml } from '../../utils/markdownUtils';
+import { useAppState } from '../../contexts/AppStateContext.jsx'; 
 
 marked.setOptions({
   breaks: true,
@@ -7393,46 +7412,19 @@ marked.setOptions({
 
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
-
-    console.log("createMarkup: Original Markdown:\n", markdownText);
-
     let html = marked.parse(markdownText);
-
-    html = renderMathInHtml(html);
-
-    const cleanHtml = DOMPurify.sanitize(html, { 
-        ADD_TAGS: [
-            'iframe', 'math', 'mtable', 'mtr', 'mtd', 'mrow', 'mi', 'mo', 'mn', 'mtext',
-            'msup', 'msub', 'mfrac', 'msqrt', 'munderover', 'mstyle',
-            'semantics', 'annotation', '표', 'annotation-xml',
-            'span',
-        ],
-        ADD_ATTR: [
-            'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'encoding', 'style',
-            'xmlns', 'display', 'class', 'role', 'aria-hidden', 'mathvariant',
-            'mathsize', 'fontstyle', 'fontweight', 'color', 'background', 'href',
-            'accent', 'accentunder', 'align', 'columnalign', 'columnlines',
-            'columnspacing', 'columnspan', 'displaystyle', 'equalcolumns',
-            'equalrows', 'fence', 'fontfamily', 'fontsize', 'frame', 'height',
-            'linethickness', 'lspace', 'mathbackground', 'mathcolor',
-            'maxwidth', 'minlabelspacing', 'movablelimits', 'notation', 'rowalign',
-            'rowlines', 'rowspacing', 'rowspan', 'rspace', 'scriptlevel',
-            'selection', 'separator', 'stretchy', 'symmetric', 'width', 'xlink:href',
-        ],
+    html = renderMathInHtml(html); 
+    const cleanHtml = DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true, mathMl: true, svg: true }, 
+        ADD_TAGS: ['iframe'], 
+        ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'],
     });
     return { __html: cleanHtml };
 };
 
-
 const escapeHtml = (unsafe) => {
     if (typeof unsafe !== 'string') return '';
-    // More robust HTML escaping
-    return unsafe
-        .replace(/&/g, "&")
-        .replace(/</g, "<")
-        .replace(/>/g, ">")
-        .replace(/"/g, `"`)
-        .replace(/'/g, "'");
+    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/'/g, "'");
 };
 
 const ENGAGEMENT_TEXTS = {
@@ -7442,8 +7434,16 @@ const ENGAGEMENT_TEXTS = {
     default: ["Processing...", "Thinking...", "Working on it..."]
 };
 
+// Placeholder messages to check against for AI Reasoning section
+const placeholderReasoningMessages = [
+    "Retrieved stored analysis. No detailed AI reasoning provided.",
+    "AI reasoning not available.",
+    "Mock generation for",
+    "Retrieved stored mindmap data. No specific thinking process recorded in content."
+];
+
 function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilename }) {
-    const [isSectionOpen, setIsSectionOpen] = useState(true); // Default to open if a doc might be pre-selected
+    const [isSectionOpen, setIsSectionOpen] = useState(true);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
@@ -7454,7 +7454,9 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
     const IconComponent = LucideIcons[iconName] || DefaultIcon;
     const modalAnalysisContentRef = useRef(null);
-    const aiReasoningRef = useRef(null);
+    const aiReasoningContentRef = useRef(null);
+    const mindmapViewerRef = useRef(null); 
+    const { theme: appTheme } = useAppState(); 
 
     useEffect(() => {
         let intervalId;
@@ -7479,39 +7481,32 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             setAnalysisContent(null);
             setAiReasoning(null);
             setIsDropdownOpen(false);
-            // setIsSectionOpen(false); // Keep section open if desired, or close it
         } else {
-            // setIsSectionOpen(true); // Keep section open if desired
-            // Optionally clear previous results when a NEW document is selected,
-            // but not if the same document is re-selected (depends on desired UX)
-            // For now, let's assume results are tied to the selected document and don't auto-clear on re-selection here
-            // Clearing happens in handleRunAnalysis before fetching new data.
+            // When a new document is selected, optionally reset previous results
+            // to avoid showing old data before a new "Run"
+             setAnalysisContent(null);
+             setAiReasoning(null);
+             setIsDropdownOpen(false);
+             setError('');
+             setIsLoading(false); // Ensure loading state is reset
         }
     }, [selectedDocumentFilename]);
 
     useEffect(() => {
-        if (isModalOpen && analysisContent && modalAnalysisContentRef.current) {
+        if (isModalOpen && analysisContent && toolType !== 'mindmap' && modalAnalysisContentRef.current) {
             const timer = setTimeout(() => {
-                if (modalAnalysisContentRef.current) {
-                    Prism.highlightAllUnder(modalAnalysisContentRef.current);
-                }
-            }, 50); // Slightly increased delay for modal animations
+                if (modalAnalysisContentRef.current) Prism.highlightAllUnder(modalAnalysisContentRef.current);
+            }, 50);
             return () => clearTimeout(timer);
         }
-    }, [isModalOpen, analysisContent]);
+    }, [isModalOpen, analysisContent, toolType]);
 
     useEffect(() => {
-        // This effect is for the AI Reasoning <pre> block if it contains Markdown.
-        // Currently, it's set up to display plain text.
-        // If aiReasoning were Markdown and rendered via createMarkup:
-        if (aiReasoningRef.current && aiReasoning && isDropdownOpen) {
-            const codeElement = aiReasoningRef.current.querySelector('code');
-            // If the code element exists and has a language class (e.g., for plain text)
-            if (codeElement && codeElement.className.includes('language-')) {
-                Prism.highlightElement(codeElement);
-            }
-            // If the entire pre block was rendered from markdown with multiple code blocks:
-            // Prism.highlightAllUnder(aiReasoningRef.current);
+        if (aiReasoningContentRef.current && aiReasoning && isDropdownOpen) {
+            const timer = setTimeout(() => {
+                if (aiReasoningContentRef.current) Prism.highlightAllUnder(aiReasoningContentRef.current);
+            }, 0);
+            return () => clearTimeout(timer);
         }
     }, [aiReasoning, isDropdownOpen]);
 
@@ -7522,8 +7517,8 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
         setIsLoading(true);
         setError('');
-        setAnalysisContent(null); // Clear previous content
-        setAiReasoning(null);   // Clear previous reasoning
+        setAnalysisContent(null);
+        setAiReasoning(null);
         setIsDropdownOpen(false);
 
         const payload = { filename: selectedDocumentFilename, analysis_type: toolType };
@@ -7531,12 +7526,12 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
         try {
             const response = await api.requestAnalysis(payload);
-            toast.dismiss(toastId); // Dismiss loading toast before showing success/error
+            toast.dismiss(toastId);
 
             if (response) {
                 if (response.content && response.content.trim() !== "" && !response.content.startsWith("Error:")) {
                     setAnalysisContent(response.content);
-                    toast.success(`${title} analysis complete!`);
+                    toast.success(`${title} analysis complete! Click 'View Full ${title}' to see details.`);
                 } else if (response.content && response.content.startsWith("Error:")) {
                     setError(response.content);
                     toast.error(`Error in ${title}: ${response.content.substring(0, 100)}...`);
@@ -7548,9 +7543,9 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                 if (response.thinking && response.thinking.trim() !== "") {
                     setAiReasoning(response.thinking);
                 } else {
-                    setAiReasoning(response.content ? "Analysis complete. No detailed reasoning provided." : "AI reasoning not available.");
+                    setAiReasoning(response.content ? "Retrieved stored analysis. No detailed AI reasoning provided." : "AI reasoning not available.");
                 }
-                setIsDropdownOpen(true); // Show dropdown with results/reasoning
+                setIsDropdownOpen(true);
             } else {
                 throw new Error("Empty response from analysis service.");
             }
@@ -7566,10 +7561,76 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
     };
 
+    const handleDownloadMindmap = async (format = 'svg') => {
+        if (mindmapViewerRef.current && mindmapViewerRef.current.getSvgElement) {
+            const svgElement = mindmapViewerRef.current.getSvgElement();
+            if (!svgElement) {
+                toast.error("Mindmap SVG element not found or not rendered yet.");
+                return;
+            }
+
+            const filenameBase = selectedDocumentFilename ? selectedDocumentFilename.split('.')[0] : 'mindmap';
+            const filename = `${filenameBase}_${toolType}.${format}`;
+
+            if (format === 'svg') {
+                const serializer = new XMLSerializer();
+                let svgString = serializer.serializeToString(svgElement);
+                svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+                const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                toast.success("SVG downloaded!");
+            } else if (format === 'png') {
+                const pngToastId = toast.loading("Preparing PNG download...");
+                try {
+                    const { saveSvgAsPng } = await import('save-svg-as-png');
+                    if (saveSvgAsPng) {
+                        saveSvgAsPng(svgElement, filename, { 
+                            scale: 2, 
+                            backgroundColor: appTheme === 'dark' ? '#1E293B' : '#FFFFFF' 
+                        });
+                        toast.success("PNG download started!", { id: pngToastId });
+                    } else {
+                        throw new Error("saveSvgAsPng function not found after import.");
+                    }
+                } catch (e) {
+                    console.error("Error loading/using save-svg-as-png:", e);
+                    toast.error(`Failed to export PNG: ${e.message}. SVG export is available.`, { id: pngToastId });
+                }
+            }
+        } else {
+            toast.error("Mindmap viewer component not ready or SVG not available.");
+        }
+    };
+    
     const renderModalContent = () => {
-        if (!analysisContent) return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
+        if (isLoading && !analysisContent) {
+            return (
+                <div className="flex items-center justify-center h-48">
+                    <Loader2 size={32} className="animate-spin text-primary" />
+                    <p className="ml-2 text-text-muted-light dark:text-text-muted-dark">Loading analysis...</p>
+                </div>
+            );
+        }
+        if (error && !analysisContent) {
+             return <p className="p-4 text-center text-red-500 dark:text-red-400">{error}</p>;
+        }
+        if (!analysisContent) {
+            return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
+        }
+
         if (toolType === 'mindmap') {
-            return <MindmapViewer markdownContent={analysisContent} />;
+            return (
+                <div className="mindmap-modal-content-wrapper min-h-[60vh] h-[calc(70vh-80px)] flex justify-center items-center">
+                     <MindmapViewer mermaidCode={analysisContent} ref={mindmapViewerRef} />
+                </div>
+            );
         }
         return (
             <div
@@ -7579,6 +7640,9 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             />
         );
     };
+
+    // Determine if AI reasoning is substantial or just a placeholder
+    const showReasoning = aiReasoning && !placeholderReasoningMessages.some(msg => aiReasoning.includes(msg));
 
     return (
         <div className="card-base p-3">
@@ -7646,7 +7710,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 transition={{ duration: 0.2 }}
                                 className="mt-2 space-y-2"
                             >
-                                {aiReasoning && (
+                                {showReasoning && aiReasoning && ( // Conditionally render based on showReasoning
                                     <details className="group text-xs rounded-md border border-border-light dark:border-border-dark bg-surface-light dark:bg-gray-800 shadow-sm">
                                         <summary className="flex items-center justify-between gap-1 p-2 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors rounded-t-md">
                                             <span className="flex items-center gap-1.5 font-medium">
@@ -7654,20 +7718,18 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                             </span>
                                             <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
                                         </summary>
-                                        <pre
-                                            ref={aiReasoningRef}
-                                            className="p-2.5 bg-gray-50 dark:bg-gray-900/50 rounded-b-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-40 overflow-y-auto custom-scrollbar"
-                                        >
-                                            {/* For plain text reasoning. If it can contain specific code, add language-xxx class */}
-                                            <code className="language-text">{escapeHtml(aiReasoning)}</code>
-                                        </pre>
+                                        <div
+                                            ref={aiReasoningContentRef}
+                                            className="p-2.5 prose prose-xs dark:prose-invert max-w-none text-text-light dark:text-text-dark max-h-60 overflow-y-auto custom-scrollbar text-[0.75rem] leading-relaxed bg-gray-50 dark:bg-gray-900/50 rounded-b-md"
+                                            dangerouslySetInnerHTML={createMarkup(aiReasoning)}
+                                        />
                                     </details>
                                 )}
 
-                                {analysisContent && toolType !== 'mindmap' && ( // Don't show view button for mindmap if it's already rendered inline
+                                {analysisContent && ( 
                                      <Button
                                         onClick={() => setIsModalOpen(true)}
-                                        variant="outline"
+                                        variant="outline" 
                                         size="sm"
                                         fullWidth
                                         leftIcon={<Eye size={14}/>}
@@ -7678,7 +7740,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 )}
                             </motion.div>
                         )}
-
+                        
                         {!isLoading && !isDropdownOpen && !error && (
                             <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 text-center">
                                 {selectedDocumentFilename ? `Click "Run" to generate ${title} for "${selectedDocumentFilename}".` : "Select a document to enable analysis."}
@@ -7688,14 +7750,25 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                 )}
             </AnimatePresence>
 
-            {/* Modal for Displaying Full Analysis Content */}
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                title={`Result for ${title} on "${selectedDocumentFilename || 'document'}"`}
-                size="xl"
+                title={`${title} for "${selectedDocumentFilename || 'document'}"`}
+                size={toolType === 'mindmap' ? "3xl" : "xl"}
+                footerContent={
+                    <>
+                        {toolType === 'mindmap' && analysisContent && (
+                            <>
+                                <Button onClick={() => handleDownloadMindmap('svg')} variant="outline" size="sm" className="text-xs" leftIcon={<Download size={14}/>}>SVG</Button>
+                                <Button onClick={() => handleDownloadMindmap('png')} variant="outline" size="sm" className="text-xs" leftIcon={<Download size={14}/>}>PNG</Button>
+                                <div className="flex-grow"></div> {/* Spacer */}
+                            </>
+                        )}
+                        <Button onClick={() => setIsModalOpen(false)} variant="secondary" size="sm" className="text-xs">Close</Button>
+                    </>
+                }
             >
-                <div className="max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 bg-gray-50 dark:bg-gray-800 rounded-md shadow-inner">
+                <div className={`max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 rounded-md shadow-inner ${toolType === 'mindmap' ? 'bg-transparent dark:bg-transparent' : 'bg-gray-50 dark:bg-gray-800'}`}>
                     {selectedDocumentFilename && (
                         <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-2 border-b border-border-light dark:border-border-dark pb-1.5">
                             Source Document: <strong>{selectedDocumentFilename}</strong>
@@ -7713,77 +7786,137 @@ export default AnalysisToolRunner;
 `frontend/src/components/analysis/MindmapViewer.jsx`
 
 ```javascript
-import React, { useEffect, useRef, useState } from 'react';
+// frontend/src/components/analysis/MindmapViewer.jsx
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import toast from 'react-hot-toast';
+import { escapeHtml } from '../../utils/helpers.js'; // Import escapeHtml helper
 
-// Ensure Markmap libraries are loaded globally from index.html (d3, markmap-lib, markmap-view, markmap-toolbar)
+const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
+    const svgContainerRef = useRef(null);
+    const [error, setError] = useState(null);
+    const [isMermaidReady, setIsMermaidReady] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [uniqueId] = useState(() => `mermaid-graph-${Math.random().toString(36).substr(2, 9)}`);
 
-function MindmapViewer({ markdownContent }) {
-    const svgRef = useRef(null);
-    const [markmapInstance, setMarkmapInstance] = useState(null);
-    const [toolbarInstance, setToolbarInstance] = useState(null);
-    const { Transformer, Markmap, Toolbar } = window.markmap; // Access global markmap
+    useImperativeHandle(ref, () => ({
+        getSvgElement: () => {
+            return svgContainerRef.current?.querySelector('svg');
+        }
+    }));
 
     useEffect(() => {
-        if (!markdownContent || !svgRef.current || !Transformer || !Markmap || !Toolbar) {
-            if (svgRef.current) svgRef.current.innerHTML = ''; // Clear previous
+        if (typeof window.mermaid !== 'undefined') {
+            setIsMermaidReady(true);
+        } else {
+            const intervalId = setInterval(() => {
+                if (typeof window.mermaid !== 'undefined') {
+                    setIsMermaidReady(true);
+                    clearInterval(intervalId);
+                }
+            }, 100);
+            return () => clearInterval(intervalId);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isMermaidReady || !mermaidCode || !svgContainerRef.current) {
+            if (svgContainerRef.current) svgContainerRef.current.innerHTML = '';
+            setError(null);
+            setIsLoading(false);
             return;
         }
-        
-        let mm, tb;
-        try {
-            // Cleanup previous instances if they exist
-            if (markmapInstance && typeof markmapInstance.destroy === 'function') {
-                markmapInstance.destroy();
-            }
-            if (toolbarInstance && toolbarInstance.el && toolbarInstance.el.parentNode) {
-                toolbarInstance.el.parentNode.removeChild(toolbarInstance.el);
-            }
 
-            const transformer = new Transformer();
-            const { root, features } = transformer.transform(markdownContent);
+        const renderMermaidDiagram = async () => {
+            setIsLoading(true);
+            setError(null);
+            if (!svgContainerRef.current) {
+                setIsLoading(false);
+                return;
+            }
+            svgContainerRef.current.innerHTML = '<div class="flex justify-center items-center h-full w-full text-sm text-text-muted-light dark:text-text-muted-dark"><div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-2"></div>Rendering diagram...</div>';
             
-            svgRef.current.innerHTML = ''; // Clear before re-rendering
-            mm = Markmap.create(svgRef.current, null, root); // Create new Markmap
-            setMarkmapInstance(mm);
-
-            // Create and prepend toolbar
-            tb = Toolbar.create(mm);
-            svgRef.current.parentNode.insertBefore(tb.el, svgRef.current);
-            setToolbarInstance(tb);
-            
-            // Auto-fit after a short delay to ensure rendering is complete
-            setTimeout(() => mm.fit(), 100);
-
-        } catch (e) {
-            console.error("Error rendering Markmap:", e);
-            toast.error("Failed to render mind map. Check console for details.");
-            if (svgRef.current) svgRef.current.innerHTML = '<p class="text-xs text-red-500 p-2">Error rendering mind map. Invalid Markdown for mind map?</p>';
-        }
-        
-        // Cleanup function for when component unmounts or markdownContent changes
-        return () => {
-            if (mm && typeof mm.destroy === 'function') {
-                mm.destroy();
+            let codeToRender = mermaidCode.trim();
+            // Remove Markdown code fences: ```mermaid ... ``` or ``` ... ```
+            // Regex explanation:
+            // ^```         - Matches starting triple backticks
+            // (?:mermaid\b)? - Optionally matches "mermaid" followed by a word boundary (case-insensitive due to i flag)
+            // \s*          - Matches any whitespace (including newlines) after "mermaid" or ```
+            // ([\s\S]*?)  - Captures the actual Mermaid code (non-greedy)
+            // \s*          - Matches any whitespace before closing backticks
+            // ```$         - Matches closing triple backticks at the end of the string
+            // i            - Case-insensitive flag (for "mermaid" keyword)
+            const fenceRegex = /^```(?:mermaid\b)?\s*([\s\S]*?)\s*```$/i;
+            const match = codeToRender.match(fenceRegex);
+            if (match && match[1]) {
+                codeToRender = match[1].trim(); // Use the captured group
             }
-            if (tb && tb.el && tb.el.parentNode) {
-                tb.el.parentNode.removeChild(tb.el);
+            
+            try {
+                if (typeof window.mermaid === 'undefined') {
+                    throw new Error("Mermaid library failed to load or initialize properly.");
+                }
+
+                const { svg, bindFunctions } = await window.mermaid.render(uniqueId, codeToRender);
+                
+                if (svgContainerRef.current) {
+                    svgContainerRef.current.innerHTML = svg;
+                    if (bindFunctions) {
+                        bindFunctions(svgContainerRef.current);
+                    }
+                    const svgElement = svgContainerRef.current.querySelector('svg');
+                    if (svgElement) {
+                        svgElement.style.width = '100%';
+                        svgElement.style.height = 'auto'; 
+                        svgElement.style.maxWidth = '100%'; 
+                        svgElement.style.display = 'block';
+                    }
+                }
+            } catch (e) {
+                console.error("Error rendering Mermaid diagram with input:", codeToRender, e);
+                const errorMsg = e.message || "Failed to render mind map. Invalid Mermaid syntax?";
+                setError(errorMsg);
+                if (svgContainerRef.current) {
+                    const codeSnippet = escapeHtml(codeToRender.substring(0, 200) + (codeToRender.length > 200 ? "..." : ""));
+                    svgContainerRef.current.innerHTML = `<div class="p-4 text-center text-red-500 dark:text-red-400 text-xs break-all"><strong>Error rendering:</strong> ${escapeHtml(errorMsg)}<br><strong class='mt-2 block'>Input Code (first 200 chars):</strong><pre class='text-left text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded mt-1 whitespace-pre-wrap'>${codeSnippet}</pre></div>`;
+                }
+            } finally {
+                setIsLoading(false);
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-    }, [markdownContent]); // Rerun when markdownContent changes
 
-    if (!markdownContent) {
-        return <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2">No mind map data to display.</p>;
+        const timer = setTimeout(renderMermaidDiagram, 100); 
+        return () => clearTimeout(timer);
+        
+    }, [mermaidCode, uniqueId, isMermaidReady]);
+
+    if (!isMermaidReady && !error) {
+      return <div className="p-4 text-center text-text-muted-light dark:text-text-muted-dark text-xs">Waiting for Mermaid.js library...</div>;
+    }
+    if (error && (!isLoading || (svgContainerRef.current && svgContainerRef.current.innerHTML.includes('Error rendering')))) {
+        return <div ref={svgContainerRef} className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md">
+                {/* Error message will be injected by useEffect's catch block */}
+               </div>;
+    }
+    
+    if (isLoading) { 
+         return <div ref={svgContainerRef} className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md">
+            {/* Loading message is set by renderMermaidDiagram's initial innerHTML write */}
+         </div>;
     }
 
+    if (!mermaidCode && !error && isMermaidReady) { 
+        return <p className="text-xs text-center text-text-muted-light dark:text-text-muted-dark p-4">No mind map data to display.</p>;
+    }
+    
     return (
-        <div className="relative w-full h-80 md:h-96 my-2">
-            {/* Toolbar will be prepended here by useEffect */}
-            <svg ref={svgRef} className="w-full h-full border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 shadow-inner"></svg>
+        <div 
+            ref={svgContainerRef} 
+            className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md"
+        >
+
         </div>
     );
-}
+});
 
 export default MindmapViewer;
 ```
@@ -10723,22 +10856,23 @@ export const useWebSpeech = () => {
 `frontend/src/main.jsx`
 
 ```javascript
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { useAppState } from './contexts/AppStateContext.jsx'; // Correct named import
-import App from './App.jsx'
-import { AuthProvider } from './contexts/AuthContext.jsx'
-import { AppStateProvider } from './contexts/AppStateContext.jsx'
-import { Toaster } from 'react-hot-toast'; // For notifications
-import './index.css' 
-import 'prismjs/themes/prism-okaidia.css';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import { AuthProvider } from './contexts/AuthContext.jsx';
+import { AppStateProvider } from './contexts/AppStateContext.jsx';
+import { Toaster } from 'react-hot-toast';
+import './index.css'; 
+
+
+import 'prismjs/themes/prism-okaidia.css'; 
 import 'katex/dist/katex.min.css';
-import Prism from 'prismjs';
+import Prism from 'prismjs'; 
 import 'prismjs/components/prism-python';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-jsx';
 import 'prismjs/components/prism-css';
-import 'prismjs/components/prism-markup';
+import 'prismjs/components/prism-markup'; 
 import 'prismjs/components/prism-json';
 import 'prismjs/components/prism-bash';
 import 'prismjs/components/prism-csharp';
@@ -10754,7 +10888,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       </AppStateProvider>
     </AuthProvider>
   </React.StrictMode>,
-)
+);
 ```
 
 `frontend/src/services/api.js`
@@ -11070,6 +11204,7 @@ export default api;
 
 ```javascript
 // Debounce function: Limits the rate at which a function can fire.
+
 export const debounce = (func, delay) => {
     let timeoutId;
     return function(...args) {
@@ -11148,47 +11283,53 @@ export const truncateText = (text, maxLength = 100) => {
 `frontend/src/utils/markdownUtils.jsx`
 
 ```javascript
-// src/utils/markdownUtils.js
+// src/utils/markdownUtils.jsx
 import katex from 'katex';
+import DOMPurify from 'dompurify';
 
 const decodeHtmlEntities = (encodedString) => {
   if (typeof encodedString !== 'string') return encodedString;
-  return encodedString
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, "'");
+
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = encodedString;
+  return textarea.value;
 };
 
 export const renderMathInHtml = (htmlString) => {
   if (!htmlString || typeof htmlString !== 'string') return htmlString;
-  console.log("[Math Test] renderMathInHtml: INPUT HTML:\n", htmlString);
 
   let processedString = htmlString;
-
-  processedString = processedString.replace(/\$\$([\s\S]+?)\$\$/g, (match, rawExpression) => {
+  processedString = processedString.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (match, rawExpression) => {
     const expression = decodeHtmlEntities(rawExpression.trim());
-    console.log("[Math Test] renderMathInHtml: DISPLAY math to KaTeX:", expression);
     try {
-      const rendered = katex.renderToString(expression, { displayMode: true, throwOnError: false, macros: {"\\RR": "\\mathbb{R}"}});
-      console.log("[Math Test] renderMathInHtml: KaTeX DISPLAY output:", rendered);
-      return rendered;
-    } catch (e) { console.warn(`[Math Test] KaTeX display error: ${e.message} for: ${expression}`); return match; }
+      const rendered = katex.renderToString(expression, { 
+        displayMode: true, 
+        throwOnError: false,
+        macros: {"\\RR": "\\mathbb{R}"} 
+      });
+      return DOMPurify.sanitize(rendered, { USE_PROFILES: { mathMl: true, svg: true, html: true } });
+    } catch (e) { 
+      console.warn(`KaTeX (display) error: ${e.message} for expression: ${expression}`); 
+      return match; 
+    }
   });
 
-  processedString = processedString.replace(/(^|[^\$])\$([^\$\n]+?)\$([^\$]|$)/g, (fullMatch, prefix, rawExpression, suffix) => {
+  processedString = processedString.replace(/(^|[^$\\])\$(?![\s$])([^$\n]+?)(?<![\s\\])\$([^\$]|$)/g, (fullMatch, prefix, rawExpression, suffix) => {
     const expression = decodeHtmlEntities(rawExpression.trim());
-    if (!expression) return fullMatch;
-    console.log("[Math Test] renderMathInHtml: INLINE math to KaTeX:", expression);
+    if (!expression) return fullMatch; 
     try {
-      const rendered = katex.renderToString(expression, { displayMode: false, throwOnError: false, macros: {"\\RR": "\\mathbb{R}"}});
-      console.log("[Math Test] renderMathInHtml: KaTeX INLINE output:", rendered);
-      return prefix + rendered + suffix;
-    } catch (e) { console.warn(`[Math Test] KaTeX inline error: ${e.message} for: ${expression}`); return fullMatch; }
+      const rendered = katex.renderToString(expression, { 
+        displayMode: false, 
+        throwOnError: false,
+        macros: {"\\RR": "\\mathbb{R}"}
+      });
+      return prefix + DOMPurify.sanitize(rendered, { USE_PROFILES: { mathMl: true, svg: true, html: true } }) + suffix;
+    } catch (e) { 
+      console.warn(`KaTeX (inline) error: ${e.message} for expression: ${expression}`);
+      return fullMatch; 
+    }
   });
-
-  console.log("[Math Test] renderMathInHtml: FINAL PROCESSED HTML:\n", processedString);
+  
   return processedString;
 };
 ```
@@ -11335,7 +11476,8 @@ PORT=5001 # Port for the backend (make sure it's free)
 MONGO_URI = "mongodb://localhost:27017/chatbot_gemini" # Your MongoDB connection string
 JWT_SECRET = "your_super_strong_and_secret_jwt_key_12345" # A strong, random secret key for JWT
 GEMINI_API_KEY = "AIzaSyDlY5AEMPkwcIDxIcT5d2kYf8_reuJbFVc" # Your actual Gemini API Key
-DEFAULT_PYTHON_RAG_URL = "http://localhost:5000"
+PYTHON_RAG_SERVICE_URL = "http://127.0.0.1:5000"
+KG_GENERATION_BATCH_SIZE=25
 
 ```
 
@@ -16663,9 +16805,9 @@ graph TD;
 \`\`\`
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the Mermaid graph definition (e.g., \`graph TD;\`) (after your detailed thinking process, if used).
-*   Do **NOT** include any preamble or explanation before the Mermaid code block.
-*   The entire output should be valid Mermaid.js syntax.
+*   Start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`graph LR;\`) (after your detailed thinking process, if used).
+*   Do **NOT** include any preamble or explanation before the Mermaid code block (e.g., do not write "Here is the Mermaid code:").
+*   The entire output after the thinking block (if any) must be valid Mermaid.js syntax.
 
 **BEGIN OUTPUT (Start with e.g., \`graph TD;\` or \`<thinking>\`):**
 `;
@@ -16738,7 +16880,6 @@ module.exports = {
     KG_GENERATION_SYSTEM_PROMPT,
     KG_BATCH_USER_PROMPT_TEMPLATE
 };
-
 ```
 
 `server/middleware/authMiddleware.js`
@@ -17733,7 +17874,7 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
         return document_chunks
 
     try:
-        embeddings_np_array = document_embedding_model.encode(texts_to_embed, show_progress_bar=False) # Set to True for long lists
+        embeddings_np_array = document_embedding_model.encode(texts_to_embed, show_progress_bar=True) # Set to True for long lists
         
         for i, original_chunk_idx in enumerate(valid_chunk_indices):
             if i < len(embeddings_np_array):
