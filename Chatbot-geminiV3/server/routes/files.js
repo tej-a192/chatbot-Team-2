@@ -10,26 +10,30 @@ const router = express.Router();
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const BACKUP_DIR = path.join(__dirname, '..', 'backup_assets');
 
-// --- Helper functions ---
+// --- Helper functions (sanitizeUsernameForDir, parseServerFilename, ensureDirExists are existing) ---
 const sanitizeUsernameForDir = (username) => {
     if (!username) return '';
     return username.replace(/[^a-zA-Z0-9_-]/g, '_');
 };
+
 const parseServerFilename = (filename) => {
-    const match = filename.match(/^(\d+)-(.*?)(\.\w+)$/);
+    // Matches "timestamp-originalName.ext"
+    // Allows originalName to contain dots now.
+    const match = filename.match(/^(\d+)-(.+?)(\.\w+)$/);
     if (match && match.length === 4) {
         return { timestamp: match[1], originalName: `${match[2]}${match[3]}`, extension: match[3] };
     }
-     // Handle cases where the original name might not have an extension or parsing fails
+    // Fallback for names that might not perfectly fit the new pattern, or originalName without extension before timestamp
     const ext = path.extname(filename);
-    const base = filename.substring(0, filename.length - ext.length);
-    const tsMatch = base.match(/^(\d+)-(.*)$/);
+    const baseWithoutExt = filename.substring(0, filename.length - ext.length);
+    const tsMatch = baseWithoutExt.match(/^(\d+)-(.*)$/);
     if (tsMatch) {
         return { timestamp: tsMatch[1], originalName: `${tsMatch[2]}${ext}`, extension: ext };
     }
-    // Fallback if no timestamp prefix found (less ideal)
+    // Final fallback if no timestamp prefix is reliably parsed
     return { timestamp: null, originalName: filename, extension: path.extname(filename) };
 };
+
 const ensureDirExists = async (dirPath) => {
     try { await fs.mkdir(dirPath, { recursive: true }); }
     catch (error) { if (error.code !== 'EEXIST') { console.error(`Error creating dir ${dirPath}:`, error); throw error; } }

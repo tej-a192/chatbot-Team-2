@@ -139,9 +139,9 @@ graph TD;
 \`\`\`
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the Mermaid graph definition (e.g., \`graph TD;\`) (after your detailed thinking process, if used).
-*   Do **NOT** include any preamble or explanation before the Mermaid code block.
-*   The entire output should be valid Mermaid.js syntax.
+*   Start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`graph LR;\`) (after your detailed thinking process, if used).
+*   Do **NOT** include any preamble or explanation before the Mermaid code block (e.g., do not write "Here is the Mermaid code:").
+*   The entire output after the thinking block (if any) must be valid Mermaid.js syntax.
 
 **BEGIN OUTPUT (Start with e.g., \`graph TD;\` or \`<thinking>\`):**
 `;

@@ -105,6 +105,6 @@ done
 
 echo "Markdown generation complete: $OUTPUT_FILE"
 
-tree -a -I 'node_modules|.git|backup_assets|assets' $START_DIR --> o.txt
+# tree -a -I 'node_modules|.git|backup_assets|assets' $START_DIR --> o.txt
 
-exit 0
+# exit 0

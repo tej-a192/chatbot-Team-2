@@ -1,73 +1,133 @@
-import React, { useEffect, useRef, useState } from 'react';
+// frontend/src/components/analysis/MindmapViewer.jsx
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import toast from 'react-hot-toast';
+import { escapeHtml } from '../../utils/helpers.js'; // Import escapeHtml helper
 
-// Ensure Markmap libraries are loaded globally from index.html (d3, markmap-lib, markmap-view, markmap-toolbar)
+const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
+    const svgContainerRef = useRef(null);
+    const [error, setError] = useState(null);
+    const [isMermaidReady, setIsMermaidReady] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [uniqueId] = useState(() => `mermaid-graph-${Math.random().toString(36).substr(2, 9)}`);
 
-function MindmapViewer({ markdownContent }) {
-    const svgRef = useRef(null);
-    const [markmapInstance, setMarkmapInstance] = useState(null);
-    const [toolbarInstance, setToolbarInstance] = useState(null);
-    const { Transformer, Markmap, Toolbar } = window.markmap; // Access global markmap
+    useImperativeHandle(ref, () => ({
+        getSvgElement: () => {
+            return svgContainerRef.current?.querySelector('svg');
+        }
+    }));
 
     useEffect(() => {
-        if (!markdownContent || !svgRef.current || !Transformer || !Markmap || !Toolbar) {
-            if (svgRef.current) svgRef.current.innerHTML = ''; // Clear previous
+        if (typeof window.mermaid !== 'undefined') {
+            setIsMermaidReady(true);
+        } else {
+            const intervalId = setInterval(() => {
+                if (typeof window.mermaid !== 'undefined') {
+                    setIsMermaidReady(true);
+                    clearInterval(intervalId);
+                }
+            }, 100);
+            return () => clearInterval(intervalId);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isMermaidReady || !mermaidCode || !svgContainerRef.current) {
+            if (svgContainerRef.current) svgContainerRef.current.innerHTML = '';
+            setError(null);
+            setIsLoading(false);
             return;
         }
-        
-        let mm, tb;
-        try {
-            // Cleanup previous instances if they exist
-            if (markmapInstance && typeof markmapInstance.destroy === 'function') {
-                markmapInstance.destroy();
-            }
-            if (toolbarInstance && toolbarInstance.el && toolbarInstance.el.parentNode) {
-                toolbarInstance.el.parentNode.removeChild(toolbarInstance.el);
-            }
 
-            const transformer = new Transformer();
-            const { root, features } = transformer.transform(markdownContent);
+        const renderMermaidDiagram = async () => {
+            setIsLoading(true);
+            setError(null);
+            if (!svgContainerRef.current) {
+                setIsLoading(false);
+                return;
+            }
+            svgContainerRef.current.innerHTML = '<div class="flex justify-center items-center h-full w-full text-sm text-text-muted-light dark:text-text-muted-dark"><div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-2"></div>Rendering diagram...</div>';
             
-            svgRef.current.innerHTML = ''; // Clear before re-rendering
-            mm = Markmap.create(svgRef.current, null, root); // Create new Markmap
-            setMarkmapInstance(mm);
-
-            // Create and prepend toolbar
-            tb = Toolbar.create(mm);
-            svgRef.current.parentNode.insertBefore(tb.el, svgRef.current);
-            setToolbarInstance(tb);
-            
-            // Auto-fit after a short delay to ensure rendering is complete
-            setTimeout(() => mm.fit(), 100);
-
-        } catch (e) {
-            console.error("Error rendering Markmap:", e);
-            toast.error("Failed to render mind map. Check console for details.");
-            if (svgRef.current) svgRef.current.innerHTML = '<p class="text-xs text-red-500 p-2">Error rendering mind map. Invalid Markdown for mind map?</p>';
-        }
-        
-        // Cleanup function for when component unmounts or markdownContent changes
-        return () => {
-            if (mm && typeof mm.destroy === 'function') {
-                mm.destroy();
+            let codeToRender = mermaidCode.trim();
+            // Remove Markdown code fences: ```mermaid ... ``` or ``` ... ```
+            // Regex explanation:
+            // ^```         - Matches starting triple backticks
+            // (?:mermaid\b)? - Optionally matches "mermaid" followed by a word boundary (case-insensitive due to i flag)
+            // \s*          - Matches any whitespace (including newlines) after "mermaid" or ```
+            // ([\s\S]*?)  - Captures the actual Mermaid code (non-greedy)
+            // \s*          - Matches any whitespace before closing backticks
+            // ```$         - Matches closing triple backticks at the end of the string
+            // i            - Case-insensitive flag (for "mermaid" keyword)
+            const fenceRegex = /^```(?:mermaid\b)?\s*([\s\S]*?)\s*```$/i;
+            const match = codeToRender.match(fenceRegex);
+            if (match && match[1]) {
+                codeToRender = match[1].trim(); // Use the captured group
             }
-            if (tb && tb.el && tb.el.parentNode) {
-                tb.el.parentNode.removeChild(tb.el);
+            
+            try {
+                if (typeof window.mermaid === 'undefined') {
+                    throw new Error("Mermaid library failed to load or initialize properly.");
+                }
+
+                const { svg, bindFunctions } = await window.mermaid.render(uniqueId, codeToRender);
+                
+                if (svgContainerRef.current) {
+                    svgContainerRef.current.innerHTML = svg;
+                    if (bindFunctions) {
+                        bindFunctions(svgContainerRef.current);
+                    }
+                    const svgElement = svgContainerRef.current.querySelector('svg');
+                    if (svgElement) {
+                        svgElement.style.width = '100%';
+                        svgElement.style.height = 'auto'; 
+                        svgElement.style.maxWidth = '100%'; 
+                        svgElement.style.display = 'block';
+                    }
+                }
+            } catch (e) {
+                console.error("Error rendering Mermaid diagram with input:", codeToRender, e);
+                const errorMsg = e.message || "Failed to render mind map. Invalid Mermaid syntax?";
+                setError(errorMsg);
+                if (svgContainerRef.current) {
+                    const codeSnippet = escapeHtml(codeToRender.substring(0, 200) + (codeToRender.length > 200 ? "..." : ""));
+                    svgContainerRef.current.innerHTML = `<div class="p-4 text-center text-red-500 dark:text-red-400 text-xs break-all"><strong>Error rendering:</strong> ${escapeHtml(errorMsg)}<br><strong class='mt-2 block'>Input Code (first 200 chars):</strong><pre class='text-left text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded mt-1 whitespace-pre-wrap'>${codeSnippet}</pre></div>`;
+                }
+            } finally {
+                setIsLoading(false);
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-    }, [markdownContent]); // Rerun when markdownContent changes
 
-    if (!markdownContent) {
-        return <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2">No mind map data to display.</p>;
+        const timer = setTimeout(renderMermaidDiagram, 100); 
+        return () => clearTimeout(timer);
+        
+    }, [mermaidCode, uniqueId, isMermaidReady]);
+
+    if (!isMermaidReady && !error) {
+      return <div className="p-4 text-center text-text-muted-light dark:text-text-muted-dark text-xs">Waiting for Mermaid.js library...</div>;
+    }
+    if (error && (!isLoading || (svgContainerRef.current && svgContainerRef.current.innerHTML.includes('Error rendering')))) {
+        return <div ref={svgContainerRef} className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md">
+                {/* Error message will be injected by useEffect's catch block */}
+               </div>;
+    }
+    
+    if (isLoading) { 
+         return <div ref={svgContainerRef} className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md">
+            {/* Loading message is set by renderMermaidDiagram's initial innerHTML write */}
+         </div>;
     }
 
+    if (!mermaidCode && !error && isMermaidReady) { 
+        return <p className="text-xs text-center text-text-muted-light dark:text-text-muted-dark p-4">No mind map data to display.</p>;
+    }
+    
     return (
-        <div className="relative w-full h-80 md:h-96 my-2">
-            {/* Toolbar will be prepended here by useEffect */}
-            <svg ref={svgRef} className="w-full h-full border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 shadow-inner"></svg>
+        <div 
+            ref={svgContainerRef} 
+            className="mermaid-diagram-render-area w-full h-full flex justify-center items-center bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md"
+        >
+
         </div>
     );
-}
+});
 
 export default MindmapViewer;

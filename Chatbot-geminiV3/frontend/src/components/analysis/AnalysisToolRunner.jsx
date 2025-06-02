@@ -3,54 +3,38 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Eye, AlertTriangle, Sparkles, HelpCircle as DefaultIcon, Download } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import { marked } from 'marked';
-import MindmapViewer from './MindmapViewer.jsx';
+import MindmapViewer from './MindmapViewer.jsx'; 
 import DOMPurify from 'dompurify';
-import Prism from 'prismjs'; // Ensure Prism is imported or available globally
-import { renderMathInHtml } from '../../utils/markdownUtils'; // Assuming you have this
+import Prism from 'prismjs'; 
+import { renderMathInHtml } from '../../utils/markdownUtils';
+import { useAppState } from '../../contexts/AppStateContext.jsx'; 
 
-// marked options and createMarkup should be defined once.
-// If createMarkup is identical to the one in MessageBubble, consider moving it to markdownUtils.js
 marked.setOptions({
   breaks: true,
   gfm: true,
 });
 
-// This createMarkup function should be robust for Markdown, KaTeX, and then sanitization.
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
-    // console.log("[ATR] createMarkup: Original Markdown:\n", markdownText); // For debugging
-
     let html = marked.parse(markdownText);
-    // console.log("[ATR] createMarkup: HTML after marked.parse():\n", html); // For debugging
-
-    html = renderMathInHtml(html); // Process KaTeX
-    // console.log("[ATR] createMarkup: HTML after renderMathInHtml():\n", html); // For debugging
-
+    html = renderMathInHtml(html); 
     const cleanHtml = DOMPurify.sanitize(html, {
-        USE_PROFILES: { html: true, mathMl: true, svg: true }, // Recommended for KaTeX
-        ADD_TAGS: ['iframe'], // For any other specific tags you need
-        ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'], // For iframes
+        USE_PROFILES: { html: true, mathMl: true, svg: true }, 
+        ADD_TAGS: ['iframe'], 
+        ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'],
     });
-    // console.log("[ATR] createMarkup: HTML after DOMPurify.sanitize():\n", cleanHtml); // For debugging
     return { __html: cleanHtml };
 };
 
-
-// escapeHtml is used if you ever display raw content that shouldn't be interpreted as HTML
 const escapeHtml = (unsafe) => {
     if (typeof unsafe !== 'string') return '';
-    return unsafe
-        .replace(/&/g, "&")
-        .replace(/</g, "<")
-        .replace(/>/g, ">")
-        .replace(/"/g, `"`)
-        .replace(/'/g, "'");
+    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/'/g, "'");
 };
 
 const ENGAGEMENT_TEXTS = {
@@ -60,19 +44,29 @@ const ENGAGEMENT_TEXTS = {
     default: ["Processing...", "Thinking...", "Working on it..."]
 };
 
+// Placeholder messages to check against for AI Reasoning section
+const placeholderReasoningMessages = [
+    "Retrieved stored analysis. No detailed AI reasoning provided.",
+    "AI reasoning not available.",
+    "Mock generation for",
+    "Retrieved stored mindmap data. No specific thinking process recorded in content."
+];
+
 function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilename }) {
     const [isSectionOpen, setIsSectionOpen] = useState(true);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [analysisContent, setAnalysisContent] = useState(null);
-    const [aiReasoning, setAiReasoning] = useState(null); // This will be Markdown
+    const [aiReasoning, setAiReasoning] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentEngagementText, setCurrentEngagementText] = useState('');
 
     const IconComponent = LucideIcons[iconName] || DefaultIcon;
     const modalAnalysisContentRef = useRef(null);
-    const aiReasoningContentRef = useRef(null); // Ref for the AI reasoning content div
+    const aiReasoningContentRef = useRef(null);
+    const mindmapViewerRef = useRef(null); 
+    const { theme: appTheme } = useAppState(); 
 
     useEffect(() => {
         let intervalId;
@@ -92,37 +86,36 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
 
     useEffect(() => {
         if (!selectedDocumentFilename) {
-            // Resetting when no document is selected
             setIsLoading(false);
             setError('');
             setAnalysisContent(null);
             setAiReasoning(null);
             setIsDropdownOpen(false);
+        } else {
+            // When a new document is selected, optionally reset previous results
+            // to avoid showing old data before a new "Run"
+             setAnalysisContent(null);
+             setAiReasoning(null);
+             setIsDropdownOpen(false);
+             setError('');
+             setIsLoading(false); // Ensure loading state is reset
         }
-        // No need to explicitly set isSectionOpen here, it's user-controlled
     }, [selectedDocumentFilename]);
 
-    // useEffect for modal content Prism highlighting
     useEffect(() => {
-        if (isModalOpen && analysisContent && modalAnalysisContentRef.current) {
+        if (isModalOpen && analysisContent && toolType !== 'mindmap' && modalAnalysisContentRef.current) {
             const timer = setTimeout(() => {
-                if (modalAnalysisContentRef.current) {
-                    Prism.highlightAllUnder(modalAnalysisContentRef.current);
-                }
+                if (modalAnalysisContentRef.current) Prism.highlightAllUnder(modalAnalysisContentRef.current);
             }, 50);
             return () => clearTimeout(timer);
         }
-    }, [isModalOpen, analysisContent]);
+    }, [isModalOpen, analysisContent, toolType]);
 
-    // useEffect for AI Reasoning content Prism highlighting
     useEffect(() => {
         if (aiReasoningContentRef.current && aiReasoning && isDropdownOpen) {
-            // aiReasoning is now Markdown, so Prism.highlightAllUnder will scan its rendered HTML
             const timer = setTimeout(() => {
-                if (aiReasoningContentRef.current) {
-                    Prism.highlightAllUnder(aiReasoningContentRef.current);
-                }
-            }, 0); // Can be 0ms, Prism will execute after current JS stack
+                if (aiReasoningContentRef.current) Prism.highlightAllUnder(aiReasoningContentRef.current);
+            }, 0);
             return () => clearTimeout(timer);
         }
     }, [aiReasoning, isDropdownOpen]);
@@ -148,7 +141,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             if (response) {
                 if (response.content && response.content.trim() !== "" && !response.content.startsWith("Error:")) {
                     setAnalysisContent(response.content);
-                    toast.success(`${title} analysis complete!`);
+                    toast.success(`${title} analysis complete! Click 'View Full ${title}' to see details.`);
                 } else if (response.content && response.content.startsWith("Error:")) {
                     setError(response.content);
                     toast.error(`Error in ${title}: ${response.content.substring(0, 100)}...`);
@@ -157,11 +150,10 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                     toast.warn(`No content was generated for ${title}.`);
                 }
 
-                // Assuming response.thinking is now also Markdown
                 if (response.thinking && response.thinking.trim() !== "") {
                     setAiReasoning(response.thinking);
                 } else {
-                    setAiReasoning(response.content ? "*Analysis complete. No detailed reasoning provided by AI.*" : "*AI reasoning not available.*");
+                    setAiReasoning(response.content ? "Retrieved stored analysis. No detailed AI reasoning provided." : "AI reasoning not available.");
                 }
                 setIsDropdownOpen(true);
             } else {
@@ -179,10 +171,82 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
     };
 
+    const handleDownloadMindmap = async (format = 'svg') => {
+        if (mindmapViewerRef.current && mindmapViewerRef.current.getSvgElement) {
+            const svgElement = mindmapViewerRef.current.getSvgElement();
+            if (!svgElement) {
+                toast.error("Mindmap SVG element not found or not rendered yet.");
+                return;
+            }
+
+            const filenameBase = selectedDocumentFilename ? selectedDocumentFilename.split('.')[0] : 'mindmap';
+            const filename = `${filenameBase}_${toolType}.${format}`;
+
+            if (format === 'svg') {
+                const serializer = new XMLSerializer();
+                let svgString = serializer.serializeToString(svgElement);
+                svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+                const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                toast.success("SVG downloaded!");
+            } else if (format === 'png') {
+                const pngToastId = toast.loading("Preparing PNG download...");
+                try {
+                    // Ensure save-svg-as-png is available (e.g., npm install save-svg-as-png)
+                    // If it's not working, common issues include:
+                    // 1. Library not installed/imported correctly.
+                    // 2. Complex SVG features (e.g., foreignObject, certain CSS filters) that the library doesn't support.
+                    // 3. Browser security restrictions if the SVG contains external resources (unlikely for Mermaid).
+                    // 4. Very large SVGs causing memory issues.
+                    const { saveSvgAsPng } = await import('save-svg-as-png');
+                    if (saveSvgAsPng) {
+                        saveSvgAsPng(svgElement, filename, { 
+                            scale: 2, 
+                            backgroundColor: appTheme === 'dark' ? '#1E293B' : '#FFFFFF' 
+                        });
+                        toast.success("PNG download started!", { id: pngToastId });
+                    } else {
+                        throw new Error("saveSvgAsPng function not found after import.");
+                    }
+                } catch (e) {
+                    console.error("Error loading/using save-svg-as-png:", e);
+                    toast.error(`Failed to export PNG: ${e.message}. SVG export is available. Consider checking console for details if library is missing.`, { id: pngToastId });
+                }
+            }
+        } else {
+            toast.error("Mindmap viewer component not ready or SVG not available.");
+        }
+    };
+    
     const renderModalContent = () => {
-        if (!analysisContent) return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
+        if (isLoading && !analysisContent) {
+            return (
+                <div className="flex items-center justify-center h-48">
+                    <Loader2 size={32} className="animate-spin text-primary" />
+                    <p className="ml-2 text-text-muted-light dark:text-text-muted-dark">Loading analysis...</p>
+                </div>
+            );
+        }
+        if (error && !analysisContent) {
+             return <p className="p-4 text-center text-red-500 dark:text-red-400">{error}</p>;
+        }
+        if (!analysisContent) {
+            return <p className="p-4 text-center text-text-muted-light dark:text-text-muted-dark">No analysis content available to display.</p>;
+        }
+
         if (toolType === 'mindmap') {
-            return <MindmapViewer markdownContent={analysisContent} />;
+            return (
+                <div className="mindmap-modal-content-wrapper min-h-[60vh] h-[calc(70vh-80px)] flex justify-center items-center">
+                     <MindmapViewer mermaidCode={analysisContent} ref={mindmapViewerRef} />
+                </div>
+            );
         }
         return (
             <div
@@ -192,6 +256,9 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             />
         );
     };
+
+    // Determine if AI reasoning is substantial or just a placeholder
+    const showReasoning = aiReasoning && !placeholderReasoningMessages.some(msg => aiReasoning.includes(msg));
 
     return (
         <div className="card-base p-3">
@@ -259,7 +326,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 transition={{ duration: 0.2 }}
                                 className="mt-2 space-y-2"
                             >
-                                {aiReasoning && (
+                                {showReasoning && aiReasoning && ( // Conditionally render based on showReasoning
                                     <details className="group text-xs rounded-md border border-border-light dark:border-border-dark bg-surface-light dark:bg-gray-800 shadow-sm">
                                         <summary className="flex items-center justify-between gap-1 p-2 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors rounded-t-md">
                                             <span className="flex items-center gap-1.5 font-medium">
@@ -267,7 +334,6 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                             </span>
                                             <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
                                         </summary>
-                                        {/* MODIFIED AI REASONING RENDERING */}
                                         <div
                                             ref={aiReasoningContentRef}
                                             className="p-2.5 prose prose-xs dark:prose-invert max-w-none text-text-light dark:text-text-dark max-h-60 overflow-y-auto custom-scrollbar text-[0.75rem] leading-relaxed bg-gray-50 dark:bg-gray-900/50 rounded-b-md"
@@ -276,10 +342,10 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                     </details>
                                 )}
 
-                                {analysisContent && toolType !== 'mindmap' && (
+                                {analysisContent && ( 
                                      <Button
                                         onClick={() => setIsModalOpen(true)}
-                                        variant="outline"
+                                        variant="outline" 
                                         size="sm"
                                         fullWidth
                                         leftIcon={<Eye size={14}/>}
@@ -290,7 +356,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
                                 )}
                             </motion.div>
                         )}
-
+                        
                         {!isLoading && !isDropdownOpen && !error && (
                             <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2 text-center">
                                 {selectedDocumentFilename ? `Click "Run" to generate ${title} for "${selectedDocumentFilename}".` : "Select a document to enable analysis."}
@@ -303,10 +369,22 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                title={`Result for ${title} on "${selectedDocumentFilename || 'document'}"`}
-                size="xl"
+                title={`${title} for "${selectedDocumentFilename || 'document'}"`}
+                size={toolType === 'mindmap' ? "3xl" : "xl"}
+                footerContent={
+                    <>
+                        {toolType === 'mindmap' && analysisContent && (
+                            <>
+                                <Button onClick={() => handleDownloadMindmap('svg')} variant="outline" size="sm" className="text-xs" leftIcon={<Download size={14}/>}>SVG</Button>
+                                {/* <Button onClick={() => handleDownloadMindmap('png')} variant="outline" size="sm" className="text-xs" leftIcon={<Download size={14}/>}>PNG</Button> */}
+                                <div className="flex-grow"></div> {/* Spacer */}
+                            </>
+                        )}
+                        <Button onClick={() => setIsModalOpen(false)} variant="secondary" size="sm" className="text-xs">Close</Button>
+                    </>
+                }
             >
-                <div className="max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 bg-gray-50 dark:bg-gray-800 rounded-md shadow-inner">
+                <div className={`max-h-[70vh] overflow-y-auto custom-scrollbar p-1 pr-2 rounded-md shadow-inner ${toolType === 'mindmap' ? 'bg-transparent dark:bg-transparent' : 'bg-gray-50 dark:bg-gray-800'}`}>
                     {selectedDocumentFilename && (
                         <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-2 border-b border-border-light dark:border-border-dark pb-1.5">
                             Source Document: <strong>{selectedDocumentFilename}</strong>
