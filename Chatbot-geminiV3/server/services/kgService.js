@@ -213,7 +213,7 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
     console.log(`${logPrefix} Merged KG successfully. Nodes: ${finalKg.nodes.length}, Edges: ${finalKg.edges.length}.`);
 
     // --- Storing the KG (your existing logic) ---
-    const baseRagUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002';
+    const baseRagUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000';
     const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`;
 
     if (!kgIngestionApiUrl.startsWith('http')) {
