@@ -12,9 +12,10 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis } = useAppState(); 
     const [useRag, setUseRag] = useState(false); 
     const [isSending, setIsSending] = useState(false);
-    const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false); // New state for CT
+    const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false); // State for CT
 
-    const handleSendMessage = async (inputText) => {
+    // MODIFIED: Accept isCtEnabledFromInput as the second argument
+    const handleSendMessage = async (inputText, isCtEnabledFromInput) => { 
         if (!inputText.trim() || !token || !currentSessionId || isSending) {
             if (!currentSessionId) toast.error("No active session. Try 'New Chat'.");
             return;
@@ -34,11 +35,12 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
         
         setIsSending(true);
         let currentThinkingStatus = "Connecting to AI...";
-        if (useRag && criticalThinkingEnabled) {
+        // MODIFIED: Use isCtEnabledFromInput for status message
+        if (useRag && isCtEnabledFromInput) {
             currentThinkingStatus = `Searching docs, retrieving KG & Contacting ${selectedLLM.toUpperCase()} (RAG + CT)...`;
         } else if (useRag) {
             currentThinkingStatus = `Searching documents & Contacting ${selectedLLM.toUpperCase()} (RAG)...`;
-        } else if (criticalThinkingEnabled) {
+        } else if (isCtEnabledFromInput) {
             currentThinkingStatus = `Retrieving KG & Contacting ${selectedLLM.toUpperCase()} (CT)...`;
         } else {
             currentThinkingStatus = `Contacting ${selectedLLM.toUpperCase()}...`;
@@ -63,8 +65,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
             useRag: useRag,
             llmProvider: selectedLLM, 
             systemPrompt: systemPrompt,
-            useCriticalThinking: criticalThinkingEnabled, // Pass CT state
-            documentContextName: selectedDocumentForAnalysis || null, // Pass selected doc for KG or RAG filter
+            // MODIFIED: Use the parameter and match backend key
+            criticalThinkingEnabled: isCtEnabledFromInput, 
+            documentContextName: selectedDocumentForAnalysis || null, 
         };
             
         try {
@@ -117,7 +120,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
         } else if (messages.length === 0 && !isSending) {
             setChatStatus("Ready. Send a message to start!");
         }
-    }, [currentSessionId, messages, isSending]);
+    }, [currentSessionId, messages, isSending, setChatStatus]); // Added setChatStatus to dependency array
 
 
     return (
@@ -142,7 +145,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
                             {useRag ? <span>RAG is <span className="text-green-500 font-semibold">ON</span>. Using document context.</span> 
                                   : <span>RAG is <span className="text-red-500 font-semibold">OFF</span>. Chatting directly.</span>}
                         </p>
-                        <p> {/* New status for Critical Thinking */}
+                        <p> {/* New status for Critical Thinking (uses the component's state for display) */}
                             {criticalThinkingEnabled ? <span>Critical Thinking (KG) is <span className="text-purple-500 font-semibold">ON</span>.</span> 
                                   : <span>Critical Thinking (KG) is <span className="text-gray-500 font-semibold">OFF</span>.</span>}
                         </p>

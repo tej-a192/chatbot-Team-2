@@ -197,39 +197,48 @@ def add_document_qdrant():
         current_app.logger.error(f"Add Document (Qdrant) Error for '{original_name}' - Unexpected Exception: {e}\n{traceback.format_exc()}", exc_info=True)
         return create_error_response(f"Failed to process document '{original_name}' for Qdrant due to an internal error.", 500)
 
+
+
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents_and_get_kg(): # Renamed for clarity
-    current_app.logger.info("--- /query Request (Qdrant Search + KG Retrieval) ---")
+    current_app.logger.info("--- /query Request (Qdrant Search + Optional KG Retrieval) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
     if not vector_service:
         return create_error_response("VectorDBService (Qdrant) is not available.", 503)
     
-    # Also check Neo4j driver availability for KG retrieval
-    try:
-        neo4j_handler.get_driver_instance() # Will raise ConnectionError if not available
-    except ConnectionError:
-        return create_error_response("Knowledge Graph service (Neo4j) is not available.", 503)
-
-
     data = request.get_json()
     query_text = data.get('query')
-    user_id_from_request = data.get('user_id') # <<< NEW: Expect user_id
+    user_id_from_request = data.get('user_id')
     k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K)
     filter_payload_from_request = data.get('filter') # This is the Qdrant filter
     
+    # <<< NEW: Get the critical thinking flag from the request, default to False
+    use_kg_for_critical_thinking = data.get('use_kg_critical_thinking', False) 
+    current_app.logger.info(f"KG Critical Thinking Requested: {use_kg_for_critical_thinking}")
+
+
+    # Check Neo4j driver availability ONLY if KG is requested
+    if use_kg_for_critical_thinking:
+        try:
+            neo4j_handler.get_driver_instance() # Will raise ConnectionError if not available
+        except ConnectionError: # Catch the specific ConnectionError from your handler
+            current_app.logger.error("Neo4j driver unavailable but KG was requested.")
+            return create_error_response("Knowledge Graph service (Neo4j) is not available, but KG retrieval was requested.", 503)
+        except Exception as e: # Catch other potential errors from get_driver_instance
+            current_app.logger.error(f"Error checking Neo4j driver availability: {e}")
+            return create_error_response(f"Error initializing Knowledge Graph service: {str(e)}", 503)
+
+
     qdrant_filters = None
 
     if not query_text:
         return create_error_response("Missing 'query' field in request body", 400)
-    if not user_id_from_request: # <<< NEW: Validate user_id
+    if not user_id_from_request:
         return create_error_response("Missing 'user_id' field in request body", 400)
 
     # --- Qdrant Filter Setup ---
-    # The filter_payload_from_request is for Qdrant. It might contain user_id and original_name.
-    # It's important that if a filter is used for Qdrant, it's consistent with the user_id
-    # we'll use for KG retrieval. The client (Node.js) should ensure this consistency.
     if filter_payload_from_request and isinstance(filter_payload_from_request, dict):
         from qdrant_client import models as qdrant_models # Import here for safety
         conditions = []
@@ -251,71 +260,83 @@ def search_qdrant_documents_and_get_kg(): # Renamed for clarity
 
     try:
         # 1. Perform Qdrant Search
-        # `docs` is List[Document], `formatted_context` is str, `docs_map` is Dict
         qdrant_retrieved_docs, formatted_context_snippet, qdrant_docs_map = vector_service.search_documents(
             query=query_text,
             k=k,
-            filter_conditions=qdrant_filters # Use the filter passed from client
+            filter_conditions=qdrant_filters
         )
 
-        # 2. Prepare KG Retrieval based on Qdrant results
-        knowledge_graphs_data = {} # To store KGs, mapping documentName to KG object
+        # 2. Conditionally Prepare KG Retrieval based on Qdrant results
+        knowledge_graphs_data = {} # Initialize
         
-        if qdrant_retrieved_docs:
+        # <<< MODIFIED: Only retrieve KG if use_kg_for_critical_thinking is True
+        if use_kg_for_critical_thinking and qdrant_retrieved_docs:
+            current_app.logger.info("KG retrieval is ENABLED and Qdrant returned documents.")
             unique_doc_names_for_kg = set()
             for doc_obj in qdrant_retrieved_docs:
-                # We need 'documentName' or 'original_name' from the Qdrant doc metadata
-                # to identify which KG to fetch.
                 doc_meta = doc_obj.metadata
                 doc_name_for_kg = doc_meta.get('documentName', doc_meta.get('original_name', doc_meta.get('file_name')))
                 
                 if doc_name_for_kg:
                     unique_doc_names_for_kg.add(doc_name_for_kg)
                 else:
-                    current_app.logger.warning(f"Qdrant doc metadata missing document identifier (documentName/original_name/file_name) for chunk ID {doc_meta.get('qdrant_id', 'N/A')}. Cannot fetch KG for this chunk's document.")
+                    current_app.logger.warning(f"Qdrant doc metadata missing document identifier for chunk ID {doc_meta.get('qdrant_id', 'N/A')}. Cannot fetch KG.")
             
             current_app.logger.info(f"Found {len(unique_doc_names_for_kg)} unique document(s) in Qdrant results to fetch KGs for: {list(unique_doc_names_for_kg)}")
 
             for doc_name in unique_doc_names_for_kg:
                 try:
                     current_app.logger.info(f"Fetching KG for document '{doc_name}' (User: {user_id_from_request})")
+                    # Assuming neo4j_handler.get_knowledge_graph is defined elsewhere
                     kg_content = neo4j_handler.get_knowledge_graph(user_id_from_request, doc_name)
-                    if kg_content: # get_knowledge_graph returns None if not found
+                    if kg_content:
                         knowledge_graphs_data[doc_name] = kg_content
                         current_app.logger.info(f"Successfully retrieved KG for '{doc_name}'. Nodes: {len(kg_content.get('nodes',[]))}, Edges: {len(kg_content.get('edges',[]))}")
                     else:
                         current_app.logger.info(f"No KG found in Neo4j for document '{doc_name}' (User: {user_id_from_request}).")
-                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found"} # Indicate not found
-                except Exception as kg_err:
+                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found or not applicable"}
+                except Exception as kg_err: # Catch specific Neo4j errors if possible, e.g., neo4j.exceptions.Neo4jError
                     current_app.logger.error(f"Error retrieving KG for document '{doc_name}': {kg_err}", exc_info=True)
                     knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "error": f"Failed to retrieve KG: {str(kg_err)}"}
+        elif not use_kg_for_critical_thinking:
+            current_app.logger.info("KG retrieval is DISABLED by request.")
+            # Optionally, you can set a specific message in knowledge_graphs_data
+            # knowledge_graphs_data = {"status": "KG retrieval not requested"}
+        elif not qdrant_retrieved_docs:
+            current_app.logger.info("KG retrieval was requested, but no documents were found by Qdrant. Skipping KG fetch.")
 
 
         # 3. Construct Final Response Payload
         response_payload = {
             "query": query_text,
             "k_requested": k,
-            "user_id_processed": user_id_from_request, # Echo back user_id
-            "qdrant_filter_applied": filter_payload_from_request, # Show Qdrant filter used
+            "user_id_processed": user_id_from_request,
+            "qdrant_filter_applied": filter_payload_from_request,
             "qdrant_results_count": len(qdrant_retrieved_docs),
             "formatted_context_snippet": formatted_context_snippet,
-            "retrieved_documents_map": qdrant_docs_map, # From Qdrant vector_service
-            "retrieved_documents_list": [doc.to_dict() for doc in qdrant_retrieved_docs], # From Qdrant vector_service
-            "knowledge_graphs": knowledge_graphs_data # <<< NEW: KG data
+            "retrieved_documents_map": qdrant_docs_map,
+            "retrieved_documents_list": [doc.to_dict() for doc in qdrant_retrieved_docs],
+            "knowledge_graphs": knowledge_graphs_data, # Will be populated or empty based on the flag
+            "kg_retrieval_attempted": use_kg_for_critical_thinking and bool(qdrant_retrieved_docs) # Indicate if KG retrieval was part of the logic
         }
         
-        current_app.logger.info(f"Qdrant search and KG retrieval successful. Returning {len(qdrant_retrieved_docs)} Qdrant docs and KGs for {len(knowledge_graphs_data)} documents.")
+        log_message_kg_part = "and KGs" if use_kg_for_critical_thinking and knowledge_graphs_data else ("and KG retrieval was SKIPPED" if not use_kg_for_critical_thinking else "and no KGs found/retrieved")
+        current_app.logger.info(f"Qdrant search {log_message_kg_part} successful. Returning {len(qdrant_retrieved_docs)} Qdrant docs.")
         return jsonify(response_payload), 200
 
-    except ConnectionError as ce: # Catch Neo4j or Qdrant connection errors
+    except ConnectionError as ce:
         current_app.logger.error(f"Service connection error during /query processing: {ce}", exc_info=True)
         return create_error_response(f"A dependent service is unavailable: {str(ce)}", 503)
-    except neo4j_exceptions.Neo4jError as ne: # Catch specific Neo4j errors
-        current_app.logger.error(f"Neo4j database error during /query processing: {ne}", exc_info=True)
-        return create_error_response(f"Neo4j database operation failed: {ne.message}", 500)
+    # except neo4j_exceptions.Neo4jError as ne: # Make sure neo4j_exceptions is imported
+    #     current_app.logger.error(f"Neo4j database error during /query processing: {ne}", exc_info=True)
+    #     return create_error_response(f"Neo4j database operation failed: {ne.message}", 500)
     except Exception as e:
+        # import traceback # Ensure traceback is imported
         current_app.logger.error(f"/query processing failed: {e}\n{traceback.format_exc()}", exc_info=True)
         return create_error_response(f"Error during query processing: {str(e)}", 500)
+
+
+
 
 @app.route('/delete_qdrant_document_data', methods=['DELETE']) # Ensure this route is defined
 def delete_qdrant_data_route():

@@ -1,10 +1,11 @@
 // src/components/chat/ChatInput.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, PlusCircle, Loader2, SearchCheck, SearchSlash, Brain } from 'lucide-react'; // Added Brain
+import { Send, Mic, PlusCircle, Loader2, SearchCheck, SearchSlash, Brain } from 'lucide-react'; // Added Brain  
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
 import toast from 'react-hot-toast'; // Added toast import
+import blueBrain from "./../../assets/blueBrain.svg"
 
 function ChatInput({ 
     onSendMessage, 
@@ -36,7 +37,9 @@ function ChatInput({
     const handleSubmit = (e) => {
         e.preventDefault();
         if (inputValue.trim() && !isLoading) {
-            onSendMessage(inputValue.trim()); // Pass criticalThinkingEnabled implicitly from CenterPanel's state
+            // MODIFIED: Explicitly pass criticalThinkingEnabled
+            // The onSendMessage function (defined in parent) will need to handle this additional argument.
+            onSendMessage(inputValue.trim(), criticalThinkingEnabled); 
             setInputValue('');
         }
     };
@@ -47,6 +50,11 @@ function ChatInput({
             handleSubmit(e);
         }
     };
+
+    const icon = criticalThinkingEnabled
+    ? () => <img src={blueBrain} alt="Blue Brain" className="w-5 h-5" />
+    : Brain;
+
 
     return (
         <div className="p-2 sm:p-3 border-t border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark">
@@ -105,8 +113,8 @@ function ChatInput({
                 />
 
                 {/* New Critical Thinking Toggle */}
-                <IconButton
-                    icon={Brain}
+               <IconButton
+                    icon={icon}
                     onClick={() => setCriticalThinkingEnabled(!criticalThinkingEnabled)}
                     title={criticalThinkingEnabled ? "Disable Critical Thinking (KG)" : "Enable Critical Thinking (KG)"}
                     variant="ghost"
@@ -114,6 +122,7 @@ function ChatInput({
                     className={`p-2 ${criticalThinkingEnabled ? 'text-purple-500 dark:text-purple-400' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
                     disabled={isLoading}
                 />
+
 
                 <Button 
                     type="submit"

@@ -171,6 +171,13 @@ except ImportError:
     PyPDF2                = None
 
 # ─── Optional: Preload SpaCy & Embedding Model ───────
+
+TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+
+if PYTESSERACT_AVAILABLE and pytesseract:
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+    logger.info(f"[Config] Tesseract Path set to: {TESSERACT_CMD}")
+
 try:
     import spacy
     SPACY_LIB_AVAILABLE = True
