@@ -198,64 +198,98 @@ def add_document_qdrant():
         return create_error_response(f"Failed to process document '{original_name}' for Qdrant due to an internal error.", 500)
 
 
-
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents_and_get_kg(): # Renamed for clarity
     current_app.logger.info("--- /query Request (Qdrant Search + Optional KG Retrieval) ---")
     if not request.is_json:
         return create_error_response("Request must be JSON", 400)
 
-    if not vector_service:
+    if not vector_service: # Assuming vector_service is your initialized VectorDBService instance
         return create_error_response("VectorDBService (Qdrant) is not available.", 503)
     
     data = request.get_json()
+    current_app.logger.info(f"--- /query RAW REQUEST DATA: {data} ---") # Log raw request
+    
     query_text = data.get('query')
     user_id_from_request = data.get('user_id')
     k = data.get('k', config.QDRANT_DEFAULT_SEARCH_K)
-    filter_payload_from_request = data.get('filter') # This is the Qdrant filter
-    
-    # <<< NEW: Get the critical thinking flag from the request, default to False
+    filter_payload_from_request = data.get('filter') # This is the Qdrant filter from client
+    documentContextName = data.get('documentContextName') # For specific document filtering
     use_kg_for_critical_thinking = data.get('use_kg_critical_thinking', False) 
+    
     current_app.logger.info(f"KG Critical Thinking Requested: {use_kg_for_critical_thinking}")
+    if documentContextName:
+        current_app.logger.info(f"Document Context Name for filtering: '{documentContextName}'")
+    if filter_payload_from_request:
+        current_app.logger.info(f"Client-provided filter payload: {filter_payload_from_request}")
 
 
     # Check Neo4j driver availability ONLY if KG is requested
     if use_kg_for_critical_thinking:
         try:
-            neo4j_handler.get_driver_instance() # Will raise ConnectionError if not available
-        except ConnectionError: # Catch the specific ConnectionError from your handler
+            neo4j_handler.get_driver_instance() 
+        except ConnectionError: 
             current_app.logger.error("Neo4j driver unavailable but KG was requested.")
             return create_error_response("Knowledge Graph service (Neo4j) is not available, but KG retrieval was requested.", 503)
-        except Exception as e: # Catch other potential errors from get_driver_instance
+        except Exception as e: 
             current_app.logger.error(f"Error checking Neo4j driver availability: {e}")
             return create_error_response(f"Error initializing Knowledge Graph service: {str(e)}", 503)
 
-
-    qdrant_filters = None
 
     if not query_text:
         return create_error_response("Missing 'query' field in request body", 400)
     if not user_id_from_request:
         return create_error_response("Missing 'user_id' field in request body", 400)
 
-    # --- Qdrant Filter Setup ---
-    if filter_payload_from_request and isinstance(filter_payload_from_request, dict):
-        from qdrant_client import models as qdrant_models # Import here for safety
-        conditions = []
-        for key, value in filter_payload_from_request.items():
-            conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
-        if conditions:
-            qdrant_filters = qdrant_models.Filter(must=conditions)
-            current_app.logger.info(f"Applying Qdrant filter: {filter_payload_from_request}")
-    else:
-        current_app.logger.info("No Qdrant filter explicitly provided by client in this query.")
-
-
     try:
         k = int(k)
     except ValueError:
         return create_error_response("'k' must be an integer", 400)
 
+    # --- Qdrant Filter Setup (Revised Logic) ---
+    qdrant_filters = None 
+
+    try:
+        from qdrant_client import models as qdrant_models
+    except ImportError:
+        current_app.logger.error("qdrant_client library is not installed. Cannot build filters.")
+        return create_error_response("Internal server error: Qdrant client library missing.", 500)
+
+    must_conditions = [] # List to hold all conditions to be ANDed
+
+    # 1. Add filter from `documentContextName` if provided
+    if documentContextName:
+        current_app.logger.info(f"Condition for documentContextName: '{documentContextName}' on field 'file_name' will be added to 'must' conditions.")
+        must_conditions.append(qdrant_models.FieldCondition(
+            key="file_name",  # IMPORTANT: This key MUST match the field name in your Qdrant payload
+            match=qdrant_models.MatchValue(value=documentContextName)
+        ))
+
+    # 2. Add filters from `filter_payload_from_request` if provided
+    #    (assuming it's a simple key-value dict for FieldConditions)
+    if filter_payload_from_request and isinstance(filter_payload_from_request, dict):
+        current_app.logger.info(f"Processing Qdrant filters from client payload (simple key-value): {filter_payload_from_request}")
+        for key, value in filter_payload_from_request.items():
+            if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
+                 current_app.logger.info(f"Condition for client filter: key='{key}', value='{value}' will be added to 'must' conditions.")
+                 must_conditions.append(qdrant_models.FieldCondition(key=key, match=qdrant_models.MatchValue(value=value)))
+            else:
+                current_app.logger.warning(f"Skipping invalid client filter condition: key='{key}', value='{value}'. Key must be string, value must be primitive.")
+
+    # 3. Construct the final qdrant_filters object if any conditions were added
+    if must_conditions:
+        qdrant_filters = qdrant_models.Filter(must=must_conditions)
+        try:
+            filter_dict_for_log = qdrant_filters.model_dump() # Try Pydantic V2 method
+        except AttributeError:
+            try:
+                filter_dict_for_log = qdrant_filters.dict() # Try Pydantic V1 method
+            except AttributeError:
+                filter_dict_for_log = str(qdrant_filters) # Fallback
+        current_app.logger.info(f"Final Qdrant filter to be applied: {filter_dict_for_log}")
+    else:
+        current_app.logger.info("No Qdrant filter explicitly provided or derived for this query.")
+    
     current_app.logger.info(f"Performing Qdrant search for user '{user_id_from_request}', query (first 50): '{query_text[:50]}...' with k={k}")
 
     try:
@@ -263,45 +297,47 @@ def search_qdrant_documents_and_get_kg(): # Renamed for clarity
         qdrant_retrieved_docs, formatted_context_snippet, qdrant_docs_map = vector_service.search_documents(
             query=query_text,
             k=k,
-            filter_conditions=qdrant_filters
+            filter_conditions=qdrant_filters # Pass the combined filters
         )
 
         # 2. Conditionally Prepare KG Retrieval based on Qdrant results
-        knowledge_graphs_data = {} # Initialize
+        knowledge_graphs_data = {} 
         
-        # <<< MODIFIED: Only retrieve KG if use_kg_for_critical_thinking is True
         if use_kg_for_critical_thinking and qdrant_retrieved_docs:
             current_app.logger.info("KG retrieval is ENABLED and Qdrant returned documents.")
             unique_doc_names_for_kg = set()
             for doc_obj in qdrant_retrieved_docs:
-                doc_meta = doc_obj.metadata
-                doc_name_for_kg = doc_meta.get('documentName', doc_meta.get('original_name', doc_meta.get('file_name')))
+                doc_payload = doc_obj.payload if hasattr(doc_obj, 'payload') else doc_obj.metadata
+                
+                doc_name_for_kg = None
+                if documentContextName: 
+                    doc_name_for_kg = documentContextName
+                else: 
+                    doc_name_for_kg = doc_payload.get('documentName', doc_payload.get('original_name', doc_payload.get('file_name')))
                 
                 if doc_name_for_kg:
                     unique_doc_names_for_kg.add(doc_name_for_kg)
                 else:
-                    current_app.logger.warning(f"Qdrant doc metadata missing document identifier for chunk ID {doc_meta.get('qdrant_id', 'N/A')}. Cannot fetch KG.")
+                    qdrant_doc_id = doc_obj.id if hasattr(doc_obj, 'id') else doc_payload.get('qdrant_id', 'N/A')
+                    current_app.logger.warning(f"Qdrant doc payload missing document identifier for chunk ID {qdrant_doc_id}. Cannot fetch KG.")
             
             current_app.logger.info(f"Found {len(unique_doc_names_for_kg)} unique document(s) in Qdrant results to fetch KGs for: {list(unique_doc_names_for_kg)}")
 
             for doc_name in unique_doc_names_for_kg:
                 try:
                     current_app.logger.info(f"Fetching KG for document '{doc_name}' (User: {user_id_from_request})")
-                    # Assuming neo4j_handler.get_knowledge_graph is defined elsewhere
                     kg_content = neo4j_handler.get_knowledge_graph(user_id_from_request, doc_name)
-                    if kg_content:
+                    if kg_content and (kg_content.get("nodes") or kg_content.get("edges")): 
                         knowledge_graphs_data[doc_name] = kg_content
                         current_app.logger.info(f"Successfully retrieved KG for '{doc_name}'. Nodes: {len(kg_content.get('nodes',[]))}, Edges: {len(kg_content.get('edges',[]))}")
                     else:
-                        current_app.logger.info(f"No KG found in Neo4j for document '{doc_name}' (User: {user_id_from_request}).")
-                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found or not applicable"}
-                except Exception as kg_err: # Catch specific Neo4j errors if possible, e.g., neo4j.exceptions.Neo4jError
+                        current_app.logger.info(f"No KG data found in Neo4j for document '{doc_name}' (User: {user_id_from_request}).")
+                        knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "message": "KG not found or contains no data"}
+                except Exception as kg_err: 
                     current_app.logger.error(f"Error retrieving KG for document '{doc_name}': {kg_err}", exc_info=True)
                     knowledge_graphs_data[doc_name] = {"nodes": [], "edges": [], "error": f"Failed to retrieve KG: {str(kg_err)}"}
         elif not use_kg_for_critical_thinking:
             current_app.logger.info("KG retrieval is DISABLED by request.")
-            # Optionally, you can set a specific message in knowledge_graphs_data
-            # knowledge_graphs_data = {"status": "KG retrieval not requested"}
         elif not qdrant_retrieved_docs:
             current_app.logger.info("KG retrieval was requested, but no documents were found by Qdrant. Skipping KG fetch.")
 
@@ -311,30 +347,29 @@ def search_qdrant_documents_and_get_kg(): # Renamed for clarity
             "query": query_text,
             "k_requested": k,
             "user_id_processed": user_id_from_request,
-            "qdrant_filter_applied": filter_payload_from_request,
+            "qdrant_filter_applied": { 
+                "client_filter": filter_payload_from_request, # What was received
+                "document_context_filter": documentContextName # What was received
+            },
             "qdrant_results_count": len(qdrant_retrieved_docs),
             "formatted_context_snippet": formatted_context_snippet,
             "retrieved_documents_map": qdrant_docs_map,
             "retrieved_documents_list": [doc.to_dict() for doc in qdrant_retrieved_docs],
-            "knowledge_graphs": knowledge_graphs_data, # Will be populated or empty based on the flag
-            "kg_retrieval_attempted": use_kg_for_critical_thinking and bool(qdrant_retrieved_docs) # Indicate if KG retrieval was part of the logic
+            "knowledge_graphs": knowledge_graphs_data, 
+            "kg_retrieval_attempted": use_kg_for_critical_thinking and bool(qdrant_retrieved_docs)
         }
         
-        log_message_kg_part = "and KGs" if use_kg_for_critical_thinking and knowledge_graphs_data else ("and KG retrieval was SKIPPED" if not use_kg_for_critical_thinking else "and no KGs found/retrieved")
+        log_message_kg_part = "and KGs" if use_kg_for_critical_thinking and any(v.get("nodes") or v.get("edges") for v in knowledge_graphs_data.values() if isinstance(v,dict)) else ("and KG retrieval was SKIPPED" if not use_kg_for_critical_thinking else "and no KGs found/retrieved")
         current_app.logger.info(f"Qdrant search {log_message_kg_part} successful. Returning {len(qdrant_retrieved_docs)} Qdrant docs.")
         return jsonify(response_payload), 200
 
     except ConnectionError as ce:
         current_app.logger.error(f"Service connection error during /query processing: {ce}", exc_info=True)
         return create_error_response(f"A dependent service is unavailable: {str(ce)}", 503)
-    # except neo4j_exceptions.Neo4jError as ne: # Make sure neo4j_exceptions is imported
-    #     current_app.logger.error(f"Neo4j database error during /query processing: {ne}", exc_info=True)
-    #     return create_error_response(f"Neo4j database operation failed: {ne.message}", 500)
     except Exception as e:
-        # import traceback # Ensure traceback is imported
+        # import traceback # Ensure traceback is imported if you use .format_exc()
         current_app.logger.error(f"/query processing failed: {e}\n{traceback.format_exc()}", exc_info=True)
         return create_error_response(f"Error during query processing: {str(e)}", 500)
-
 
 
 
