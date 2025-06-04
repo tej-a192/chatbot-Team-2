@@ -328,6 +328,11 @@ router.post('/', authMiddleware, (req, res) => {
         serverFilename = req.file.filename;
         console.log(`Upload Route: File received for user '${username}'. Server Filename: ${serverFilename}, Original: ${originalName}`);
 
+        // Fetch user's LLM preferences for workers
+        const userLlmPrefs = await User.findById(userId).select('preferredLlmProvider ollamaModel').lean();
+        const llmProviderForWorkers = userLlmPrefs?.preferredLlmProvider || 'gemini'; // Default to gemini if not set
+        const ollamaModelForWorkers = userLlmPrefs?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+
         try {
             // ----- STAGE 1: MongoDB Pre-check for existing originalName -----
             const userForPreCheck = await User.findById(userId).select('uploadedDocuments.filename'); // Only need filename
@@ -420,7 +425,9 @@ router.post('/', authMiddleware, (req, res) => {
                         workerData: {
                             userId: userId,
                             originalName: originalName,
-                            textForAnalysis: ragResult.text // Pass the full text
+                            textForAnalysis: ragResult.text, // Pass the full text
+                            llmProvider: llmProviderForWorkers,
+                            ollamaModel: ollamaModelForWorkers
                         }
                     });
                     analysisWorker.on('message', (msg) => console.log(`[Upload Route BG] Analysis Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
@@ -453,6 +460,8 @@ router.post('/', authMiddleware, (req, res) => {
                             chunksForKg: ragResult.chunksForKg, // This comes from Python
                             userId: userId,
                             originalName: originalName,
+                            llmProvider: llmProviderForWorkers,
+                            ollamaModel: ollamaModelForWorkers
                         }
                     });
                     kgWorker.on('message', (msg) => console.log(`[Upload Route BG] KG Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));

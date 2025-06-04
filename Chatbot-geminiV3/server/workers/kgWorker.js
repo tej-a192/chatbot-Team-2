@@ -7,7 +7,7 @@ const connectDB = require('../config/db');
 const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    const { chunksForKg: allInitialChunks, userId, originalName } = workerData;
+    const { chunksForKg: allInitialChunks, userId, originalName, llmProvider, ollamaModel } = workerData;
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";
@@ -37,7 +37,7 @@ async function runKgGeneration() {
             finalMessage = "No chunks provided for KG generation.";
             overallSuccess = true; // Not a failure of this worker's process
         } else {
-            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName);
+            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName, llmProvider, ollamaModel);
 
             if (kgExtractionResult && kgExtractionResult.success) {
                 await User.updateOne(

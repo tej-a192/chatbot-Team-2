@@ -7,10 +7,11 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService'); // For actual LLM calls
+const ollamaService = require('../services/ollamaService'); // Import Ollama service
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); // For prompts
 
 // This function will now contain the actual analysis generation logic
-async function performFullAnalysis(userId, originalName, textForAnalysis) {
+async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel) {
     console.log(`[Analysis Worker ${process.pid}] Starting actual analysis generation for '${originalName}'. Text length: ${textForAnalysis.length}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
@@ -22,10 +23,19 @@ async function performFullAnalysis(userId, originalName, textForAnalysis) {
             console.log(`[Analysis Worker] Generating ${type} for '${context.originalName}' (User: ${context.userId}).`);
             const historyForGemini = [{ role: 'user', parts: [{ text: "Please perform the requested analysis based on the system instruction provided." }] }];
             
-            const generatedText = await geminiService.generateContentWithHistory(
-                historyForGemini,
-                promptContentForLLM // This is the full prompt including the document text
-            );
+            let generatedText;
+            if (llmProvider === 'ollama') {
+                generatedText = await ollamaService.generateContentWithHistory(
+                    historyForGemini, // This structure might need adjustment for ollamaService's prompt formatter
+                    promptContentForLLM, // This is the system prompt + document text
+                    { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT } // Pass model and token options
+                );
+            } else { // Default to Gemini
+                generatedText = await geminiService.generateContentWithHistory(
+                    historyForGemini,
+                    promptContentForLLM // This is the full prompt including the document text
+                );
+            }
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
                 console.warn(`[Analysis Worker] Gemini returned empty content for ${type} for '${context.originalName}'.`);
@@ -106,7 +116,7 @@ async function performFullAnalysis(userId, originalName, textForAnalysis) {
 }
 
 async function run() {
-    const { userId, originalName, textForAnalysis } = workerData;
+    const { userId, originalName, textForAnalysis, llmProvider, ollamaModel } = workerData;
     let dbConnected = false;
     let overallTaskSuccess = false; // Renamed for clarity for the worker's overall task
     let finalMessageToParent = "Analysis worker encountered an issue.";
@@ -142,7 +152,7 @@ async function run() {
             finalMessageToParent = "Analysis skipped: No text provided.";
             // Fall through to postMessage and finally block.
         } else {
-            const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis);
+            const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel);
             overallTaskSuccess = analysisServiceResult.success;
             finalMessageToParent = analysisServiceResult.message;
         }

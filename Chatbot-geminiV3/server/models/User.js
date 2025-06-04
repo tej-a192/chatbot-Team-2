@@ -39,6 +39,18 @@ const UserSchema = new mongoose.Schema({
       },
     },
   ],
+
+  // LLM Preferences
+  preferredLlmProvider: {
+    type: String,
+    enum: ['gemini', 'ollama'],
+    default: 'gemini', // Default to Gemini
+  },
+  ollamaModel: { // User's preferred Ollama model if provider is ollama
+    type: String,
+    default: process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5:14b-instruct', // Default from .env
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,

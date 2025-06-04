@@ -21,6 +21,7 @@ import IconButton from '../core/IconButton.jsx';
 marked.setOptions({
   breaks: true,
   gfm: true,
+  // sanitize: false, // Consider DOMPurify for production
 });
 
 const createMarkup = (markdownText) => {
