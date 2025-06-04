@@ -5,8 +5,6 @@ import { AuthProvider } from './contexts/AuthContext.jsx';
 import { AppStateProvider } from './contexts/AppStateContext.jsx';
 import { Toaster } from 'react-hot-toast';
 import './index.css'; 
-
-
 import 'prismjs/themes/prism-okaidia.css'; 
 import 'katex/dist/katex.min.css';
 import Prism from 'prismjs'; 

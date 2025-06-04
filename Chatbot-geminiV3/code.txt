@@ -1946,11 +1946,25 @@ export default ChatInput;
 
 ```javascript
 // src/components/chat/MessageBubble.jsx
-import React from 'react';
+
+import React, { useEffect, useRef } from 'react';
 import { marked } from 'marked';
-import { ChevronDown, Brain, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash } from 'lucide-react'; // Added Volume2, StopCircle, ServerCrash
-import { useTextToSpeech } from '../../hooks/useTextToSpeech.js'; // Correct path
-import IconButton from '../core/IconButton.jsx'; // Assuming IconButton is here
+import DOMPurify from 'dompurify';
+import Prism from 'prismjs';
+import 'prismjs/themes/prism-okaidia.css';
+import { renderMathInHtml } from '../../utils/markdownUtils';
+import {
+  ChevronDown,
+  Brain,
+  Link as LinkIcon,
+  Zap,
+  Server,
+  ServerCrash,
+  Volume2,
+  StopCircle,
+} from 'lucide-react';
+import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
+import IconButton from '../core/IconButton.jsx';
 
 marked.setOptions({
   breaks: true,
@@ -1959,136 +1973,153 @@ marked.setOptions({
 });
 
 const createMarkup = (markdownText) => {
-    if (!markdownText) return { __html: '' };
-    // Ensure marked is configured (or assume it's configured globally)
-    const rawHtml = marked.parse(markdownText);
-    return { __html: rawHtml };
+  if (!markdownText) return { __html: '' };
+
+  let html = marked.parse(markdownText);
+  html = renderMathInHtml(html);
+
+  const cleanHtml = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, mathMl: true, svg: true },
+  });
+
+  return { __html: cleanHtml };
 };
 
 const escapeHtml = (unsafe) => {
-    if (typeof unsafe !== 'string') return '';
-    return unsafe
-         .replace(/&/g, "&") 
-         .replace(/</g, "<")
-         .replace(/>/g, ">")
-         .replace(/"/g, '"')
-         .replace(/'/g, "'");
+  if (typeof unsafe !== 'string') return '';
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 };
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, id: messageId }) { // Added messageId prop
-    const isUser = sender === 'user';
-    const { speak, cancel, isSpeaking: isCurrentlySpeakingThisBubble, isSupported: ttsIsSupported, currentlySpeakingUtterance } = useTextToSpeech();
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, id: messageId }) {
+  const isUser = sender === 'user';
+  const messageContentRef = useRef(null);
+  const thinkingContentRef = useRef(null);
+  const {
+    speak,
+    cancel,
+    isSpeaking: isCurrentlySpeakingThisBubble,
+    isSupported: ttsIsSupported,
+  } = useTextToSpeech();
 
-    const formatTimestamp = (ts) => {
-        if (!ts) return '';
-        try {
-            return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } catch (e) { return 'Invalid Time'; }
-    };
+  useEffect(() => {
+    if (messageContentRef.current) {
+      Prism.highlightAllUnder(messageContentRef.current);
+    }
+  }, [text]);
 
-    const getPipelineIcon = () => {
-        if (!sourcePipeline) return null;
-        const lowerPipeline = sourcePipeline.toLowerCase();
-        if (lowerPipeline.includes('ollama')) return <Zap size={12} className="text-green-400" title="Ollama Powered" />;
-        if (lowerPipeline.includes('gemini')) return <Server size={12} className="text-blue-400" title="Gemini Powered" />;
-        if (lowerPipeline.includes('rag')) return <Zap size={12} className="text-purple-400" title="RAG Enhanced" />;
-        if (lowerPipeline.includes('error')) return <ServerCrash size={12} className="text-red-400" title="Error" />;
-        return null;
-    };
+  useEffect(() => {
+    if (thinkingContentRef.current && thinking) {
+      Prism.highlightAllUnder(thinkingContentRef.current);
+    }
+  }, [thinking]);
 
-    const handleToggleSpeech = () => {
-        if (!ttsIsSupported || !text) return;
+  const handleToggleSpeech = () => {
+    if (!ttsIsSupported || !text) return;
+    if (isCurrentlySpeakingThisBubble) {
+      cancel();
+    } else {
+      speak({ text });
+    }
+  };
 
-        // Check if the currently speaking utterance is from this message bubble
-        // This is a simplified check; utteranceRef in hook isn't directly comparable by text value easily
-        // For true robust tracking, the hook would need to manage which ID is speaking.
-        // For now, if any message is speaking and it's this one that wants to stop, or a new one wants to start:
-        if (isCurrentlySpeakingThisBubble) { // If this bubble instance thinks it's speaking
-            cancel();
-        } else {
-            // The speak function in the hook already calls cancel() internally
-            // to stop any other ongoing speech before starting a new one.
-            speak({ text });
-        }
-    };
-    
-    // Determine if the global TTS is speaking *this* message.
-    // This logic is tricky if the hook is per-instance.
-    // The `isCurrentlySpeakingThisBubble` state from the hook instance helps here.
-    // If `currentlySpeakingUtterance` from hook was the actual utterance object, we could compare.
-    // For simplicity, `isCurrentlySpeakingThisBubble` (local to this hook instance) is our best bet.
+  const formatTimestamp = (ts) => {
+    if (!ts) return '';
+    const date = new Date(ts);
+    return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
 
-    return (
-        <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} w-full group`}>
-            <div 
-                className={`message-bubble max-w-[85%] md:max-w-[75%] p-3 rounded-2xl shadow-md break-words ${
-                    isUser 
-                    ? 'bg-primary dark:bg-primary-dark text-white rounded-br-lg' 
-                    : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
-                }`}
-            >
-                {/* Main message content */}
-                <div 
-                    className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" 
-                    dangerouslySetInnerHTML={createMarkup(text || '')} 
-                />
-                
-                {/* Timestamp, Pipeline Icon, and TTS Button */}
-                <div className="flex items-center justify-end mt-1.5 text-xs opacity-70 gap-2">
-                    {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
-                    <span>{formatTimestamp(timestamp)}</span>
-                    {!isUser && ttsIsSupported && text && (
-                        <IconButton
-                            icon={isCurrentlySpeakingThisBubble ? StopCircle : Volume2}
-                            onClick={handleToggleSpeech}
-                            title={isCurrentlySpeakingThisBubble ? "Stop reading" : "Read aloud"}
-                            size="sm" // Small icon button
-                            variant="ghost"
-                            className={`p-0.5 ${isCurrentlySpeakingThisBubble ? 'text-red-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
-                        />
-                    )}
-                </div>
-            </div>
+  const getPipelineIcon = () => {
+    switch (sourcePipeline) {
+      case 'web-search': return <LinkIcon size={14} />;
+      case 'ai-search': return <Zap size={14} />;
+      case 'local-rag': return <Server size={14} />;
+      case 'pipeline-error': return <ServerCrash size={14} />;
+      default: return null;
+    }
+  };
 
-            {/* Metadata: Thinking and References for Bot Messages */}
-            {!isUser && (thinking || (references && references.length > 0)) && (
-                <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2 space-y-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    {thinking && thinking.trim() && (
-                        <details className="group/details text-xs">
-                            <summary className="flex items-center gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                                <Brain size={14} /> AI Reasoning
-                                <ChevronDown size={14} className="group-open/details:rotate-180 transition-transform" />
-                            </summary>
-                            <pre className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-32 overflow-y-auto custom-scrollbar">
-                                <code>{escapeHtml(thinking)}</code>
-                            </pre>
-                        </details>
-                    )}
-                    {references && references.length > 0 && (
-                        <details className="group/details text-xs" open>
-                            <summary className="flex items-center gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                                <LinkIcon size={14} /> References
-                                <ChevronDown size={14} className="group-open/details:rotate-180 transition-transform" />
-                            </summary>
-                            <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
-                                {references.map((ref, index) => (
-                                    <li 
-                                        key={index} 
-                                        className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate"
-                                        title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source || '')}`}
-                                    >
-                                        <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
-                                    </li>
-                                ))}
-                            </ul>
-                        </details>
-                    )}
-                </div>
-            )}
+  return (
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} w-full group`}>
+      <div
+        className={`message-bubble max-w-[85%] md:max-w-[75%] p-3 rounded-2xl shadow-md break-words ${
+          isUser
+            ? 'bg-primary dark:bg-primary-dark text-white rounded-br-lg'
+            : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
+        }`}
+      >
+        <div
+          ref={messageContentRef}
+          className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed"
+          dangerouslySetInnerHTML={createMarkup(text || '')}
+        />
+
+        <div className="flex items-center justify-end mt-1.5 text-xs opacity-70 gap-2">
+          {!isUser && getPipelineIcon() && <span>{getPipelineIcon()}</span>}
+          <span>{formatTimestamp(timestamp)}</span>
+          {!isUser && ttsIsSupported && text && (
+            <IconButton
+              icon={isCurrentlySpeakingThisBubble ? StopCircle : Volume2}
+              onClick={handleToggleSpeech}
+              title={isCurrentlySpeakingThisBubble ? "Stop reading" : "Read aloud"}
+              size="sm"
+              variant="ghost"
+              className={`p-0.5 ${isCurrentlySpeakingThisBubble ? 'text-red-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
+            />
+          )}
         </div>
-    );
+      </div>
+
+      {/* Thinking block (AI reasoning) */}
+      {thinking && (
+        <div className="w-full max-w-[85%] md:max-w-[75%]">
+          <details className="mt-1 text-[0.75rem] group open:bg-surface-light dark:open:bg-surface-dark open:rounded-lg open:shadow-sm open:p-2 open:border open:border-border-light dark:open:border-border-dark">
+            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-muted">
+              <Brain size={14} /> AI Reasoning
+              <ChevronDown size={14} className="group-open/details:rotate-180 transition-transform" />
+            </summary>
+            <pre
+              ref={thinkingContentRef}
+              className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded-md text-text-light dark:text-text-dark whitespace-pre-wrap break-all text-[0.7rem] max-h-32 overflow-y-auto custom-scrollbar"
+            >
+              <code className="language-text">{escapeHtml(thinking)}</code>
+            </pre>
+          </details>
+        </div>
+      )}
+
+      {/* References */}
+      {references?.length > 0 && (
+        <div className="w-full max-w-[85%] md:max-w-[75%] mt-1">
+          <details className="text-[0.75rem] group open:bg-surface-light dark:open:bg-surface-dark open:rounded-lg open:shadow-sm open:p-2 open:border open:border-border-light dark:open:border-border-dark">
+            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-muted">
+              <ChevronDown size={14} className="group-open/details:rotate-180 transition-transform" />
+              References
+            </summary>
+            <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
+              {references.map((ref, index) => (
+                <li
+                  key={index}
+                  className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate"
+                  title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source || '')}`}
+                >
+                  <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
+    </div>
+  );
 }
+
 export default MessageBubble;
+
 ```
 
 `frontend/src/components/common/ThemeToggle.jsx`
@@ -5032,7 +5063,8 @@ JWT_SECRET = "your_super_strong_and_secret_jwt_key_12345" # A strong, random sec
 GEMINI_API_KEY = "AIzaSyDlY5AEMPkwcIDxIcT5d2kYf8_reuJbFVc" # Your actual Gemini API Key
 PYTHON_RAG_SERVICE_URL = "http://127.0.0.1:5000"
 KG_GENERATION_BATCH_SIZE=25
-
+OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
+OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
 ```
 
 `server/config/db.js`
@@ -5664,6 +5696,18 @@ const UserSchema = new mongoose.Schema({
       },
     },
   ],
+
+  // LLM Preferences
+  preferredLlmProvider: {
+    type: String,
+    enum: ['gemini', 'ollama'],
+    default: 'gemini', // Default to Gemini
+  },
+  ollamaModel: { // User's preferred Ollama model if provider is ollama
+    type: String,
+    default: process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5:14b-instruct', // Default from .env
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,
@@ -8414,6 +8458,8 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const { generateContentWithHistory } = require('../services/geminiService');
+const geminiService = require('../services/geminiService'); // Keep as geminiService
+const ollamaService = require('../services/ollamaService'); // Import new Ollama service
 // Import CHAT_MAIN_SYSTEM_PROMPT which no longer mandates <thinking> output
 const { CHAT_MAIN_SYSTEM_PROMPT, CHAT_USER_PROMPT_TEMPLATES } = require('../config/promptTemplates');
 const axios = require('axios');
@@ -8596,8 +8642,21 @@ router.post('/message', async (req, res) => {
         
         console.log(`   Calling ${llmProvider || 'Gemini'} API. History length for LLM: ${fullHistoryForLLM.length}. System Prompt Used: ${!!mainSystemPromptText}. Query for LLM (first 150 chars): ${queryForLLM.substring(0,150)}...`);
         
-        aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, mainSystemPromptText);
+        // aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, mainSystemPromptText);
         
+        if (llmProvider === 'ollama') {
+            aiResponseMessageText = await ollamaService.generateContentWithHistory(
+                fullHistoryForLLM,
+                mainSystemPromptText
+                // TODO: Potentially pass user-specific Ollama model name if stored
+            );
+        } else { // Default to Gemini
+            aiResponseMessageText = await geminiService.generateContentWithHistory(
+                fullHistoryForLLM,
+                mainSystemPromptText
+            );
+        }
+
         const aiMessageForDbAndClient = {
             sender: 'bot',
             role: 'model',
@@ -9640,6 +9699,11 @@ router.post('/', authMiddleware, (req, res) => {
         serverFilename = req.file.filename;
         console.log(`Upload Route: File received for user '${username}'. Server Filename: ${serverFilename}, Original: ${originalName}`);
 
+        // Fetch user's LLM preferences for workers
+        const userLlmPrefs = await User.findById(userId).select('preferredLlmProvider ollamaModel').lean();
+        const llmProviderForWorkers = userLlmPrefs?.preferredLlmProvider || 'gemini'; // Default to gemini if not set
+        const ollamaModelForWorkers = userLlmPrefs?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+
         try {
             // ----- STAGE 1: MongoDB Pre-check for existing originalName -----
             const userForPreCheck = await User.findById(userId).select('uploadedDocuments.filename'); // Only need filename
@@ -9732,7 +9796,9 @@ router.post('/', authMiddleware, (req, res) => {
                         workerData: {
                             userId: userId,
                             originalName: originalName,
-                            textForAnalysis: ragResult.text // Pass the full text
+                            textForAnalysis: ragResult.text, // Pass the full text
+                            llmProvider: llmProviderForWorkers,
+                            ollamaModel: ollamaModelForWorkers
                         }
                     });
                     analysisWorker.on('message', (msg) => console.log(`[Upload Route BG] Analysis Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
@@ -9765,6 +9831,8 @@ router.post('/', authMiddleware, (req, res) => {
                             chunksForKg: ragResult.chunksForKg, // This comes from Python
                             userId: userId,
                             originalName: originalName,
+                            llmProvider: llmProviderForWorkers,
+                            ollamaModel: ollamaModelForWorkers
                         }
                     });
                     kgWorker.on('message', (msg) => console.log(`[Upload Route BG] KG Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
@@ -10247,6 +10315,7 @@ module.exports = {
 ```javascript
 // server/services/kgService.js
 const geminiService = require('./geminiService');
+const ollamaService = require('./ollamaService'); // Import Ollama service
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 // --- IMPORT THE PROMPTS ---
@@ -10273,7 +10342,7 @@ ${chunkText}
 
 // --- NEW: Internal function to process a single BATCH of chunks ---
 // (This function _processBatchOfChunksForKg remains the same as in the previous good answer)
-async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex) {
+async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex, llmProvider, ollamaModel) {
     // batchOfChunkObjects is an array of the original chunk objects
     // e.g., [{ text_content: "...", metadata: {...} }, ...]
     const logPrefix = `[KG Service Batch ${batchIndex}]`;
@@ -10291,12 +10360,22 @@ async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex) {
     ];
 
     try {
-        console.log(`${logPrefix} Processing ${chunkTextsForPrompt.length} chunks for KG generation.`);
-        const responseText = await geminiService.generateContentWithHistory(
-            chatHistory,
-            KG_GENERATION_SYSTEM_PROMPT, // System prompt applies to EACH chunk's processing logic
-            geminiService.DEFAULT_MAX_OUTPUT_TOKENS_KG
-        );
+        console.log(`${logPrefix} Processing ${chunkTextsForPrompt.length} chunks for KG generation using ${llmProvider}.`);
+        let responseText;
+
+        if (llmProvider === 'ollama') {
+            responseText = await ollamaService.generateContentWithHistory(
+                chatHistory, // This structure is simple for KG (just user prompt)
+                KG_GENERATION_SYSTEM_PROMPT,
+                { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG }
+            );
+        } else { // Default to Gemini
+            responseText = await geminiService.generateContentWithHistory(
+                chatHistory,
+                KG_GENERATION_SYSTEM_PROMPT, // System prompt applies to EACH chunk's processing logic
+                geminiService.DEFAULT_MAX_OUTPUT_TOKENS_KG
+            );
+        }
 
         if (!responseText) {
             console.warn(`${logPrefix} Empty response from Gemini for batch.`);
@@ -10411,7 +10490,7 @@ function _mergeGraphFragments(graphFragments) {
 
 // --- MODIFIED: Main function for KG generation and storage ---
 // (This function generateAndStoreKg remains the same as in the previous good answer)
-async function generateAndStoreKg(chunksForKg, userId, originalName) {
+async function generateAndStoreKg(chunksForKg, userId, originalName, llmProvider, ollamaModel) {
     const logPrefix = `[KG Service Doc: ${originalName}, User: ${userId}]`;
     console.log(`${logPrefix} Starting KG generation with ${chunksForKg.length} initial chunks.`);
 
@@ -10437,7 +10516,7 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
         
         console.log(`${logPrefix} Processing batch ${batchIndex} (chunks ${i} to ${Math.min(i + BATCH_SIZE - 1, chunksForKg.length - 1)}), ${validChunksInBatch.length} valid chunks.`);
         
-        const fragmentsFromBatch = await _processBatchOfChunksForKg(validChunksInBatch, batchIndex); // Calls the new batch processor
+        const fragmentsFromBatch = await _processBatchOfChunksForKg(validChunksInBatch, batchIndex, llmProvider, ollamaModel); // Pass LLM info
         if (fragmentsFromBatch && fragmentsFromBatch.length > 0) {
             allGraphFragments.push(...fragmentsFromBatch);
         } else {
@@ -10530,6 +10609,130 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
 }
 
 module.exports = { generateAndStoreKg };
+```
+
+`server/services/ollamaService.js`
+
+```javascript
+// server/services/ollamaService.js
+const axios = require('axios');
+
+const OLLAMA_BASE_URL = process.env.OLLAMA_API_BASE_URL || 'http://localhost:11434';
+const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'llama3'; // Ensure this is set in .env
+
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT = 4096; // Ollama's equivalent to maxOutputTokens (num_predict)
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG = 8192;   // Larger for KG tasks
+
+// Helper to format history for Ollama.
+// Many models expect a specific format, e.g., Llama 2 chat format.
+// This is a generic approach; specific models might need fine-tuning.
+function formatHistoryForOllama(chatHistory, systemPromptText) {
+    let promptString = "";
+
+    if (systemPromptText && systemPromptText.trim() !== "") {
+        // A common way to prepend system prompt for instruct/chat models
+        promptString += `System: ${systemPromptText.trim()}\n\n`;
+    }
+
+    chatHistory.forEach(msg => {
+        const role = msg.role === 'model' ? 'Assistant' : 'User';
+        const text = (Array.isArray(msg.parts) && msg.parts[0]?.text) ? msg.parts[0].text : (msg.text || "");
+        promptString += `${role}: ${text}\n`;
+    });
+    // The final prompt to Ollama will append the *current* user message after this history.
+    // So, if the last message in chatHistory is the one we want a response to,
+    // it should be included as the final "User:" part here.
+    // Or, if chatHistory is true history, then the calling function appends the current query.
+    return promptString;
+}
+
+
+const generateContentWithHistory = async (
+    chatHistory, // Array of { role: 'user'/'model', parts: [{ text: '...' }] }
+    systemPromptText = null,
+    options = {} // { model, maxOutputTokens }
+) => {
+    const modelToUse = options.model || DEFAULT_OLLAMA_MODEL;
+    const effectiveMaxOutputTokens = options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT;
+
+    if (!Array.isArray(chatHistory) || chatHistory.length === 0) {
+        throw new Error("Ollama: Chat history must be a non-empty array.");
+    }
+
+    // The `chatHistory` passed here should *not* include the most recent user message if it's a typical chat flow.
+    // That message will be the main "prompt" to Ollama.
+    // If `chatHistory` *does* include the final user message, then the prompt below is just that message.
+
+    const historyString = formatHistoryForOllama(chatHistory.slice(0, -1), systemPromptText);
+    const currentUserMessage = (chatHistory[chatHistory.length - 1]?.parts?.[0]?.text) || "";
+
+    if (!currentUserMessage.trim()) {
+        throw new Error("Ollama: The final user message in history is empty or missing.");
+    }
+    
+    // Construct the full prompt for Ollama
+    // Ollama's /api/generate expects a single "prompt" field.
+    // History is typically prepended to the current user's message.
+    const fullPrompt = historyString + `User: ${currentUserMessage}\nAssistant:`; // Prompt for assistant's turn
+
+
+    const requestPayload = {
+        model: modelToUse,
+        prompt: fullPrompt,
+        stream: false, // We want the full response
+        options: {
+            temperature: options.temperature || 0.7,
+            num_predict: effectiveMaxOutputTokens, // num_predict is Ollama's way of limiting output length
+            // Add other Ollama options here if needed (e.g., top_k, top_p, seed)
+        }
+    };
+    
+    // If a system prompt was provided, and the model supports a dedicated 'system' field, use it.
+    // Otherwise, it's already prepended in formatHistoryForOllama.
+    // For /api/generate, it's usually part of the main prompt.
+    // Some models might allow a `system` field in the payload for /api/generate. Check Ollama docs for specific model.
+    // if (systemPromptText && systemPromptText.trim() !== "" && modelSupportsSystemField(modelToUse)) {
+    //    requestPayload.system = systemPromptText.trim();
+    // }
+
+
+    const endpoint = `${OLLAMA_BASE_URL}/api/generate`;
+    console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}. Prompt (first 100): "${fullPrompt.substring(0, 100)}..."`);
+
+    try {
+        const response = await axios.post(endpoint, requestPayload, { timeout: 120000 }); // 2 min timeout
+
+        if (response.data && response.data.response) {
+            if (response.data.done === false || response.data.truncated) { // `truncated` might be a custom field or implied by `done: false` if `num_predict` is hit
+                 console.warn(`Ollama response for model ${modelToUse} may have been truncated. Done: ${response.data.done}. Context length: ${response.data.context?.length}`);
+            }
+            return response.data.response.trim();
+        } else {
+            console.error("Ollama API Error: Invalid response structure.", response.data);
+            throw new Error("Ollama service returned an invalid response structure.");
+        }
+    } catch (error) {
+        console.error("Ollama API Call Error:", error.message);
+        let clientMessage = "Failed to get response from Ollama AI service.";
+        if (error.response) {
+            console.error("Ollama Error Response Data:", error.response.data);
+            clientMessage = `Ollama Service Error: ${error.response.data.error || error.message}`;
+        } else if (error.request) {
+            clientMessage = "No response received from Ollama service. Check if it's running and accessible.";
+        }
+        const enhancedError = new Error(clientMessage);
+        enhancedError.status = error.response?.status || 503; // Service Unavailable or other
+        enhancedError.originalError = error;
+        throw enhancedError;
+    }
+};
+
+module.exports = {
+    generateContentWithHistory,
+    DEFAULT_OLLAMA_MODEL, 
+    DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT,
+    DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG,
+};
 ```
 
 `server/utils/assetCleanup.js`
@@ -10701,10 +10904,11 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService'); // For actual LLM calls
+const ollamaService = require('../services/ollamaService'); // Import Ollama service
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); // For prompts
 
 // This function will now contain the actual analysis generation logic
-async function performFullAnalysis(userId, originalName, textForAnalysis) {
+async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel) {
     console.log(`[Analysis Worker ${process.pid}] Starting actual analysis generation for '${originalName}'. Text length: ${textForAnalysis.length}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
@@ -10716,10 +10920,19 @@ async function performFullAnalysis(userId, originalName, textForAnalysis) {
             console.log(`[Analysis Worker] Generating ${type} for '${context.originalName}' (User: ${context.userId}).`);
             const historyForGemini = [{ role: 'user', parts: [{ text: "Please perform the requested analysis based on the system instruction provided." }] }];
             
-            const generatedText = await geminiService.generateContentWithHistory(
-                historyForGemini,
-                promptContentForLLM // This is the full prompt including the document text
-            );
+            let generatedText;
+            if (llmProvider === 'ollama') {
+                generatedText = await ollamaService.generateContentWithHistory(
+                    historyForGemini, // This structure might need adjustment for ollamaService's prompt formatter
+                    promptContentForLLM, // This is the system prompt + document text
+                    { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT } // Pass model and token options
+                );
+            } else { // Default to Gemini
+                generatedText = await geminiService.generateContentWithHistory(
+                    historyForGemini,
+                    promptContentForLLM // This is the full prompt including the document text
+                );
+            }
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
                 console.warn(`[Analysis Worker] Gemini returned empty content for ${type} for '${context.originalName}'.`);
@@ -10800,7 +11013,7 @@ async function performFullAnalysis(userId, originalName, textForAnalysis) {
 }
 
 async function run() {
-    const { userId, originalName, textForAnalysis } = workerData;
+    const { userId, originalName, textForAnalysis, llmProvider, ollamaModel } = workerData;
     let dbConnected = false;
     let overallTaskSuccess = false; // Renamed for clarity for the worker's overall task
     let finalMessageToParent = "Analysis worker encountered an issue.";
@@ -10836,7 +11049,7 @@ async function run() {
             finalMessageToParent = "Analysis skipped: No text provided.";
             // Fall through to postMessage and finally block.
         } else {
-            const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis);
+            const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel);
             overallTaskSuccess = analysisServiceResult.success;
             finalMessageToParent = analysisServiceResult.message;
         }
@@ -10895,7 +11108,7 @@ const connectDB = require('../config/db');
 const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    const { chunksForKg: allInitialChunks, userId, originalName } = workerData;
+    const { chunksForKg: allInitialChunks, userId, originalName, llmProvider, ollamaModel } = workerData;
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";
@@ -10925,7 +11138,7 @@ async function runKgGeneration() {
             finalMessage = "No chunks provided for KG generation.";
             overallSuccess = true; // Not a failure of this worker's process
         } else {
-            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName);
+            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName, llmProvider, ollamaModel);
 
             if (kgExtractionResult && kgExtractionResult.success) {
                 await User.updateOne(
