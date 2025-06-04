@@ -1,3 +1,4 @@
+
 version: '3.8' # Specifies the version of the Docker Compose file format
 
 services:
@@ -55,9 +56,6 @@ services:
   #     - qdrant
   #     - neo4j
   #   restart: unless-stopped
-  
-# Top-Level Volumes Declaration
-# This section explicitly defines the named volumes that will be used for persistent storage.
 # Docker Compose will create these volumes automatically if they don't already exist.
 volumes:
   qdrant_data:  # Named volume for Qdrant's persistent data
