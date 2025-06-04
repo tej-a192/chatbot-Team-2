@@ -25,10 +25,7 @@ qdrant-client
 neo4j
 sentence_transformers
 spacy
-<<<<<<< HEAD
-=======
 opencv-python
->>>>>>> 4a970a932e10e0b46602c5eda49013a83c98ac9c
 
 
 

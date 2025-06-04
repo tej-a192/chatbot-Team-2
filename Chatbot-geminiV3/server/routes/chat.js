@@ -3,6 +3,8 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const { generateContentWithHistory } = require('../services/geminiService');
+const geminiService = require('../services/geminiService'); // Keep as geminiService
+const ollamaService = require('../services/ollamaService'); // Import new Ollama service
 // Import CHAT_MAIN_SYSTEM_PROMPT which no longer mandates <thinking> output
 const { CHAT_MAIN_SYSTEM_PROMPT, CHAT_USER_PROMPT_TEMPLATES } = require('../config/promptTemplates');
 const axios = require('axios');
@@ -185,8 +187,21 @@ router.post('/message', async (req, res) => {
         
         console.log(`   Calling ${llmProvider || 'Gemini'} API. History length for LLM: ${fullHistoryForLLM.length}. System Prompt Used: ${!!mainSystemPromptText}. Query for LLM (first 150 chars): ${queryForLLM.substring(0,150)}...`);
         
-        aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, mainSystemPromptText);
+        // aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, mainSystemPromptText);
         
+        if (llmProvider === 'ollama') {
+            aiResponseMessageText = await ollamaService.generateContentWithHistory(
+                fullHistoryForLLM,
+                mainSystemPromptText
+                // TODO: Potentially pass user-specific Ollama model name if stored
+            );
+        } else { // Default to Gemini
+            aiResponseMessageText = await geminiService.generateContentWithHistory(
+                fullHistoryForLLM,
+                mainSystemPromptText
+            );
+        }
+
         const aiMessageForDbAndClient = {
             sender: 'bot',
             role: 'model',
