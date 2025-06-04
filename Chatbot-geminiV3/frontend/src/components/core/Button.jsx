@@ -1,3 +1,4 @@
+// src/components/core/Button.jsx
 import React from 'react';
 import { Loader2 } from 'lucide-react'; // For loading spinner
 
@@ -32,19 +33,26 @@ const Button = ({
     };
 
     const widthStyle = fullWidth ? "w-full" : "";
-    const disabledStyle = (disabled || isLoading) ? "opacity-60 cursor-not-allowed" : "cursor-pointer";
+    const isDisabled = disabled || isLoading;
+    const finalDisabledStyle = isDisabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer";
 
+    const spinnerSize = size === 'sm' ? 14 : (size === 'lg' ? 20 : 16);
+    
     return (
         <button
             type={type}
             onClick={onClick}
-            disabled={disabled || isLoading}
-            className={`${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${widthStyle} ${disabledStyle} ${className}`}
+            disabled={isDisabled} // Use the corrected variable
+            className={`${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${widthStyle} ${finalDisabledStyle} ${className}`}
             {...props}
         >
-            {isLoading && <Loader2 size={size === 'sm' ? 14 : 18} className="animate-spin" />}
+            {isLoading && (
+                <Loader2 size={spinnerSize} className="animate-spin" />
+            )}
             {!isLoading && leftIcon && <span className="icon-left">{leftIcon}</span>}
-            {!isLoading && children}
+
+            <span className={isLoading ? 'ml-2' : ''}>{children}</span>
+
             {!isLoading && rightIcon && <span className="icon-right">{rightIcon}</span>}
         </button>
     );

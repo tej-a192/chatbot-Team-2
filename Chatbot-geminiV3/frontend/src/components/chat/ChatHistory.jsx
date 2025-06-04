@@ -30,6 +30,7 @@ function ChatHistory({ messages, isLoading }) {
                         transition={{ duration: 0.3, ease: "easeOut" }}
                     >
                         <MessageBubble
+                            id={msg.id || `msg-${index}-${msg.timestamp}`} // Pass the ID
                             sender={msg.sender} // 'user' or 'bot'
                             text={msg.text}
                             thinking={msg.thinking}

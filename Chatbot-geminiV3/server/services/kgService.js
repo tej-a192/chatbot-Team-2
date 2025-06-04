@@ -212,15 +212,8 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
     }
     console.log(`${logPrefix} Merged KG successfully. Nodes: ${finalKg.nodes.length}, Edges: ${finalKg.edges.length}.`);
 
-<<<<<<< HEAD
-        // --- Determine and Call the KG Ingestion API ---
-    const baseRagUrl = process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Use default if not set
-    const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`; // Ensure no double slash and append /kg
-=======
-    // --- Storing the KG (your existing logic) ---
-    const baseRagUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5002';
+    const baseRagUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000';
     const kgIngestionApiUrl = `${baseRagUrl.replace(/\/$/, '')}/kg`;
->>>>>>> db12d8d6185be5fd3cae0eafb8a6e054e30dfd4a
 
     if (!kgIngestionApiUrl.startsWith('http')) {
         console.error(`${logPrefix} KG Ingestion API URL is invalid: ${kgIngestionApiUrl}. Check PYTHON_RAG_SERVICE_URL.`);

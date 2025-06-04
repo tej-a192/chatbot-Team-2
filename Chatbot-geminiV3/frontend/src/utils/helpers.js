@@ -1,4 +1,5 @@
 // Debounce function: Limits the rate at which a function can fire.
+
 export const debounce = (func, delay) => {
     let timeoutId;
     return function(...args) {
