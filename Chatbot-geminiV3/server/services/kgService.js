@@ -1,5 +1,6 @@
 // server/services/kgService.js
 const geminiService = require('./geminiService');
+const ollamaService = require('./ollamaService'); // Import Ollama service
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 // --- IMPORT THE PROMPTS ---
@@ -26,7 +27,7 @@ ${chunkText}
 
 // --- NEW: Internal function to process a single BATCH of chunks ---
 // (This function _processBatchOfChunksForKg remains the same as in the previous good answer)
-async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex) {
+async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex, llmProvider, ollamaModel) {
     // batchOfChunkObjects is an array of the original chunk objects
     // e.g., [{ text_content: "...", metadata: {...} }, ...]
     const logPrefix = `[KG Service Batch ${batchIndex}]`;
@@ -44,12 +45,22 @@ async function _processBatchOfChunksForKg(batchOfChunkObjects, batchIndex) {
     ];
 
     try {
-        console.log(`${logPrefix} Processing ${chunkTextsForPrompt.length} chunks for KG generation.`);
-        const responseText = await geminiService.generateContentWithHistory(
-            chatHistory,
-            KG_GENERATION_SYSTEM_PROMPT, // System prompt applies to EACH chunk's processing logic
-            geminiService.DEFAULT_MAX_OUTPUT_TOKENS_KG
-        );
+        console.log(`${logPrefix} Processing ${chunkTextsForPrompt.length} chunks for KG generation using ${llmProvider}.`);
+        let responseText;
+
+        if (llmProvider === 'ollama') {
+            responseText = await ollamaService.generateContentWithHistory(
+                chatHistory, // This structure is simple for KG (just user prompt)
+                KG_GENERATION_SYSTEM_PROMPT,
+                { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG }
+            );
+        } else { // Default to Gemini
+            responseText = await geminiService.generateContentWithHistory(
+                chatHistory,
+                KG_GENERATION_SYSTEM_PROMPT, // System prompt applies to EACH chunk's processing logic
+                geminiService.DEFAULT_MAX_OUTPUT_TOKENS_KG
+            );
+        }
 
         if (!responseText) {
             console.warn(`${logPrefix} Empty response from Gemini for batch.`);
@@ -164,7 +175,7 @@ function _mergeGraphFragments(graphFragments) {
 
 // --- MODIFIED: Main function for KG generation and storage ---
 // (This function generateAndStoreKg remains the same as in the previous good answer)
-async function generateAndStoreKg(chunksForKg, userId, originalName) {
+async function generateAndStoreKg(chunksForKg, userId, originalName, llmProvider, ollamaModel) {
     const logPrefix = `[KG Service Doc: ${originalName}, User: ${userId}]`;
     console.log(`${logPrefix} Starting KG generation with ${chunksForKg.length} initial chunks.`);
 
@@ -190,7 +201,7 @@ async function generateAndStoreKg(chunksForKg, userId, originalName) {
         
         console.log(`${logPrefix} Processing batch ${batchIndex} (chunks ${i} to ${Math.min(i + BATCH_SIZE - 1, chunksForKg.length - 1)}), ${validChunksInBatch.length} valid chunks.`);
         
-        const fragmentsFromBatch = await _processBatchOfChunksForKg(validChunksInBatch, batchIndex); // Calls the new batch processor
+        const fragmentsFromBatch = await _processBatchOfChunksForKg(validChunksInBatch, batchIndex, llmProvider, ollamaModel); // Pass LLM info
         if (fragmentsFromBatch && fragmentsFromBatch.length > 0) {
             allGraphFragments.push(...fragmentsFromBatch);
         } else {

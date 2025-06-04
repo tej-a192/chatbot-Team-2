@@ -21,16 +21,25 @@ export const AppStateProvider = ({ children }) => {
         return storedTheme;
     });
 
-    const [selectedLLM, setSelectedLLM] = useState(localStorage.getItem('selectedLLM') || 'gemini'); // Default to gemini
+    const [selectedLLM, setSelectedLLM] = useState(localStorage.getItem('selectedLLM') || 'gemini');
     const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
-    const [isRightPanelOpen, setIsRightPanelOpen] = useState(true); 
-    
+    const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
     const [currentSessionId, setCurrentSessionIdState] = useState(() => {
         return localStorage.getItem('aiTutorSessionId') || null;
     });
-    
-    const [systemPrompt, setSystemPromptState] = useState(localStorage.getItem('aiTutorSystemPrompt') || defaultSystemPromptText);
+    const [systemPrompt, setSystemPromptState] = useState(
+        localStorage.getItem('aiTutorSystemPrompt') || defaultSystemPromptText
+    );
+
     const [selectedDocumentForAnalysis, setSelectedDocumentForAnalysisState] = useState(null);
+    const [selectedSubject, setSelectedSubjectState] = useState(
+        localStorage.getItem('aiTutorSelectedSubject') || null
+    );
+
+    const [isAdminSessionActive, setIsAdminSessionActiveState] = useState(() => {
+        return sessionStorage.getItem('isAdminSessionActive') === 'true';
+    });
 
     const toggleTheme = () => {
         setThemeState(prevTheme => {
@@ -39,21 +48,21 @@ export const AppStateProvider = ({ children }) => {
             return newTheme;
         });
     };
-    
+
     const switchLLM = (llm) => {
-         setSelectedLLM(llm); 
+         setSelectedLLM(llm);
          localStorage.setItem('selectedLLM', llm);
          console.log("AppStateContext: Switched LLM to:", llm);
     };
-    
-    const setSessionId = (sessionId) => { // This is setGlobalSessionId in App.jsx
+
+    const setSessionId = (sessionId) => {
         if (sessionId) {
             localStorage.setItem('aiTutorSessionId', sessionId);
         } else {
             localStorage.removeItem('aiTutorSessionId');
         }
-        setCurrentSessionIdState(sessionId); 
-        console.log("AppStateContext: Global session ID updated to:", sessionId);
+        setCurrentSessionIdState(sessionId);
+        console.log("AppStateContext: Regular user session ID updated to:", sessionId);
     };
 
     const setSystemPrompt = (promptText) => {
@@ -61,16 +70,57 @@ export const AppStateProvider = ({ children }) => {
         localStorage.setItem('aiTutorSystemPrompt', promptText);
     };
 
-    const selectDocumentForAnalysis = (documentFile) => {
-        setSelectedDocumentForAnalysisState(documentFile); // Stores filename string
-        console.log("AppStateContext: Document selected for analysis:", documentFile || null);
+    const selectDocumentForAnalysis = (documentFilename) => {
+        setSelectedDocumentForAnalysisState(documentFilename);
+        console.log("AppStateContext: Document for analysis tools set to:", documentFilename || "None");
+        if (documentFilename && selectedSubject !== documentFilename) {
+            if (selectedSubject !== null) {
+                console.log("AppStateContext: Clearing selected subject because a specific user document was chosen for analysis tools.");
+                setSelectedSubjectState(null);
+                localStorage.removeItem('aiTutorSelectedSubject');
+            }
+        }
+    };
+
+    const setSelectedSubject = (subjectName) => {
+        const newSubject = subjectName === "none" || !subjectName ? null : subjectName;
+        if (newSubject) {
+            localStorage.setItem('aiTutorSelectedSubject', newSubject);
+        } else {
+            localStorage.removeItem('aiTutorSelectedSubject');
+        }
+        setSelectedSubjectState(newSubject);
+        console.log("AppStateContext: Selected subject (for chat RAG) updated to:", newSubject || "None");
+
+        // When a subject (admin doc) is selected for chat, also make it the target for analysis tools.
+        setSelectedDocumentForAnalysisState(newSubject); // THIS IS KEY
+        if (newSubject) {
+             console.log("AppStateContext: Also set document for analysis tools to (admin subject):", newSubject);
+        } else {
+            if (selectedDocumentForAnalysis === subjectName) { // subjectName is the old value here
+                 setSelectedDocumentForAnalysisState(null);
+                 console.log("AppStateContext: Cleared document for analysis tools as linked subject was cleared.");
+            }
+        }
+    };
+
+    const setIsAdminSessionActive = (isActive) => {
+        if (isActive) {
+            sessionStorage.setItem('isAdminSessionActive', 'true');
+            setSessionId(null);
+            setSelectedSubject(null);
+        } else {
+            sessionStorage.removeItem('isAdminSessionActive');
+        }
+        setIsAdminSessionActiveState(isActive);
+        console.log("AppStateContext: Admin session active status set to:", isActive);
     };
 
     useEffect(() => {
         const rootHtmlElement = document.documentElement;
         rootHtmlElement.classList.remove('light', 'dark');
         rootHtmlElement.classList.add(theme);
-        document.body.className = ''; 
+        document.body.className = '';
         document.body.classList.add(theme === 'dark' ? 'bg-background-dark' : 'bg-background-light');
     }, [theme]);
 
@@ -80,9 +130,11 @@ export const AppStateProvider = ({ children }) => {
             selectedLLM, switchLLM,
             isLeftPanelOpen, setIsLeftPanelOpen,
             isRightPanelOpen, setIsRightPanelOpen,
-            currentSessionId, setSessionId, 
+            currentSessionId, setSessionId,
             systemPrompt, setSystemPrompt,
-            selectedDocumentForAnalysis, selectDocumentForAnalysis
+            selectedDocumentForAnalysis, selectDocumentForAnalysis,
+            selectedSubject, setSelectedSubject,
+            isAdminSessionActive, setIsAdminSessionActive
         }}>
             {children}
         </AppStateContext.Provider>

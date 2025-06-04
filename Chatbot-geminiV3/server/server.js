@@ -12,6 +12,7 @@ const readline = require('readline').createInterface({
   input: process.stdin,
   output: process.stdout,
 });
+const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware'); 
 
 // --- Custom Modules ---
 const connectDB = require('./config/db');
@@ -69,6 +70,9 @@ app.use('/api/files', authMiddleware, require('./routes/files'));
 app.use('/api/syllabus', authMiddleware, require('./routes/syllabus'));
 app.use('/api/mindmap', authMiddleware, require('./routes/mindmap'));
 app.use('/api/analysis', authMiddleware, require('./routes/analysis')); 
+app.use('/api/admin/documents', require('./routes/adminDocuments'));
+app.use('/api/subjects', authMiddleware, require('./routes/subjects'));
+
 // app.use('/api/kg', authMiddleware, require('./routes/kg'));
 
 

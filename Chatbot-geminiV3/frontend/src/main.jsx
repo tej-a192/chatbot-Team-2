@@ -1,13 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App.jsx';
-import { AuthProvider } from './contexts/AuthContext.jsx';
+import AppWrapper from './App.jsx';
+import { AuthProvider } from './contexts/AuthContext.jsx'; // For regular users
 import { AppStateProvider } from './contexts/AppStateContext.jsx';
 import { Toaster } from 'react-hot-toast';
-import './index.css'; 
+import './index.css';
 
-
-import 'prismjs/themes/prism-okaidia.css'; 
+import 'prismjs/themes/prism-okaidia.css';
 import 'katex/dist/katex.min.css';
 import Prism from 'prismjs'; 
 import 'prismjs/components/prism-python';
@@ -25,8 +24,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
       <AppStateProvider>
-        <App />
-        <Toaster position="top-right" reverseOrder={false} />
+        <AppWrapper />
       </AppStateProvider>
     </AuthProvider>
   </React.StrictMode>,
