@@ -2,10 +2,8 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
-const { generateContentWithHistory } = require('../services/geminiService');
 const geminiService = require('../services/geminiService'); // Keep as geminiService
 const ollamaService = require('../services/ollamaService'); // Import new Ollama service
-// Import CHAT_MAIN_SYSTEM_PROMPT which no longer mandates <thinking> output
 const { CHAT_MAIN_SYSTEM_PROMPT, CHAT_USER_PROMPT_TEMPLATES } = require('../config/promptTemplates');
 const axios = require('axios');
 
@@ -15,15 +13,15 @@ const router = express.Router();
 async function queryPythonRagService(
     userId,
     query,
-    criticalThinkingEnabled, // boolean: for use_kg_critical_thinking
-    documentContextNameToPass, // string: for documentContextName
-    clientFilter = null, // object: for the generic 'filter'
-    k = 5 // Default k value
+    criticalThinkingEnabled,
+    documentContextNameToPass,
+    clientFilter = null,
+    k = 5
 ) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
         console.error("PYTHON_RAG_SERVICE_URL is not set. RAG features disabled for this request.");
-        return []; // Or throw an error / return a specific error structure
+        return [];
     }
     const searchUrl = `${pythonServiceUrl}/query`;
     console.log(`Querying Python RAG: User ${userId}, Query (first 50): "${query.substring(0, 50)}...", k=${k}, CriticalThinking=${criticalThinkingEnabled}, DocContext=${documentContextNameToPass}`);
@@ -32,11 +30,10 @@ async function queryPythonRagService(
         query: query,
         k: k,
         user_id: userId,
-        use_kg_critical_thinking: !!criticalThinkingEnabled, // Ensure boolean for Python
-        documentContextName: documentContextNameToPass || null // Send null if undefined/empty
+        use_kg_critical_thinking: !!criticalThinkingEnabled,
+        documentContextName: documentContextNameToPass || null
     };
 
-    // Add the generic 'filter' object to the payload if it's provided and valid
     if (clientFilter && typeof clientFilter === 'object' && Object.keys(clientFilter).length > 0) {
         payload.filter = clientFilter;
         console.log(`  Applying generic filter to Python RAG search:`, clientFilter);
@@ -47,18 +44,15 @@ async function queryPythonRagService(
     try {
         const response = await axios.post(searchUrl, payload, {
             headers: { 'Content-Type': 'application/json' },
-            timeout: process.env.PYTHON_RAG_TIMEOUT || 30000 // 30 seconds, configurable
+            timeout: process.env.PYTHON_RAG_TIMEOUT || 30000
         });
 
         if (response.data && Array.isArray(response.data.retrieved_documents_list)) {
             console.log(`Python RAG service /query returned ${response.data.retrieved_documents_list.length} results.`);
-            // Transform the Python response to the structure expected by Node.js
             return response.data.retrieved_documents_list.map(doc => ({
                 documentName: doc.metadata?.file_name || doc.metadata?.original_name || doc.metadata?.title || 'Unknown Document',
                 content: doc.page_content || "",
                 score: doc.metadata?.score,
-                // You can add more metadata here if needed by the Node.js layer
-                // e.g., qdrant_id: doc.metadata?.qdrant_id
             }));
         }
         console.warn(`Python RAG /query returned unexpected data structure:`, response.data);
@@ -74,9 +68,6 @@ async function queryPythonRagService(
             errorMsg = 'Python RAG service request timed out.';
         }
         console.error(`Error querying Python RAG service at ${searchUrl}:`, errorMsg);
-        // Depending on how you want to handle errors, you might throw,
-        // or return an empty array, or a specific error indicator.
-        // For now, returning empty array to maintain existing behavior.
         return []; 
     }
 }
@@ -95,11 +86,10 @@ router.post('/message', async (req, res) => {
         systemPrompt: clientProvidedSystemInstruction,
         criticalThinkingEnabled, 
         documentContextName,
-        filter // <<< ADDED: Destructure the generic filter from client
+        filter
     } = req.body;
     const userId = req.user._id; 
 
-    // ... (validations remain the same) ...
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
     }
@@ -112,22 +102,18 @@ router.post('/message', async (req, res) => {
     if (criticalThinkingEnabled !== undefined && typeof criticalThinkingEnabled !== 'boolean') {
         return res.status(400).json({ message: 'Invalid criticalThinkingEnabled value. Must be a boolean.' });
     }
-    if (filter !== undefined && (typeof filter !== 'object' || filter === null) && Object.keys(filter || {}).length > 0) { // Allow empty object or null/undefined
-        // More robust validation for filter if needed, e.g. checking its structure
+    if (filter !== undefined && (typeof filter !== 'object' || filter === null) && Object.keys(filter || {}).length > 0) {
         console.warn("Received 'filter' parameter with unexpected type or structure:", filter);
-        // Depending on strictness, you might return 400 or just ignore it
     }
 
-
-    const currentTimestamp = new Date();
-    const userMessageForDb = { /* ... */ };
+    const currentTimestamp = new Date(); // Timestamp for the current user message
 
     console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}, CriticalThinking=${criticalThinkingEnabled}, DocContext=${documentContextName}, ClientFilter=${!!filter}, Query: "${query.substring(0,50)}..."`);
 
     try {
         let aiResponseMessageText;
         let referencesForResponse = [];
-        let actualSourcePipeline = `${llmProvider || 'gemini'}-direct`;
+        let actualSourcePipeline = `${llmProvider || 'gemini'}-direct`; // Default llmProvider to 'gemini' if not specified
         let contextForLLMString = "";
         let relevantDocsFromRag = [];
         const mainSystemPromptText = CHAT_MAIN_SYSTEM_PROMPT ? CHAT_MAIN_SYSTEM_PROMPT() : ""; 
@@ -136,18 +122,15 @@ router.post('/message', async (req, res) => {
             actualSourcePipeline = `${llmProvider || 'gemini'}-rag`;
             console.log(`   Querying RAG service for user ${userId}, query "${query.trim()}", criticalThinking: ${criticalThinkingEnabled}, docContext: ${documentContextName}, clientFilter: ${JSON.stringify(filter)}`);
             
-            // MODIFIED: Call queryPythonRagService with all relevant parameters
             relevantDocsFromRag = await queryPythonRagService(
                 userId.toString(), 
                 query.trim(), 
-                criticalThinkingEnabled, // For use_kg_critical_thinking
-                documentContextName,     // For documentContextName
-                filter                   // For the generic 'filter' payload
-                // k value can be passed here if needed, or Python service uses its default
+                criticalThinkingEnabled,
+                documentContextName,
+                filter
             );
 
             if (relevantDocsFromRag && relevantDocsFromRag.length > 0) {
-                // ... (context assembly for LLM - this part looks good) ...
                 let ragContextForPromptAssembly = "";
                 relevantDocsFromRag.forEach((doc, index) => {
                     ragContextForPromptAssembly += `\n[${index + 1}] Source Document: ${doc.documentName}\n(Score: ${doc.score ? doc.score.toFixed(3) : 'N/A'})\nContent:\n${doc.content}\n---\n`;
@@ -162,9 +145,6 @@ router.post('/message', async (req, res) => {
                 contextForLLMString = ""; 
             }
         }
-
-        // ... (rest of the /message route logic for LLM call, DB save, response)
-        // This part seems largely correct based on your existing code.
 
         const historyForLLM = history
             .map(msg => ({
@@ -187,13 +167,10 @@ router.post('/message', async (req, res) => {
         
         console.log(`   Calling ${llmProvider || 'Gemini'} API. History length for LLM: ${fullHistoryForLLM.length}. System Prompt Used: ${!!mainSystemPromptText}. Query for LLM (first 150 chars): ${queryForLLM.substring(0,150)}...`);
         
-        // aiResponseMessageText = await generateContentWithHistory(fullHistoryForLLM, mainSystemPromptText);
-        
         if (llmProvider === 'ollama') {
             aiResponseMessageText = await ollamaService.generateContentWithHistory(
                 fullHistoryForLLM,
                 mainSystemPromptText
-                // TODO: Potentially pass user-specific Ollama model name if stored
             );
         } else { // Default to Gemini
             aiResponseMessageText = await geminiService.generateContentWithHistory(
@@ -203,18 +180,24 @@ router.post('/message', async (req, res) => {
         }
 
         const aiMessageForDbAndClient = {
-            sender: 'bot',
-            role: 'model',
+            sender: 'bot', // For frontend
+            role: 'model', // For DB and LLM history
             parts: [{ text: aiResponseMessageText }],
-            text: aiResponseMessageText,
-            timestamp: new Date(),
-            thinking: null, 
+            text: aiResponseMessageText, // For frontend convenience
+            timestamp: new Date(), // Timestamp for AI message
+            thinking: null, // Placeholder, can be populated by LLM if it follows <thinking> format
             references: referencesForResponse,
             source_pipeline: actualSourcePipeline,
             critical_thinking_applied_details: useRag && criticalThinkingEnabled && relevantDocsFromRag.length > 0 ? "KG-enhanced RAG" : (criticalThinkingEnabled ? "Requested, not RAG/KG path" : "Not requested")
         };
 
-        const dbUserMessageForSave = { role: 'user', parts: userMessageForDb.parts, timestamp: userMessageForDb.timestamp };
+        // Correctly construct the user's message for the database
+        const dbUserMessageForSave = { 
+            role: 'user', 
+            parts: [{ text: query.trim() }], // Use the 'query' from req.body
+            timestamp: currentTimestamp       // Use the 'currentTimestamp' for this user message
+        };
+
         const dbAiMessageForSave = { 
             role: 'model', 
             parts: aiMessageForDbAndClient.parts, 
@@ -238,14 +221,12 @@ router.post('/message', async (req, res) => {
         res.status(200).json({ reply: aiMessageForDbAndClient }); 
 
     } catch (error) {
-        // ... (your existing error handling logic - looks good) ...
         console.error(`!!! Error processing chat message for Session ${sessionId} (RAG: ${useRag}, CriticalThinking: ${criticalThinkingEnabled}):`, error);
         let statusCode = error.status || error.response?.status || 500;
         let clientMessage = error.message || error.response?.data?.message || "Failed to get response from AI service.";
         if (error.response && error.response.data && error.response.data.error) {
             clientMessage = `Error from dependent service: ${error.response.data.error}`;
         }
-
 
         const errorMessageForChat = {
             sender: 'bot',
@@ -259,7 +240,12 @@ router.post('/message', async (req, res) => {
         };
         
         try {
-            const dbUserMessageOnError = { role: 'user', parts: userMessageForDb.parts, timestamp: userMessageForDb.timestamp };
+            // When an error occurs, still save the user's message correctly
+            const dbUserMessageOnError = { 
+                role: 'user', 
+                parts: [{ text: query.trim() }], // Use the 'query' from req.body
+                timestamp: currentTimestamp       // Use the 'currentTimestamp'
+            };
             const dbAiErrorMsg = { 
                 role: 'model', 
                 parts: errorMessageForChat.parts, 
@@ -286,10 +272,6 @@ router.post('/message', async (req, res) => {
 });
 
 // --- @route   POST /api/chat/history ---
-// ... (rest of the file remains the same as your last provided version)
-// --- @desc    Primarily for generating a new session ID for "New Chat" button.
-// ---           Can also save an entire batch of messages if needed, but /message handles incremental.
-// --- @access  Private ---
 router.post('/history', async (req, res) => {
     const { sessionId, messages } = req.body;
     const userId = req.user._id;
@@ -349,8 +331,6 @@ router.post('/history', async (req, res) => {
 
 
 // --- @route   GET /api/chat/sessions ---
-// --- @desc    Get a list of user's past chat sessions ---
-// --- @access  Private ---
 router.get('/sessions', async (req, res) => {
     const userId = req.user._id;
     console.log(`>>> GET /api/chat/sessions: User=${userId}`);
@@ -388,8 +368,6 @@ router.get('/sessions', async (req, res) => {
 
 
 // --- @route   GET /api/chat/session/:sessionId ---
-// --- @desc    Get all messages for a specific session ---
-// --- @access  Private ---
 router.get('/session/:sessionId', async (req, res) => {
     const userId = req.user._id;
     const { sessionId } = req.params;
@@ -408,9 +386,11 @@ router.get('/session/:sessionId', async (req, res) => {
         console.log(`<<< GET /api/chat/session/${sessionId}: Session found for User ${userId}. Messages: ${session.messages?.length}`);
         
         const messagesForFrontend = (session.messages || []).map(msg => ({
-            id: msg._id?.toString() || uuidv4(),
+            id: msg._id?.toString() || uuidv4(), // Provide a fallback ID if _id is somehow missing
             sender: msg.role === 'model' ? 'bot' : 'user',
-            text: msg.parts?.[0]?.text || '',
+            text: msg.parts?.[0]?.text || '', // Ensure text is always a string
+            // Ensure parts is always an array for consistency, even if text is derived from it
+            parts: msg.parts && Array.isArray(msg.parts) && msg.parts.length > 0 ? msg.parts : [{ text: msg.parts?.[0]?.text || '' }],
             thinking: msg.thinking, 
             references: msg.references, 
             timestamp: msg.timestamp,
@@ -425,10 +405,8 @@ router.get('/session/:sessionId', async (req, res) => {
 });
 
 // --- @route   POST /api/chat/rag ---
-// --- @desc    Directly test RAG (not part of main chat flow if /message handles RAG) ---
-// --- @access  Private ---
 router.post('/rag', async (req, res) => {
-    const { message, filter, k } = req.body; // k can also be passed from client for this test route
+    const { message, filter, k } = req.body;
     const userId = req.user._id.toString();
 
     if (!message || typeof message !== 'string' || message.trim() === '') {
@@ -439,14 +417,11 @@ router.post('/rag', async (req, res) => {
         const kValue = parseInt(k) || parseInt(process.env.RAG_DEFAULT_K) || 5;
         const clientFilterToPass = filter && typeof filter === 'object' ? filter : null;
 
-        // For this direct /rag test route, documentContextName and criticalThinkingEnabled
-        // are not typically part of its direct purpose, but you could add them if needed.
-        // Assuming criticalThinkingEnabled = false and documentContextName = null for this test.
         const relevantDocs = await queryPythonRagService(
             userId, 
             message.trim(), 
-            false, // criticalThinkingEnabled for this test
-            null,  // documentContextName for this test
+            false, 
+            null,  
             clientFilterToPass,
             kValue
         );
