@@ -296,7 +296,13 @@ const api = {
   getMindmap: async () => {
     const response = await apiClient.get('/mindmap'); // Assumes /api/mindmap on backend
     return response.data; // Expects { mermaidCode: "...", source: "..." }
-  }
+  },
+  getSubjects: async () => {
+        // This endpoint is protected by regular user JWT auth on the backend
+        const response = await apiClient.get("/subjects");
+        // Expects response like: { subjects: ["Admin Doc 1.pdf", "Admin Topic X.md", ...] }
+        return response.data;
+    },
 };
 
 export default api;
