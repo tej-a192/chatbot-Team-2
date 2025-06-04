@@ -1,102 +1,168 @@
 // src/hooks/useWebSpeech.js
-import { useState, useEffect, useCallback } from 'react';
+// This version uses the browser's built-in SpeechRecognition API
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export const useWebSpeech = () => {
-    const [transcript, setTranscript] = useState('');
+    const [transcript, setTranscript] = useState(''); 
     const [listening, setListening] = useState(false);
-    const [recognitionInstance, setRecognitionInstance] = useState(null);
-    const [error, setError] = useState(null); // Added error state
-    const isSpeechSupported = !!SpeechRecognition;
+    const recognitionRef = useRef(null);
+    const [error, setError] = useState(null);
+    const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+    const stopTimeoutRef = useRef(null);
 
-    useEffect(() => {
-        if (!isSpeechSupported) {
-            console.warn("Web Speech API is not supported by this browser.");
-            return;
+    const destroyRecognitionInstance = useCallback(() => {
+        console.log("useWebSpeech: destroyRecognitionInstance called.");
+        if (recognitionRef.current) {
+            recognitionRef.current.onstart = null;
+            recognitionRef.current.onresult = null;
+            recognitionRef.current.onerror = null;
+            recognitionRef.current.onend = null;
+            recognitionRef.current.abort();
+            recognitionRef.current = null;
+            console.log("useWebSpeech: Recognition instance nullified.");
+        }
+        if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+    }, []);
+    
+    const createAndSetupRecognitionInstance = useCallback(() => {
+        if (!SpeechRecognition) {
+            console.error("useWebSpeech: createAndSetup - SpeechRecognition not supported.");
+            setIsSpeechSupported(false);
+            return null;
+        }
+        
+        if (recognitionRef.current) {
+            console.log("useWebSpeech: createAndSetup - Destroying existing instance.");
+            destroyRecognitionInstance();
         }
 
+        console.log("useWebSpeech: Creating NEW SpeechRecognition instance.");
         const recognition = new SpeechRecognition();
-        recognition.continuous = false; // Set to true if you want it to keep listening
-        recognition.interimResults = false; // Set to true for live results
         recognition.lang = 'en-US';
+        recognition.continuous = false; 
+        recognition.interimResults = true; 
+
+        recognition.onstart = () => {
+            console.log("useWebSpeech: EVENT - onstart");
+            if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+            setListening(true);
+            setError(null);
+            setTranscript(''); 
+            console.log("useWebSpeech: onstart - transcript cleared, listening set to true.");
+        };
 
         recognition.onresult = (event) => {
-            const currentTranscript = Array.from(event.results)
-                .map(result => result[0])
-                .map(result => result.transcript)
-                .join('');
-            setTranscript(currentTranscript);
-            setError(null); // Clear error on successful result
-            // console.log("Voice input result:", currentTranscript);
+            console.log("useWebSpeech: EVENT - onresult FIRED!", event);
+            if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+            
+            let recognizedTextInEvent = "";
+            let isThisSegmentFinal = false;
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                const segment = event.results[i];
+                const text = segment[0]?.transcript || "";
+                console.log(`useWebSpeech: onresult - Segment ${i}: Text: "${text}", isFinal: ${segment.isFinal}`);
+                
+                if (text) recognizedTextInEvent = text; 
+                if (segment.isFinal) isThisSegmentFinal = true;
+            }
+
+            recognizedTextInEvent = recognizedTextInEvent.trim();
+            if (recognizedTextInEvent) {
+                console.log(`useWebSpeech: onresult - Updating transcript state to: "${recognizedTextInEvent}" (isFinal in this event: ${isThisSegmentFinal})`);
+                setTranscript(recognizedTextInEvent); 
+            } else {
+                console.log("useWebSpeech: onresult - No usable text in this event.");
+            }
         };
 
         recognition.onerror = (event) => {
-            console.error("Speech recognition error:", event.error);
-            let errorMessage = event.error;
-            if (event.error === 'no-speech') errorMessage = "No speech detected. Please try again.";
-            else if (event.error === 'audio-capture') errorMessage = "Audio capture failed. Check microphone.";
-            else if (event.error === 'not-allowed') errorMessage = "Microphone permission denied.";
-            else if (event.error === 'network') errorMessage = "Network error during speech recognition.";
-            // Add more specific error messages as needed
-            
-            setError(errorMessage);
-            setListening(false);
+            console.error("useWebSpeech: EVENT - onerror", event.error, event.message);
+            if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+            setError(`Speech Error: ${event.error}. ${event.message || ''}`);
+            setListening(false); 
         };
 
         recognition.onend = () => {
+            console.log("useWebSpeech: EVENT - onend. Listening state before onend:", listening);
+            if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
             setListening(false);
-            // console.log("Speech recognition ended.");
+            console.log("useWebSpeech: onend - Final transcript state:", `"${transcript}"`);
         };
         
-        setRecognitionInstance(recognition);
+        recognitionRef.current = recognition;
+        return recognition;
+    }, [destroyRecognitionInstance, listening, transcript]);
 
-        // Cleanup
+    useEffect(() => {
+        if (!SpeechRecognition) {
+            setIsSpeechSupported(false);
+            return;
+        }
+        setIsSpeechSupported(true);
+        if (!recognitionRef.current) {
+            createAndSetupRecognitionInstance();
+        }
         return () => {
-            if (recognition) {
-                recognition.abort(); // Use abort to stop and discard results if component unmounts
-            }
+            destroyRecognitionInstance();
         };
-    }, [isSpeechSupported]);
+    }, [createAndSetupRecognitionInstance, destroyRecognitionInstance]);
 
     const startListening = useCallback(() => {
-        if (recognitionInstance && !listening) {
+        if (!isSpeechSupported) { setError("Speech recognition not supported."); return; }
+        let currentRecognition = recognitionRef.current;
+        if (!currentRecognition) {
+            currentRecognition = createAndSetupRecognitionInstance();
+            if (!currentRecognition) { setError("Failed to initialize speech service."); return; }
+        }
+        if (currentRecognition && !listening) {
             try {
-                setTranscript(''); // Clear previous transcript
-                setError(null); // Clear previous errors
-                recognitionInstance.start();
-                setListening(true);
-                // console.log("Speech recognition started.");
+                currentRecognition.start();
             } catch (e) {
-                // This catch might be for synchronous errors during .start() call,
-                // most errors are handled by recognition.onerror
-                console.error("Error starting speech recognition:", e);
-                setError("Could not start voice input.");
-                setListening(false); // Ensure listening state is correct
+                setError(`Mic Error: ${e.message}.`);
+                setListening(false);
+                destroyRecognitionInstance(); 
+                createAndSetupRecognitionInstance(); 
             }
         }
-    }, [recognitionInstance, listening]);
+    }, [isSpeechSupported, listening, createAndSetupRecognitionInstance, destroyRecognitionInstance]);
 
     const stopListening = useCallback(() => {
-        if (recognitionInstance && listening) {
-            recognitionInstance.stop(); // Stop and process any captured audio
-            // setListening(false) will be called by onend event
-            // console.log("Speech recognition stopped manually.");
-        }
-    }, [recognitionInstance, listening]);
+        if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current); 
 
-    const resetTranscript = useCallback(() => {
+        if (recognitionRef.current && listening) {
+            recognitionRef.current.stop(); 
+            
+            stopTimeoutRef.current = setTimeout(() => {
+                if (listening) { 
+                    console.warn("useWebSpeech: stopListening - Timeout after stop(), forcing cleanup.");
+                    setListening(false);
+                    destroyRecognitionInstance(); 
+                    createAndSetupRecognitionInstance();  
+                }
+            }, 1000); 
+        } else {
+            if (!listening && recognitionRef.current) { 
+                setListening(false); 
+            } else if (!recognitionRef.current) {
+                createAndSetupRecognitionInstance();
+            }
+        }
+    }, [listening, createAndSetupRecognitionInstance, destroyRecognitionInstance]);
+
+    const clearHookTranscriptState = useCallback(() => {
         setTranscript('');
     }, []);
-
 
     return {
         transcript,
         listening,
-        isSpeechSupported,
+        isSpeechSupported, // Note: this is 'isSpeechSupported'
         startListening,
         stopListening,
-        resetTranscript,
-        error // Expose error state
+        resetTranscript: clearHookTranscriptState,
+        error
     };
 };
