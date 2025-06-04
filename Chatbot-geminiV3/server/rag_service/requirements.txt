@@ -25,6 +25,7 @@ qdrant-client
 neo4j
 sentence_transformers
 spacy
+opencv-python
 
 
 

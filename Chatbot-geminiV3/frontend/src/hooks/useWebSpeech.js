@@ -1,3 +1,4 @@
+// src/hooks/useWebSpeech.js
 import { useState, useEffect, useCallback } from 'react';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -6,6 +7,7 @@ export const useWebSpeech = () => {
     const [transcript, setTranscript] = useState('');
     const [listening, setListening] = useState(false);
     const [recognitionInstance, setRecognitionInstance] = useState(null);
+    const [error, setError] = useState(null); // Added error state
     const isSpeechSupported = !!SpeechRecognition;
 
     useEffect(() => {
@@ -25,15 +27,20 @@ export const useWebSpeech = () => {
                 .map(result => result.transcript)
                 .join('');
             setTranscript(currentTranscript);
+            setError(null); // Clear error on successful result
             // console.log("Voice input result:", currentTranscript);
         };
 
         recognition.onerror = (event) => {
             console.error("Speech recognition error:", event.error);
-            // Handle common errors like 'no-speech', 'audio-capture', 'not-allowed'
-            if (event.error === 'not-allowed') {
-                alert("Microphone permission denied. Please allow microphone access in your browser settings.");
-            }
+            let errorMessage = event.error;
+            if (event.error === 'no-speech') errorMessage = "No speech detected. Please try again.";
+            else if (event.error === 'audio-capture') errorMessage = "Audio capture failed. Check microphone.";
+            else if (event.error === 'not-allowed') errorMessage = "Microphone permission denied.";
+            else if (event.error === 'network') errorMessage = "Network error during speech recognition.";
+            // Add more specific error messages as needed
+            
+            setError(errorMessage);
             setListening(false);
         };
 
@@ -47,7 +54,7 @@ export const useWebSpeech = () => {
         // Cleanup
         return () => {
             if (recognition) {
-                recognition.stop();
+                recognition.abort(); // Use abort to stop and discard results if component unmounts
             }
         };
     }, [isSpeechSupported]);
@@ -56,11 +63,15 @@ export const useWebSpeech = () => {
         if (recognitionInstance && !listening) {
             try {
                 setTranscript(''); // Clear previous transcript
+                setError(null); // Clear previous errors
                 recognitionInstance.start();
                 setListening(true);
                 // console.log("Speech recognition started.");
             } catch (e) {
+                // This catch might be for synchronous errors during .start() call,
+                // most errors are handled by recognition.onerror
                 console.error("Error starting speech recognition:", e);
+                setError("Could not start voice input.");
                 setListening(false); // Ensure listening state is correct
             }
         }
@@ -68,8 +79,8 @@ export const useWebSpeech = () => {
 
     const stopListening = useCallback(() => {
         if (recognitionInstance && listening) {
-            recognitionInstance.stop();
-            setListening(false); // Manually set as onend might be delayed
+            recognitionInstance.stop(); // Stop and process any captured audio
+            // setListening(false) will be called by onend event
             // console.log("Speech recognition stopped manually.");
         }
     }, [recognitionInstance, listening]);
@@ -85,6 +96,7 @@ export const useWebSpeech = () => {
         isSpeechSupported,
         startListening,
         stopListening,
-        resetTranscript
+        resetTranscript,
+        error // Expose error state
     };
 };
