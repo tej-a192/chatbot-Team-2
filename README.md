@@ -185,10 +185,10 @@ This project is a collaborative effort. The contributors are listed below and th
 
 ## 👥 Team Contributions
 
-| Teammate Name             | Branch Name |
-|--------------------------|-------------|
-| **Pavan Teja B**         | `dev/rex`   |
-| **Rohith Syam Livingston D** | `alpha`     |
-| **Murali Krishna B**     | `dev-mk`    |
-| **Mehaboob Subhani**     | `skms`      |
-| **Anusha P**             | `anu`       |
+| Teammate Name             | Branch Name | Major Contributions                                                                                             |
+|--------------------------|-------------|------------------------------------------------------------------------------------------------------------------|
+| **Pavan Teja B**         | `dev/rex`   | File Parsing, Analysis Generation, KG Generation, Markdown, Prompting with CoT & Few-Shot Prompting             |
+| **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, DB Management                                       |
+| **Murali Krishna B**     | `dev-mk`    | Front & Backend Integration, Multi-LLM Switch, Session and Global State Management                             |
+| **Mehaboob Subhani**     | `skms`      | UI Development                                                                                                  |
+| **Anusha P**             | `anu`       | Research, Speech-to-Text, Text-to-Speech *(Last commit issues)*                                                 |
