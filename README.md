@@ -189,12 +189,18 @@ This project is a collaborative effort. The contributors are listed below and th
 
 ---
 
+## 📽️ Demo Video
+
+[Click here to watch the full demo](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing)
+
+---
+
 ## 👥 Team Contributions
 
 | Teammate Name             | Branch Name | Major Contributions                                                                                             | Contribution Link |
 |--------------------------|-------------|------------------------------------------------------------------------------------------------------------------|-------------------|
 | **Pavan Teja B**         | `dev/rex`   | File Parsing, Analysis Generation, KG Generation, Markdown, Prompting with CoT & Few-Shot Prompting             | [Link](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing) |
-| **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, DB Management                                       |                   |
+| **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, DB Management                                       | [Link](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
 | **Murali Krishna B**     | `dev-mk`    | Front & Backend Integration, Multi-LLM Switch, Session and Global State Management                             |                   |
 | **Mehaboob Subhani**     | `skms`      | UI Development                                                                                                  |                   |
 | **Anusha P**             | `anu`       | Research, Speech-to-Text, Text-to-Speech *(Last commit issues)*                                                 |                   |
