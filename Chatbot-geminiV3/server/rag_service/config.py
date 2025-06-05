@@ -95,15 +95,7 @@ QDRANT_SEARCH_MIN_RELEVANCE_SCORE = float(os.getenv("QDRANT_SEARCH_MIN_RELEVANCE
 API_PORT = int(os.getenv('API_PORT', 5000))
 logger.info(f"[Config] API Running Port: {API_PORT}")
 
-# === Optional: Tesseract OCR Path (uncomment if used) ===
-# TESSERACT_CMD = os.getenv('TESSERACT_CMD')
-# if TESSERACT_CMD:
-#     import pytesseract
-#     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-#     logger.info(f"[Config] Tesseract Path: {TESSERACT_CMD}")
-
-
-# ─── Library Availability Flags ──────────────────────
+# ─── Library Flags ──────────────────────
 try:
     import pypdf
     PYPDF_AVAILABLE      = True
@@ -170,7 +162,6 @@ except ImportError:
     PYPDF2_AVAILABLE      = False
     PyPDF2                = None
 
-# ─── Optional: Preload SpaCy & Embedding Model ───────
 
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
 
@@ -205,4 +196,4 @@ try:
     LANGCHAIN_SPLITTER_AVAILABLE = True
 except ImportError:
     LANGCHAIN_SPLITTER_AVAILABLE = False
-    RecursiveCharacterTextSplitter = None # Placeholder
+    RecursiveCharacterTextSplitter = None

@@ -63,7 +63,7 @@ async function runKgGeneration() {
                 overallSuccess = false;
             }
         }
-
+        
         if (parentPort) {
             parentPort.postMessage({ success: overallSuccess, originalName, message: finalMessage });
         }
