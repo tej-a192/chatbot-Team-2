@@ -59,10 +59,14 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         setSessionMessages([]); // Clear previous preview
         setError(''); 
         try {
-            // api.getChatHistory returns the array of messages directly
-            const messagesArray = await api.getChatHistory(sessionId); 
+            // api.getChatHistory returns the full session object, which includes a 'messages' array.
+            const sessionData = await api.getChatHistory(sessionId); 
+            
+            // Check if sessionData and sessionData.messages are valid
+            const messagesFromApi = Array.isArray(sessionData?.messages) ? sessionData.messages : [];
+
             // Map to the structure expected by the modal's display loop
-            setSessionMessages(messagesArray.map(msg => ({
+            setSessionMessages(messagesFromApi.map(msg => ({
                 id: msg.id || msg._id || `hist-${Date.now()}-${Math.random()}`,
                 sender: msg.sender, // 'user' or 'bot'
                 text: msg.text, // Main text content

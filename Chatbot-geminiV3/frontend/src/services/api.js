@@ -57,7 +57,7 @@ const api = {
 
   _getStoredDocumentAnalysis: async (documentFilename) => {
     try {
-      const response = await apiClient.get(`/ analysis / ${ encodeURIComponent(documentFilename) } `);
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
       return response.data;
     } catch (error) {
       if (error.response && error.response.status === 404) {

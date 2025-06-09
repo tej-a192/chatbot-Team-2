@@ -211,9 +211,10 @@ function MainAppLayout() {
 
     const handleNewChat = async () => {
         try {
-            const data = await api.startNewSession(); // Regular user API
-            if (data && data.sessionId) {
-                setGlobalSessionId(data.sessionId);
+            // Pass the current session ID to the backend so it can be summarized
+            const data = await api.startNewSession(currentSessionId); 
+            if (data && data.newSessionId) {
+                setGlobalSessionId(data.newSessionId); // Use the new ID from the backend
                 setAppStateMessages([]);
                 setAppStateChatStatus("New chat started.");
                 toast.success("New chat started!");
@@ -221,7 +222,7 @@ function MainAppLayout() {
                 toast.error("Could not start new chat session.");
             }
         } catch (error) {
-            toast.error("Failed to start new chat.");
+            toast.error(`Failed to start new chat: ${error.message}`);
         }
     };
 
@@ -246,8 +247,9 @@ function MainAppLayout() {
         }
         setAppStateChatStatus("Loading chat history...");
         try {
-            const historyData = await api.getChatHistory(sid); // Regular user API
-            const formattedMessages = (Array.isArray(historyData) ? historyData : []).map(msg => ({
+            // This API call now returns the full session object, including messages
+            const sessionData = await api.getChatHistory(sid);
+            const formattedMessages = (Array.isArray(sessionData.messages) ? sessionData.messages : []).map(msg => ({
                 id: msg.id || msg._id || String(Math.random() + Date.now()),
                 sender: msg.sender || (msg.role === 'model' ? 'bot' : 'user'),
                 text: msg.parts?.[0]?.text || msg.text || '',
@@ -401,21 +403,18 @@ function App() {
                 navigate('/', { replace: true });
             } else if (!currentSessionId && !location.pathname.startsWith('/admin')) { // Only start session if not on admin path
                 // console.log("App.jsx: Regular user logged in, no session, starting new one.");
-                api.startNewSession().then(data => {
-                    if (data && data.sessionId) {
-                        setGlobalSessionId(data.sessionId);
+                api.startNewSession(null).then(data => { // Pass null for no previous session
+                    if (data && data.newSessionId) {
+                        setGlobalSessionId(data.newSessionId);
                     }
                 }).catch(err => {
-                    toast.error("Failed to start new session (initial).");
-                    console.error("App.jsx: Error starting new session (initial):", err);
+                    toast.error("Failed to start initial session.");
+                    console.error("App.jsx: Error starting initial session:", err);
                 });
             }
         } else {
             // No regular user token/user, and not an admin session
-            // Show AuthModal if not trying to access an admin path (like /admin/login which doesn't exist anymore)
-            // or any other non-auth-modal related path.
-            if (!location.pathname.startsWith('/admin')) { // If not on an admin path
-                // console.log("App.jsx: No active regular or admin session. Showing AuthModal.");
+            if (!location.pathname.startsWith('/admin')) {
                 setShowAuthModal(true);
             }
         }
@@ -427,22 +426,14 @@ function App() {
     ]);
 
     const handleAuthSuccess = (authDataFromModal) => {
-        // console.log("App.jsx handleAuthSuccess: Received from AuthModal:", authDataFromModal);
-        // AuthModal now handles setting isAdminSessionActive and navigating for admin.
-        // For regular users, AuthContext handles setting token/user.
-        // This callback primarily ensures the modal closes and session ID is handled for regular users.
         setShowAuthModal(false);
-
         if (authDataFromModal && !authDataFromModal.isAdminLogin && authDataFromModal.token) {
-            // Regular user login was successful
-            if (authDataFromModal.sessionId) {
-                setGlobalSessionId(authDataFromModal.sessionId);
-            } else if (regularUserToken && !currentSessionId) { // Fallback if session ID wasn't in authData
-                api.startNewSession().then(data => {
-                    if (data && data.sessionId) setGlobalSessionId(data.sessionId);
-                });
-            }
-            // If backend provides more complete user info (including role for regular user), update AuthContext
+            // For a regular user, start a completely fresh session on successful login
+            api.startNewSession(null).then(data => { // Pass null, as there's no previous session to summarize
+                if (data && data.newSessionId) {
+                    setGlobalSessionId(data.newSessionId);
+                }
+            });
             if (authDataFromModal.username && authDataFromModal._id && authDataFromModal.role) {
                 setRegularUserInAuthContext({
                     id: authDataFromModal._id,
@@ -452,10 +443,6 @@ function App() {
             }
         } else if (authDataFromModal && authDataFromModal.isAdminLogin) {
             // Admin "login" handled by AuthModal. useEffect will handle navigation.
-            // console.log("App.jsx: Admin login processed by AuthModal.");
-        } else {
-            // Modal closed manually or other non-success scenario
-            // The useEffect will re-evaluate and show AuthModal if needed.
         }
     };
 
@@ -478,17 +465,16 @@ function App() {
 
             <Routes>
                 <Route path="/admin/dashboard" element={
-                    <AdminProtectedRoute> {/* This checks AppStateContext.isAdminSessionActive */}
+                    <AdminProtectedRoute>
                         <AdminDashboardPage />
                     </AdminProtectedRoute>
                 } />
 
-                {/* Default route / Catch-all for the main application */}
                 <Route path="/*" element={
-                    isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : // If admin is active, always go to dashboard
-                        (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : // If regular user, show main app
-                            (location.pathname.startsWith('/admin')) ? <Navigate to="/" replace /> : // If on admin path but not admin, go to main (will show modal)
-                                null // Fallback - AuthModal will be shown by useEffect if conditions are met
+                    isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> :
+                        (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> :
+                            (location.pathname.startsWith('/admin')) ? <Navigate to="/" replace /> :
+                                null
                 } />
             </Routes>
         </div>
@@ -5281,7 +5267,7 @@ apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("authToken");
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers.Authorization = `Bearer ${ token } `;
     }
     return config;
   },
@@ -5323,14 +5309,14 @@ const api = {
 
   _getStoredDocumentAnalysis: async (documentFilename) => {
     try {
-      const response = await apiClient.get(`/analysis/${encodeURIComponent(documentFilename)}`);
+      const response = await apiClient.get(`/ analysis / ${ encodeURIComponent(documentFilename) } `);
       return response.data;
     } catch (error) {
       if (error.response && error.response.status === 404) {
-        console.info(`No stored analysis found for document: ${documentFilename}`);
+        console.info(`No stored analysis found for document: ${ documentFilename } `);
         return null;
       }
-      console.error(`Error fetching stored analysis for ${documentFilename}:`, error);
+      console.error(`Error fetching stored analysis for ${ documentFilename }: `, error);
       throw error;
     }
   },
@@ -5343,7 +5329,7 @@ const api = {
       throw new Error("Filename and analysis_type are required for requestAnalysis.");
     }
 
-    const toastId = toast.loading(`Checking for stored ${analysis_type} for "${filename}"...`);
+    const toastId = toast.loading(`Checking for stored ${ analysis_type } for "${filename}"...`);
 
     try {
       const storedAnalysisData = await api._getStoredDocumentAnalysis(filename);
@@ -5355,159 +5341,159 @@ const api = {
 
         const { content: parsedContent, thinking: parsedThinking } = parseAnalysisOutput(storedAnalysisData[analysis_type]);
 
-        toast.success(`Displaying stored ${analysis_type} for "${filename}".`, { id: toastId });
+        toast.success(`Displaying stored ${ analysis_type } for "${filename}".`, { id: toastId });
         return {
           content: parsedContent,
-          thinking: parsedThinking || `Retrieved stored ${analysis_type} data. No specific thinking process recorded in content.`
+          thinking: parsedThinking || `Retrieved stored ${ analysis_type } data.No specific thinking process recorded in content.`
         };
       } else {
         toast.dismiss(toastId);
-        const generationToastId = toast.loading(`No stored ${analysis_type}. Generating new analysis for "${filename}"... (Mock V1)`);
-        console.warn(`No valid stored ${analysis_type} found for "${filename}". Falling back to mock generation.`);
+        const generationToastId = toast.loading(`No stored ${ analysis_type }. Generating new analysis for "${filename}"... (Mock V1)`);
+        console.warn(`No valid stored ${ analysis_type } found for "${filename}".Falling back to mock generation.`);
 
         await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
 
         let fullMockOutput = "";
         switch (analysis_type) {
           case 'faq':
-            fullMockOutput = `<thinking>I will identify key details from the provided text about ${filename} to formulate 5-7 FAQs with concise answers directly from the text. My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking>\n\nQ: What is this document about?\nA: This is mock FAQ content for ${filename}.\n\nQ: How is this generated?\nA: Through a mock API call when no stored data is found.`;
+            fullMockOutput = `< thinking > I will identify key details from the provided text about ${ filename } to formulate 5 - 7 FAQs with concise answers directly from the text.My plan is to scan for questions, key statements, and rephrase them appropriately.</thinking >\n\nQ: What is this document about ?\nA: This is mock FAQ content for ${ filename }.\n\nQ: How is this generated ?\nA: Through a mock API call when no stored data is found.`;
             break;
           case 'topics':
-            fullMockOutput = `<thinking>I will identify the key topics in the provided biography of ${filename}. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text. I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
-            break;
+            fullMockOutput = `< thinking > I will identify the key topics in the provided biography of ${ filename }. I will focus on the major events and themes highlighted in the narrative, ensuring each topic is explained concisely using only information from the text.I'll then list them with brief explanations.</thinking>\n\n### Mock Key Topics for ${filename}\n\n- Topic A: Mock Data Integration\n- Topic B: Placeholder Information\n- Topic C: ${analysis_type.toUpperCase()} specific to ${filename}`;
+break;
           case 'mindmap':
-            fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
-            break;
+fullMockOutput = `<thinking>Planning to generate a mind map structure for ${filename}. Will use Markdown list format focusing on hierarchical relationships found in the text.</thinking>\n\nmindmap\n  root((${filename} - Mock Mindmap))\n    Overview\n      Key Point 1\n      Key Point 2\n    Details\n      Specific Detail A\n      Specific Detail B`;
+break;
           default:
-            fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
+fullMockOutput = `<thinking>No specific thinking process for unknown analysis type '${analysis_type}'.</thinking>\n\nMock content for an unknown analysis type '${analysis_type}' on ${filename}.`;
         }
 
-        const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
+const { content: parsedMockContent, thinking: parsedMockThinking } = parseAnalysisOutput(fullMockOutput);
 
-        toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
-        return {
-          content: parsedMockContent,
-          thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
-        };
+toast.success(`${analysis_type} generated (mock data) for "${filename}".`, { id: generationToastId });
+return {
+  content: parsedMockContent,
+  thinking: parsedMockThinking || `Mock generation for ${analysis_type} on "${filename}".`
+};
       }
     } catch (error) {
-      toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
-      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
-      return {
-        content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
-        thinking: "An error occurred during the analysis process."
-      };
-    }
+  toast.error(`Error processing ${analysis_type} for "${filename}": ${error.message || 'Unknown error'}`, { id: toastId });
+  console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
+  return {
+    content: `Error: Could not retrieve or generate ${analysis_type} for "${filename}".\n${error.message}`,
+    thinking: "An error occurred during the analysis process."
+  };
+}
   },
 
-  login: async (credentials) => {
-    const response = await apiClient.post("/auth/signin", credentials);
-    return response.data;
-  },
+login: async (credentials) => {
+  const response = await apiClient.post("/auth/signin", credentials);
+  return response.data;
+},
 
   signup: async (userData) => {
     const response = await apiClient.post("/auth/signup", userData);
     return response.data;
   },
 
-  getMe: async () => {
-    const response = await apiClient.get("/auth/me");
-    return response.data;
-  },
+    getMe: async () => {
+      const response = await apiClient.get("/auth/me");
+      return response.data;
+    },
 
-  sendMessage: async (payload) => {
-    const response = await apiClient.post("/chat/message", payload);
-    return response.data;
-  },
+      sendMessage: async (payload) => {
+        const response = await apiClient.post("/chat/message", payload);
+        return response.data;
+      },
 
-  getChatHistory: async (sessionId) => {
-    const response = await apiClient.get(`/chat/session/${sessionId}`);
-    return response.data.messages || [];
-  },
+        getChatHistory: async (sessionId) => {
+          const response = await apiClient.get(`/chat/session/${sessionId}`);
+          // The backend now returns the full session object, including messages array
+          return response.data;
+        },
 
-  getChatSessions: async () => {
-    const response = await apiClient.get("/chat/sessions");
-    return response.data;
-  },
+          getChatSessions: async () => {
+            const response = await apiClient.get("/chat/sessions");
+            return response.data;
+          },
 
-  startNewSession: async () => {
-    const response = await apiClient.post("/chat/history", {
-        sessionId: `client-initiate-${Date.now()}`,
-        messages: []
-    });
-    return { sessionId: response.data.newSessionId };
-  },
+            startNewSession: async (previousSessionId) => {
+              const response = await apiClient.post("/chat/history", { previousSessionId });
+              return response.data; // Expects { newSessionId: '...' }
+            },
 
-  saveChatHistory: async (sessionId, messages) => {
-    const response = await apiClient.post("/chat/history", { sessionId, messages });
-    return response.data;
-  },
+              saveChatHistory: async (sessionId, messages) => {
+                // This function might become less used if history is always saved server-side
+                // But can be kept for explicit "save" buttons or periodic auto-saves.
+                const response = await apiClient.post("/chat/history/save", { sessionId, messages }); // Example of a different route
+                return response.data;
+              },
 
-  uploadFile: async (formData, onUploadProgress) => {
-    const response = await apiClient.post("/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-      onUploadProgress,
-    });
-    return response.data;
-  },
+                uploadFile: async (formData, onUploadProgress) => {
+                  const response = await apiClient.post("/upload", formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                    onUploadProgress,
+                  });
+                  return response.data;
+                },
 
-  getFiles: async () => {
-    const response = await apiClient.get("/files");
-    console.log("Response from /files ; ", response.data);
-    return response.data;
-  },
+                  getFiles: async () => {
+                    const response = await apiClient.get("/files");
+                    console.log("Response from /files ; ", response.data);
+                    return response.data;
+                  },
 
-  deleteFile: async (serverFilename) => {
-    const response = await apiClient.delete(`/files/${serverFilename}`);
-    return response.data;
-  },
+                    deleteFile: async (serverFilename) => {
+                      const response = await apiClient.delete(`/files/${serverFilename}`);
+                      return response.data;
+                    },
 
-  updateUserLLMConfig: async (configData) => {
-    console.warn("api.updateUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. This is a local mock via api.js.");
-    return new Promise(resolve => setTimeout(() => {
-        localStorage.setItem("selectedLLM", configData.llmProvider);
-        if (configData.apiKey) localStorage.setItem("mockGeminiApiKeyStatus", "set");
-        if (configData.ollamaUrl) localStorage.setItem("mockOllamaUrl", configData.ollamaUrl);
-        resolve({ message: `LLM preference for ${configData.llmProvider} noted (local mock via API layer).` });
-    }, 100));
-  },
+                      updateUserLLMConfig: async (configData) => {
+                        console.warn("api.updateUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. This is a local mock via api.js.");
+                        return new Promise(resolve => setTimeout(() => {
+                          localStorage.setItem("selectedLLM", configData.llmProvider);
+                          if (configData.apiKey) localStorage.setItem("mockGeminiApiKeyStatus", "set");
+                          if (configData.ollamaUrl) localStorage.setItem("mockOllamaUrl", configData.ollamaUrl);
+                          resolve({ message: `LLM preference for ${configData.llmProvider} noted (local mock via API layer).` });
+                        }, 100));
+                      },
 
-  getUserLLMConfig: async () => {
-    console.warn("api.getUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. Returning local default via api.js.");
-    return new Promise(resolve => setTimeout(() => {
-        resolve({ llmProvider: localStorage.getItem("selectedLLM") || "ollama" });
-    }, 50));
-  },
+                        getUserLLMConfig: async () => {
+                          console.warn("api.getUserLLMConfig (frontend): Node.js backend doesn't have a dedicated user config endpoint yet. Returning local default via api.js.");
+                          return new Promise(resolve => setTimeout(() => {
+                            resolve({ llmProvider: localStorage.getItem("selectedLLM") || "ollama" });
+                          }, 50));
+                        },
 
-  getOrchestratorStatus: async () => {
-    console.warn("api.getOrchestratorStatus (frontend): Using a local mock via API layer for backend status.");
-    return new Promise(resolve => setTimeout(() => {
-        resolve({
-            status: "ok",
-            message: "Backend (Node.js - Mocked Status via Frontend API)",
-            database_status: "Connected (Mock)",
-        });
-    }, 50));
-  },
+                          getOrchestratorStatus: async () => {
+                            console.warn("api.getOrchestratorStatus (frontend): Using a local mock via API layer for backend status.");
+                            return new Promise(resolve => setTimeout(() => {
+                              resolve({
+                                status: "ok",
+                                message: "Backend (Node.js - Mocked Status via Frontend API)",
+                                database_status: "Connected (Mock)",
+                              });
+                            }, 50));
+                          },
 
-  // THIS IS THE KEY FUNCTION FOR STEP 1
-  getSubjects: async () => {
-    // This method calls the /api/subjects endpoint which is protected by authMiddleware
-    // The apiClient's interceptor will automatically add the JWT token.
-    const response = await apiClient.get("/subjects");
-    // Backend returns { subjects: ["Subject A", "Subject B", ...] }
-    return response.data; // Should contain { subjects: [...] }
-  },
+                            // THIS IS THE KEY FUNCTION FOR STEP 1
+                            getSubjects: async () => {
+                              // This method calls the /api/subjects endpoint which is protected by authMiddleware
+                              // The apiClient's interceptor will automatically add the JWT token.
+                              const response = await apiClient.get("/subjects");
+                              // Backend returns { subjects: ["Subject A", "Subject B", ...] }
+                              return response.data; // Should contain { subjects: [...] }
+                            },
 
-  getSyllabus: async (subjectId) => {
-    const response = await apiClient.get(`/syllabus/${subjectId}`);
-    return response.data.syllabus;
-  },
+                              getSyllabus: async (subjectId) => {
+                                const response = await apiClient.get(`/syllabus/${subjectId}`);
+                                return response.data.syllabus;
+                              },
 
-  getMindmap: async () => {
-    const response = await apiClient.get('/mindmap');
-    return response.data;
-  }
+                                getMindmap: async () => {
+                                  const response = await apiClient.get('/mindmap');
+                                  return response.data;
+                                }
 };
 
 export default api;
@@ -9362,19 +9348,9 @@ const axios = require('axios');
 
 const router = express.Router();
 
-// Summarization prerequisites
-const HISTORY_CHAR_THRESHOLD = 8000;
-const RECENT_MESSAGES_TO_KEEP = 10;
-
-
 // --- Helper to call Python RAG Query Endpoint ---
 async function queryPythonRagService(
-    userId,
-    query,
-    criticalThinkingEnabled, // boolean: for use_kg_critical_thinking
-    documentContextNameToPass, // string: for documentContextName
-    clientFilter = null, // object: for the generic 'filter'
-    k = 5 // Default k value
+    userId, query, criticalThinkingEnabled, documentContextNameToPass, clientFilter = null, k = 5
 ) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
@@ -9385,18 +9361,12 @@ async function queryPythonRagService(
     console.log(`Querying Python RAG: User ${userId}, Query (first 50): "${query.substring(0, 50)}...", k=${k}, CriticalThinking=${criticalThinkingEnabled}, DocContext=${documentContextNameToPass}`);
 
     const payload = {
-        query: query,
-        k: k,
-        user_id: userId,
+        query: query, k: k, user_id: userId,
         use_kg_critical_thinking: !!criticalThinkingEnabled,
         documentContextName: documentContextNameToPass || null
     };
-
     if (clientFilter && typeof clientFilter === 'object' && Object.keys(clientFilter).length > 0) {
         payload.filter = clientFilter;
-        console.log(`  Applying generic filter to Python RAG search:`, clientFilter);
-    } else {
-        console.log(`  No generic client filter applied to Python RAG search.`);
     }
 
     try {
@@ -9404,27 +9374,17 @@ async function queryPythonRagService(
             headers: { 'Content-Type': 'application/json' },
             timeout: process.env.PYTHON_RAG_TIMEOUT || 30000
         });
-
         if (response.data && Array.isArray(response.data.retrieved_documents_list)) {
-            console.log(`Python RAG service /query returned ${response.data.retrieved_documents_list.length} results.`);
             return response.data.retrieved_documents_list.map(doc => ({
                 documentName: doc.metadata?.file_name || doc.metadata?.original_name || doc.metadata?.title || 'Unknown Document',
-                content: doc.page_content || "",
-                score: doc.metadata?.score,
+                content: doc.page_content || "", score: doc.metadata?.score,
             }));
         }
-        console.warn(`Python RAG /query returned unexpected data structure:`, response.data);
         return [];
     } catch (error) {
         let errorMsg = error.message;
-        if (error.response?.data?.error) {
-            errorMsg = `Python Service Error: ${error.response.data.error}`;
-            if (error.response.data.details) {
-                errorMsg += ` | Details: ${JSON.stringify(error.response.data.details)}`;
-            }
-        } else if (error.code === 'ECONNABORTED') {
-            errorMsg = 'Python RAG service request timed out.';
-        }
+        if (error.response?.data?.error) errorMsg = `Python Service Error: ${error.response.data.error}`;
+        else if (error.code === 'ECONNABORTED') errorMsg = 'Python RAG service request timed out.';
         console.error(`Error querying Python RAG service at ${searchUrl}:`, errorMsg);
         return [];
     }
@@ -9433,18 +9393,12 @@ async function queryPythonRagService(
 
 // --- @route   POST /api/chat/message ---
 // --- @desc    Send a message, get AI response, save interaction ---
-// --- @access  Private (authMiddleware applied in server.js) ---
+// --- @access  Private ---
 router.post('/message', async (req, res) => {
     const {
-        query,
-        // history is received but we use the DB as the source of truth
-        sessionId,
-        useRag,
-        llmProvider: clientLlmProvider,
-        systemPrompt: clientProvidedSystemInstruction,
-        criticalThinkingEnabled,
-        documentContextName,
-        filter
+        query, sessionId, useRag, llmProvider: clientLlmProvider,
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
     } = req.body;
     const userId = req.user._id;
 
@@ -9455,125 +9409,73 @@ router.post('/message', async (req, res) => {
         return res.status(400).json({ message: 'Session ID required.' });
     }
 
-    const userMessageForDb = {
-        role: 'user',
-        parts: [{ text: query }],
-        timestamp: new Date()
-    };
-
-    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}, Query: "${query.substring(0,50)}..."`);
+    const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, RAG=${useRag}, Query: "${query.substring(0, 50)}..."`);
 
     try {
-        // 1. FETCH STATE
+        // 1. FETCH AUTHORITATIVE STATE FROM DB
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
             User.findById(userId).select('preferredLlmProvider ollamaModel').lean()
         ]);
-
         const llmProvider = user?.preferredLlmProvider || clientLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
-        // Initialize local state variables from DB
-        let fullDbHistory = chatSession ? chatSession.messages : [];
-        let currentSummary = chatSession ? chatSession.summary || "" : "";
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
 
-        // 2. PROCESS STATE & SUMMARIZE (if needed)
-        const totalHistoryChars = fullDbHistory.reduce((acc, msg) => acc + (msg.parts?.[0]?.text?.length || 0), 0);
-        let finalMessagesToSave = [...fullDbHistory];
-        let finalSummaryToSave = currentSummary;
-
-        if (totalHistoryChars > HISTORY_CHAR_THRESHOLD && fullDbHistory.length > RECENT_MESSAGES_TO_KEEP) {
-            console.log(`[Chat Summarizer] History for session ${sessionId} exceeds threshold. Summarizing.`);
-            
-            const messagesToSummarize = fullDbHistory.slice(0, -RECENT_MESSAGES_TO_KEEP);
-            const recentMessages = fullDbHistory.slice(-RECENT_MESSAGES_TO_KEEP);
-
-            if (messagesToSummarize.length > 0) {
-                const newSummary = await createOrUpdateSummary(messagesToSummarize, currentSummary, llmProvider, ollamaModel);
-                
-                if (newSummary && newSummary.trim() !== "" && newSummary !== currentSummary) {
-                    console.log(`[Chat Summarizer] New summary generated. Context for this turn will be updated.`);
-                    finalSummaryToSave = newSummary; 
-                    fullDbHistory = recentMessages; // History for this turn is now the truncated version
-                }
-            }
-        }
-
-        // 3. PREPARE PROMPT FOR LLM
+        // 2. PREPARE PROMPT FOR LLM (using only DB state)
         let referencesForResponse = [];
         let actualSourcePipeline = `${llmProvider}-direct`;
-        let contextForLLMString = "";
+        let ragContextString = "";
         
         if (useRag) {
             actualSourcePipeline = `${llmProvider}-rag`;
             const relevantDocsFromRag = await queryPythonRagService(
                 userId.toString(), query.trim(), criticalThinkingEnabled, documentContextName, filter
             );
-            if (relevantDocsFromRag && relevantDocsFromRag.length > 0) {
-                let ragContextForPromptAssembly = "";
-                relevantDocsFromRag.forEach((doc, index) => {
-                    ragContextForPromptAssembly += `\n[${index + 1}] Source Document: ${doc.documentName}\n(Score: ${doc.score ? doc.score.toFixed(3) : 'N/A'})\nContent:\n${doc.content}\n---\n`;
+            if (relevantDocsFromRag?.length > 0) {
+                ragContextString = relevantDocsFromRag.map((doc, index) => {
                     referencesForResponse.push({
                         number: index + 1, source: doc.documentName,
                         content_preview: doc.content.substring(0, 100) + (doc.content.length > 100 ? "..." : "")
                     });
-                });
-                contextForLLMString = ragContextForPromptAssembly.trim();
+                    return `\n[${index + 1}] Source: ${doc.documentName}\nContent:\n${doc.content}\n---`;
+                }).join('');
             }
         }
         
         const historyForLlm = [];
-        if (finalSummaryToSave) { // Use the potentially updated summary
-            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT: Here is a summary of our conversation so far. Use it to inform your response but do not mention the summary itself in your answer:\n\n"""\n${finalSummaryToSave}\n"""` }] });
+        if (summaryFromDb) {
+            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT: Here is a summary of our conversation so far. Use it to inform your response but do not mention the summary itself in your answer:\n\n"""\n${summaryFromDb}\n"""` }] });
             historyForLlm.push({ role: 'model', parts: [{ text: "Okay, I have reviewed the summary of our previous conversation. I will use this context for my next response. How can I help you now?" }] });
         }
         
-        // Use the potentially truncated history for the prompt
-        const formattedMessages = fullDbHistory.map(msg => ({
+        const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
-        historyForLlm.push(...formattedMessages);
+        historyForLlm.push(...formattedDbMessages);
         
-        let queryForLLM;
-        if (useRag && contextForLLMString) {
-            queryForLLM = CHAT_USER_PROMPT_TEMPLATES.rag(query.trim(), contextForLLMString, clientProvidedSystemInstruction);
-        } else {
-            queryForLLM = CHAT_USER_PROMPT_TEMPLATES.direct(query.trim(), clientProvidedSystemInstruction);
-        }
+        const queryForLLM = useRag && ragContextString
+            ? CHAT_USER_PROMPT_TEMPLATES.rag(query.trim(), ragContextString, clientProvidedSystemInstruction)
+            : CHAT_USER_PROMPT_TEMPLATES.direct(query.trim(), clientProvidedSystemInstruction);
         const fullHistoryForLLM = [...historyForLlm, { role: 'user', parts: [{ text: queryForLLM }] }];
         
-        // 4. CALL LLM SERVICE
+        // 3. CALL LLM SERVICE
         console.log(`   Calling ${llmProvider} API. Effective history length for LLM: ${fullHistoryForLLM.length}.`);
         const aiResponseMessageText = llmProvider === 'ollama'
             ? await ollamaService.generateContentWithHistory(fullHistoryForLLM, CHAT_MAIN_SYSTEM_PROMPT(), { model: ollamaModel })
             : await geminiService.generateContentWithHistory(fullHistoryForLLM, CHAT_MAIN_SYSTEM_PROMPT());
 
         const aiMessageForDbAndClient = {
-            sender: 'bot', role: 'model', parts: [{ text: aiResponseMessageText }],
-            text: aiResponseMessageText, timestamp: new Date(), thinking: null,
-            references: referencesForResponse, source_pipeline: actualSourcePipeline,
+            sender: 'bot', role: 'model', parts: [{ text: aiResponseMessageText }], text: aiResponseMessageText,
+            timestamp: new Date(), thinking: null, references: referencesForResponse, source_pipeline: actualSourcePipeline,
         };
 
-        // 5. PERSIST FINAL STATE TO DB (Single Operation)
-        // If summarization happened, finalMessagesToSave is already the truncated version.
-        // If not, it's the full history. Now add the new messages.
-        if(finalSummaryToSave !== currentSummary) {
-            // If we summarized, the history to save is the truncated part + new messages
-            finalMessagesToSave = [...fullDbHistory, userMessageForDb, aiMessageForDbAndClient];
-        } else {
-            // Otherwise, just append to the existing full history
-            finalMessagesToSave.push(userMessageForDb, aiMessageForDbAndClient);
-        }
-        
+        // 4. PERSIST FINAL STATE TO DB
         await ChatHistory.findOneAndUpdate(
             { sessionId: sessionId, userId: userId },
-            { 
-                $set: { 
-                    messages: finalMessagesToSave,
-                    summary: finalSummaryToSave,
-                    updatedAt: new Date() 
-                } 
-            },
+            { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } }, $set: { updatedAt: new Date() } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
@@ -9586,14 +9488,11 @@ router.post('/message', async (req, res) => {
         const clientMessage = error.message || "Failed to get response from AI service.";
         
         const errorMessageForChat = {
-            sender: 'bot', role: 'model', parts: [{ text: `Error: ${clientMessage}` }],
-            text: `Error: ${clientMessage}`, timestamp: new Date(),
-            thinking: `Error occurred during processing: ${error.message}`, references: [],
-            source_pipeline: 'error-pipeline'
+            sender: 'bot', role: 'model', parts: [{ text: `Error: ${clientMessage}` }], text: `Error: ${clientMessage}`,
+            timestamp: new Date(), thinking: `Error occurred: ${error.message}`, references: [], source_pipeline: 'error-pipeline'
         };
         
         try {
-            // Attempt to save the user message and the error response to history
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, errorMessageForChat] } }, $set: { updatedAt: new Date() } },
@@ -9606,55 +9505,55 @@ router.post('/message', async (req, res) => {
     }
 });
 
+
 // --- @route   POST /api/chat/history ---
+// --- @desc    Handles starting a new session, summarizing the old one to carry over context ---
+// --- @access  Private ---
 router.post('/history', async (req, res) => {
-    const { sessionId, messages } = req.body;
+    const { previousSessionId } = req.body;
     const userId = req.user._id;
+    const newSessionId = uuidv4();
+    let summaryOfOldSession = "";
 
-    if (!sessionId || sessionId.startsWith('client-initiate-') || (Array.isArray(messages) && messages.length === 0)) {
-        const newServerSessionId = uuidv4();
-        console.log(`>>> POST /api/chat/history (New Session ID): User=${userId}. Generated New SID: ${newServerSessionId}`);
-        return res.status(200).json({
-            message: 'New session ID generated.',
-            savedSessionId: null,
-            newSessionId: newServerSessionId
-        });
-    }
+    console.log(`>>> POST /api/chat/history (New Session): User=${userId}, PrevSID=${previousSessionId}`);
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-        return res.status(400).json({ message: 'No valid messages provided to save for existing session.' });
-    }
-    
-    console.log(`>>> POST /api/chat/history (Explicit Save): User=${userId}, Session=${sessionId}, Messages=${messages.length}`);
-    try {
-        const validMessagesForDb = messages.map(m => ({
-            role: m.sender === 'user' ? 'user' : 'model',
-            parts: m.parts.map(p => ({ text: p.text || '' })),
-            timestamp: new Date(m.timestamp),
-            thinking: m.thinking || undefined,
-            references: m.references || undefined,
-            source_pipeline: m.source_pipeline || undefined
-        })).filter(Boolean);
+    if (previousSessionId) {
+        try {
+            const oldSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
+            const user = await User.findById(userId).select('preferredLlmProvider ollamaModel').lean();
+            const llmProvider = user?.preferredLlmProvider || 'gemini';
+            const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
-        if (validMessagesForDb.length === 0) {
-            return res.status(400).json({ message: 'No valid messages to save after filtering.' });
+            if (oldSession && oldSession.messages?.length > 0) {
+                console.log(`   Summarizing previous session ${previousSessionId} to carry over context.`);
+                const fullHistoryOfOldSession = oldSession.messages;
+                summaryOfOldSession = await createOrUpdateSummary(
+                    fullHistoryOfOldSession,
+                    oldSession.summary, // Pass existing summary to be cumulative
+                    llmProvider,
+                    ollamaModel
+                );
+            }
+        } catch (summaryError) {
+            console.error(`!!! Could not summarize previous session ${previousSessionId}:`, summaryError);
         }
+    }
 
-        const savedHistory = await ChatHistory.findOneAndUpdate(
-            { sessionId: sessionId, userId: userId },
-            { $set: { userId: userId, sessionId: sessionId, messages: validMessagesForDb, updatedAt: Date.now() } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-        );
-        
-        console.log(`<<< POST /api/chat/history (Explicit Save): History saved for session ${savedHistory.sessionId}.`);
-        res.status(200).json({
-            message: 'Chat history explicitly saved successfully.',
-            savedSessionId: savedHistory.sessionId,
-            newSessionId: savedHistory.sessionId
+    try {
+        await ChatHistory.create({
+            userId: userId,
+            sessionId: newSessionId,
+            messages: [],
+            summary: summaryOfOldSession,
         });
-    } catch (error) {
-        console.error(`!!! Error explicitly saving chat history for session ${sessionId}:`, error);
-        res.status(500).json({ message: 'Failed to save chat history due to a server error.' });
+        console.log(`<<< POST /api/chat/history: New session ${newSessionId} created for User=${userId}. Summary length: ${summaryOfOldSession.length}`);
+        res.status(200).json({
+            message: 'New session started.',
+            newSessionId: newSessionId,
+        });
+    } catch (dbError) {
+        console.error(`!!! Failed to create new chat session ${newSessionId} in DB:`, dbError);
+        res.status(500).json({ message: 'Failed to create new session due to a server error.' });
     }
 });
 
@@ -11948,7 +11847,7 @@ Example of a good updated summary:
  */
 async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmProvider, ollamaModel) {
     if (!messagesToSummarize || messagesToSummarize.length === 0) {
-        return existingSummary; // Nothing new to summarize, return the old one.
+        return existingSummary || ""; // Return old summary or empty string if nothing to summarize
     }
 
     // Format the history for the summarization prompt
@@ -11959,7 +11858,7 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
     }).join('\n\n');
 
     let userPrompt = "";
-    if (existingSummary) {
+    if (existingSummary && existingSummary.trim() !== "") {
         userPrompt = `Existing Summary:\n"""\n${existingSummary}\n"""\n\nNew Messages to integrate:\n"""\n${newMessagesText}\n"""\n\nPlease provide the new, updated summary.`;
     } else {
         userPrompt = `New Messages to summarize:\n"""\n${newMessagesText}\n"""\n\nPlease provide the summary.`;
@@ -11967,7 +11866,7 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
 
     const historyForLlm = [{ role: 'user', parts: [{ text: userPrompt }] }];
 
-    console.log(`[SummarizationService] Requesting summary using ${llmProvider}. Existing summary length: ${existingSummary.length}, New messages length: ${newMessagesText.length}`);
+    console.log(`[SummarizationService] Requesting summary using ${llmProvider}. Existing summary length: ${existingSummary ? existingSummary.length : 0}, New messages length: ${newMessagesText.length}`);
 
     try {
         let summary;
@@ -11985,11 +11884,11 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
         }
 
         console.log(`[SummarizationService] Summary generated successfully.`);
-        return summary;
+        return summary.trim();
     } catch (error) {
         console.error(`[SummarizationService] Error generating summary: ${error.message}`);
         // Return the old summary on failure to avoid losing context.
-        return existingSummary;
+        return existingSummary || "";
     }
 }
 
