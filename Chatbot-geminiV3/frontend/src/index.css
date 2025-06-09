@@ -131,7 +131,7 @@
     }
     pre code {
       @apply bg-transparent p-0 font-mono text-sm leading-relaxed;
-      color: #abb2bf;
+      /* color: #abb2bf; */
       white-space: pre-wrap;
       word-break: break-all;
     }
