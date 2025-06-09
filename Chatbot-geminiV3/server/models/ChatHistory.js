@@ -1,38 +1,15 @@
+// server/models/ChatHistory.js
 const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid'); // For default message ID if needed
+const { v4: uuidv4 } = require('uuid');
 
 const MessageSchema = new mongoose.Schema({
-    // id: { type: String, default: uuidv4 }, // Client usually generates this for optimistic updates
-    role: { // 'user' or 'model' (for Gemini compatibility)
-        type: String,
-        enum: ['user', 'model'],
-        required: true
-    },
-    parts: [{ // Gemini structure
-        text: {
-            type: String,
-            required: true
-        },
-        // _id: false // Mongoose adds _id by default, can disable if truly not needed per part
-    }],
-    timestamp: {
-        type: Date,
-        default: Date.now
-    },
-    // Optional fields from AI response
-    thinking: {
-        type: String,
-        default: ''
-    },
-    references: {
-        type: Array, // Array of objects like { number, source, content_preview }
-        default: []
-    },
-    source_pipeline: { // e.g., "gemini-direct", "gemini-rag"
-        type: String,
-        default: ''
-    }
-}, { _id: false }); // Don't create separate _id for each message object in the array
+    role: { type: String, enum: ['user', 'model'], required: true },
+    parts: [{ text: { type: String, required: true } }],
+    timestamp: { type: Date, default: Date.now },
+    thinking: { type: String, default: '' },
+    references: { type: Array, default: [] },
+    source_pipeline: { type: String, default: '' }
+}, { _id: false });
 
 const ChatHistorySchema = new mongoose.Schema({
     userId: {
@@ -48,6 +25,10 @@ const ChatHistorySchema = new mongoose.Schema({
         index: true,
     },
     messages: [MessageSchema],
+    summary: {
+        type: String,
+        default: ''
+    },
     createdAt: {
         type: Date,
         default: Date.now,

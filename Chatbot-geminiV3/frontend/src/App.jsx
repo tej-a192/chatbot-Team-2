@@ -51,9 +51,10 @@ function MainAppLayout() {
 
     const handleNewChat = async () => {
         try {
-            const data = await api.startNewSession(); // Regular user API
-            if (data && data.sessionId) {
-                setGlobalSessionId(data.sessionId);
+            // Pass the current session ID to the backend so it can be summarized
+            const data = await api.startNewSession(currentSessionId); 
+            if (data && data.newSessionId) {
+                setGlobalSessionId(data.newSessionId); // Use the new ID from the backend
                 setAppStateMessages([]);
                 setAppStateChatStatus("New chat started.");
                 toast.success("New chat started!");
@@ -61,7 +62,7 @@ function MainAppLayout() {
                 toast.error("Could not start new chat session.");
             }
         } catch (error) {
-            toast.error("Failed to start new chat.");
+            toast.error(`Failed to start new chat: ${error.message}`);
         }
     };
 
@@ -86,8 +87,9 @@ function MainAppLayout() {
         }
         setAppStateChatStatus("Loading chat history...");
         try {
-            const historyData = await api.getChatHistory(sid); // Regular user API
-            const formattedMessages = (Array.isArray(historyData) ? historyData : []).map(msg => ({
+            // This API call now returns the full session object, including messages
+            const sessionData = await api.getChatHistory(sid);
+            const formattedMessages = (Array.isArray(sessionData.messages) ? sessionData.messages : []).map(msg => ({
                 id: msg.id || msg._id || String(Math.random() + Date.now()),
                 sender: msg.sender || (msg.role === 'model' ? 'bot' : 'user'),
                 text: msg.parts?.[0]?.text || msg.text || '',
@@ -241,21 +243,18 @@ function App() {
                 navigate('/', { replace: true });
             } else if (!currentSessionId && !location.pathname.startsWith('/admin')) { // Only start session if not on admin path
                 // console.log("App.jsx: Regular user logged in, no session, starting new one.");
-                api.startNewSession().then(data => {
-                    if (data && data.sessionId) {
-                        setGlobalSessionId(data.sessionId);
+                api.startNewSession(null).then(data => { // Pass null for no previous session
+                    if (data && data.newSessionId) {
+                        setGlobalSessionId(data.newSessionId);
                     }
                 }).catch(err => {
-                    toast.error("Failed to start new session (initial).");
-                    console.error("App.jsx: Error starting new session (initial):", err);
+                    toast.error("Failed to start initial session.");
+                    console.error("App.jsx: Error starting initial session:", err);
                 });
             }
         } else {
             // No regular user token/user, and not an admin session
-            // Show AuthModal if not trying to access an admin path (like /admin/login which doesn't exist anymore)
-            // or any other non-auth-modal related path.
-            if (!location.pathname.startsWith('/admin')) { // If not on an admin path
-                // console.log("App.jsx: No active regular or admin session. Showing AuthModal.");
+            if (!location.pathname.startsWith('/admin')) {
                 setShowAuthModal(true);
             }
         }
@@ -267,22 +266,14 @@ function App() {
     ]);
 
     const handleAuthSuccess = (authDataFromModal) => {
-        // console.log("App.jsx handleAuthSuccess: Received from AuthModal:", authDataFromModal);
-        // AuthModal now handles setting isAdminSessionActive and navigating for admin.
-        // For regular users, AuthContext handles setting token/user.
-        // This callback primarily ensures the modal closes and session ID is handled for regular users.
         setShowAuthModal(false);
-
         if (authDataFromModal && !authDataFromModal.isAdminLogin && authDataFromModal.token) {
-            // Regular user login was successful
-            if (authDataFromModal.sessionId) {
-                setGlobalSessionId(authDataFromModal.sessionId);
-            } else if (regularUserToken && !currentSessionId) { // Fallback if session ID wasn't in authData
-                api.startNewSession().then(data => {
-                    if (data && data.sessionId) setGlobalSessionId(data.sessionId);
-                });
-            }
-            // If backend provides more complete user info (including role for regular user), update AuthContext
+            // For a regular user, start a completely fresh session on successful login
+            api.startNewSession(null).then(data => { // Pass null, as there's no previous session to summarize
+                if (data && data.newSessionId) {
+                    setGlobalSessionId(data.newSessionId);
+                }
+            });
             if (authDataFromModal.username && authDataFromModal._id && authDataFromModal.role) {
                 setRegularUserInAuthContext({
                     id: authDataFromModal._id,
@@ -292,10 +283,6 @@ function App() {
             }
         } else if (authDataFromModal && authDataFromModal.isAdminLogin) {
             // Admin "login" handled by AuthModal. useEffect will handle navigation.
-            // console.log("App.jsx: Admin login processed by AuthModal.");
-        } else {
-            // Modal closed manually or other non-success scenario
-            // The useEffect will re-evaluate and show AuthModal if needed.
         }
     };
 
@@ -318,17 +305,16 @@ function App() {
 
             <Routes>
                 <Route path="/admin/dashboard" element={
-                    <AdminProtectedRoute> {/* This checks AppStateContext.isAdminSessionActive */}
+                    <AdminProtectedRoute>
                         <AdminDashboardPage />
                     </AdminProtectedRoute>
                 } />
 
-                {/* Default route / Catch-all for the main application */}
                 <Route path="/*" element={
-                    isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : // If admin is active, always go to dashboard
-                        (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : // If regular user, show main app
-                            (location.pathname.startsWith('/admin')) ? <Navigate to="/" replace /> : // If on admin path but not admin, go to main (will show modal)
-                                null // Fallback - AuthModal will be shown by useEffect if conditions are met
+                    isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> :
+                        (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> :
+                            (location.pathname.startsWith('/admin')) ? <Navigate to="/" replace /> :
+                                null
                 } />
             </Routes>
         </div>
