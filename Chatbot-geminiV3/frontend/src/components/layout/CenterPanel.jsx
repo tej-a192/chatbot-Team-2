@@ -44,12 +44,11 @@ function CenterPanel({ messages, setMessages, currentSessionId, chatStatus, setC
 
         if (useRag) {
             // Prioritize selectedSubject for RAG context in chat
-            if (selectedSubject) {
-                ragContextNameForPayload = selectedSubject;
-                currentThinkingStatus = `Using subject "${selectedSubject}" & contacting ${selectedLLM.toUpperCase()}`;
+             ragContextNameForPayload = selectedSubject || selectedDocumentForAnalysis;
+
+            if (ragContextNameForPayload) {
+                currentThinkingStatus = `Using document "${ragContextNameForPayload}" & contacting ${selectedLLM.toUpperCase()}`;
             } else {
-                // If no subject is selected, RAG will be general or use other implicit contexts if backend supports it.
-                // selectedDocumentForAnalysis is primarily for the RightPanel tools, not general chat RAG by default.
                 currentThinkingStatus = `Contacting ${selectedLLM.toUpperCase()} (RAG - General Context)`;
             }
             if (isCtEnabledFromInput) {
