@@ -182,3 +182,13 @@ This project is a collaborative effort. The contributors are listed below and th
 3.  Murali Krishna B
 4.  Mahaboob Subhani SK
 5.  Anusha P
+
+## 👥 Team Contributions
+
+| Teammate Name             | Branch Name |
+|--------------------------|-------------|
+| **Pavan Teja B**         | `dev/rex`   |
+| **Rohith Syam Livingston D** | `alpha`     |
+| **Murali Krishna B**     | `dev-mk`    |
+| **Mehaboob Subhani**     | `skms`      |
+| **Anusha P**             | `anu`       |
