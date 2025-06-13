@@ -68,6 +68,10 @@ Before you begin, ensure you have the following installed and configured:
     ```bash
         Add the `C:\Program Files\Tesseract-OCR` in the system environment variables
     ```
+4. **Download and setup FFmpeg (used for podcast audio generation):**
+   - Download: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+   - Extract to: `C:\ffmpeg`
+   - Add `C:\ffmpeg\bin` to your system’s environment variables
 
 3.  **Backend Setup (Python RAG & KG Service):**
     *   Navigate to the Python service directory:
@@ -79,7 +83,11 @@ Before you begin, ensure you have the following installed and configured:
             pip install -r requirements.txt
         ```
     *   Ensure `config.py` correctly loads necessary environment variables (it typically reads from `server/.env` via `os.getenv`). Verify paths or settings like `TESSERACT_CMD` if you customized them.
-    
+    *   Run the following command to install the required SpaCy model after installing Python dependencies:
+    ```bash
+    python -m spacy download en_core_web_sm
+    ```
+
     
 4.  **Running the Backend (RAG & Node Server):**
     
@@ -173,6 +181,12 @@ Before you begin, ensure you have the following installed and configured:
         We implemented a web search agentic framework that empowers the chatbot to fetch real-time information from the internet using **DuckDuckGo**. The agent dynamically decides how to respond based on the user's query:
         * If the question is factual or answerable by the LLMs (Gemini or Ollama), it directly fetches a response using the model.
         * If the question requires up-to-date or external information, the query is routed through a web search agent that retrieves relevant content from DuckDuckGo and integrates it into the final answer.
+   *   **Podcast Generator**:  
+        We implemented a podcast generation agentic framework that transforms documents into spoken audio using **gTTS (Google Text-to-Speech)**. This feature allows users to listen to the contents of any uploaded document as a podcast:
+        * The system first extracts and processes the full text content from the uploaded file (PDFs, DOCX, or text).
+        * Using gTTS, the text is converted into natural-sounding speech and saved as an MP3 file.
+        * FFmpeg is used to ensure the audio is properly encoded and compatible for playback or download.
+        * The generated podcast file is then made available for streaming or download through the chat interface.
 
 *   **Others**:
     *   Speech-to-Text for user input.
@@ -203,5 +217,5 @@ This project is a collaborative effort. The contributors are listed below and th
 | **Pavan Teja B**         | `dev/rex`   | Advanced File Parsing(Text, Tables, Images), Analysis Generation(FAQs, Topics, Mindmaps), Knowledge graph generation, , DB Management, Markdown, Prompting with CoT & Few-Shot Prompting             | [Link](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing) |
 | **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, Long Term Memory                                       | [Link](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
 | **Murali Krishna B**     | `dev-mk`    | Front & Backend Integration, Multi-LLM Switch, Session and Global State Management                             |                   |
-| **Mehaboob Subhani**     | `skms`      | UI Development, Web Search Agentic framework using DuckDuckGo, Content generation(ppt,docs) for analysis tools, User profile management                                                                                                 | [Link](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
+| **Mehaboob Subhani**     | `skms`      | UI Development, Web Search Agentic framework using DuckDuckGo, Content generation(ppt,docs) for analysis tools, User profile management, Podcast generation using gTTS                                                                                                 | [Link](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
 | **Anusha P**             | `anu`       | Research, Speech-to-Text, Text-to-Speech using                                                  |                   |
