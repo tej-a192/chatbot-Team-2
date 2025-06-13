@@ -168,6 +168,12 @@ Before you begin, ensure you have the following installed and configured:
     *   Knowledge Check
     *   Custom Prompt (Editable)
 *   **Subject Focus for Chat**: Users can select an admin-uploaded document (as a "Subject") to focus the RAG chat context.
+*   **Agentic Frameworks**:
+    *   **Web Search Agent**:  
+        We implemented a web search agentic framework that empowers the chatbot to fetch real-time information from the internet using **DuckDuckGo**. The agent dynamically decides how to respond based on the user's query:
+        * If the question is factual or answerable by the LLMs (Gemini or Ollama), it directly fetches a response using the model.
+        * If the question requires up-to-date or external information, the query is routed through a web search agent that retrieves relevant content from DuckDuckGo and integrates it into the final answer.
+
 *   **Others**:
     *   Speech-to-Text for user input.
     *   Text-to-Speech for AI messages.
@@ -195,7 +201,7 @@ This project is a collaborative effort. The contributors are listed below and th
 | Teammate Name             | Branch Name | Major Contributions                                                                                             | Contribution Link |
 |--------------------------|-------------|------------------------------------------------------------------------------------------------------------------|-------------------|
 | **Pavan Teja B**         | `dev/rex`   | Advanced File Parsing(Text, Tables, Images), Analysis Generation(FAQs, Topics, Mindmaps), Knowledge graph generation, , DB Management, Markdown, Prompting with CoT & Few-Shot Prompting             | [Link](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing) |
-| **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking                                       | [Link](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
+| **Rohith Syam Livingston D** | `alpha`     | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, Long Term Memory                                       | [Link](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
 | **Murali Krishna B**     | `dev-mk`    | Front & Backend Integration, Multi-LLM Switch, Session and Global State Management                             |                   |
-| **Mehaboob Subhani**     | `skms`      | UI Development, Web Search Agent, Content generation(ppt,docs) for analysis tools, User profile management                                                                                                 | [Link](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
+| **Mehaboob Subhani**     | `skms`      | UI Development, Web Search Agentic framework using DuckDuckGo, Content generation(ppt,docs) for analysis tools, User profile management                                                                                                 | [Link](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
 | **Anusha P**             | `anu`       | Research, Speech-to-Text, Text-to-Speech using                                                  |                   |
