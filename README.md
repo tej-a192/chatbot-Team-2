@@ -108,7 +108,7 @@ Before you begin, ensure you have the following installed and configured:
     *   Start the Node.js backend:
         ```bash
             cd server
-            npm start 
+            npm run dev 
         ```
         The server will typically run on the port specified in your `server/.env` file (e.g., `http://localhost:5001`).
 
