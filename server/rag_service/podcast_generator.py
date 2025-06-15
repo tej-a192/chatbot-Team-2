@@ -61,7 +61,7 @@ def generate_podcast_script(source_document_text, outline_content, llm_function)
     logger.info("Generating two-speaker podcast script with updated prompt...")
     
     prompt = PODCAST_SCRIPT_PROMPT_TEMPLATE.format(
-        document_content=source_document_text[:40000],
+        document_content=source_document_text[:40000], # Limit context to avoid excessive token usage
         study_focus=outline_content,
     )
     
@@ -84,21 +84,16 @@ def parse_script_into_dialogue(script_text):
         if not line:
             continue
         
-        # This regex is now more critical. It looks for SPEAKER_A: or SPEAKER_B: at the start.
         match = re.match(r'^(SPEAKER_[AB]):(.*)', line, re.IGNORECASE)
         if match:
-            # If we were building text for a previous speaker, save it first.
             if current_speaker and current_text:
                 dialogue.append((current_speaker, current_text.strip()))
             
-            # Start the new speaker's line.
             current_speaker = match.group(1).upper()
             current_text = match.group(2).strip()
         elif current_speaker:
-            # If it's not a new speaker line, append it to the current speaker's text.
             current_text += " " + line
             
-    # Add the very last line of dialogue after the loop finishes.
     if current_speaker and current_text:
         dialogue.append((current_speaker, current_text.strip()))
         
@@ -107,7 +102,6 @@ def parse_script_into_dialogue(script_text):
 def synthesize_dual_speaker_audio(dialogue, output_path):
     """
     Creates a two-speaker audio file using gTTS and FFmpeg subprocess.
-    (This function remains unchanged from the previous correct version).
     """
     logger.info(f"Synthesizing dual-speaker audio for {len(dialogue)} parts using FFmpeg.")
     
@@ -122,7 +116,6 @@ def synthesize_dual_speaker_audio(dialogue, output_path):
     }
 
     try:
-        # Generate individual audio files for each dialogue part
         for i, (speaker, text) in enumerate(dialogue):
             if not text:
                 continue
@@ -150,7 +143,6 @@ def synthesize_dual_speaker_audio(dialogue, output_path):
         if not temp_files:
             raise ValueError("No audio segments were successfully generated.")
 
-        # Create the playlist file for FFmpeg's concat protocol
         with open(ffmpeg_playlist_path, 'w') as f:
             for temp_file in temp_files:
                 escaped_path = temp_file.replace('\\', '/').replace("'", "'\\''")
@@ -158,26 +150,22 @@ def synthesize_dual_speaker_audio(dialogue, output_path):
         
         temp_files.append(ffmpeg_playlist_path)
 
-        # Use FFmpeg to concatenate all the temporary files
         logger.info(f"Concatenating {len(temp_files)-1} audio segments into final podcast file.")
         ffmpeg_command = [
             'ffmpeg', '-f', 'concat', '-safe', '0', '-i', ffmpeg_playlist_path, '-c', 'copy', output_path
         ]
         
-        result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-        logger.info(f"FFmpeg concatenation successful.")
+        subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
         
         return True
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg command failed with exit code {e.returncode}")
-        logger.error(f"FFmpeg stderr: {e.stderr}")
+        logger.error(f"FFmpeg command failed with exit code {e.returncode}\nFFmpeg stderr: {e.stderr}")
         raise IOError(f"FFmpeg failed during audio processing: {e.stderr}") from e
     except Exception as e:
         logger.error(f"An unexpected error occurred during audio synthesis: {e}", exc_info=True)
         raise
     finally:
-        # Cleanup all temporary files
         logger.info(f"Cleaning up {len(temp_files)} temporary files...")
         for temp_file in temp_files:
             try:

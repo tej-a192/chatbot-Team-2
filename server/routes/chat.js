@@ -8,20 +8,11 @@ const { processAgenticRequest } = require('../services/agentService');
 
 const router = express.Router();
 
-// --- @route   POST /api/chat/message ---
 router.post('/message', async (req, res) => {
-    // --- ADD THIS "TRUTH LOG" LINE ---
-    console.log('--- RAW REQUEST BODY RECEIVED ---', JSON.stringify(req.body, null, 2));
-    // --- END OF ADDED LINE ---
-
     const {
-        query,
-        sessionId,
-        useWebSearch,
-        systemPrompt: clientProvidedSystemInstruction,
-        criticalThinkingEnabled,
-        documentContextName,
-        filter
+        query, sessionId, useWebSearch,
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
     } = req.body;
     
     const userId = req.user._id;
@@ -66,7 +57,8 @@ router.post('/message', async (req, res) => {
             filter,
             llmProvider,
             ollamaModel,
-            isWebSearchEnabled: !!useWebSearch
+            isWebSearchEnabled: !!useWebSearch,
+            userId: userId.toString(), // <<< PASS THE USER ID TO THE AGENT
         };
 
         const agentResponse = await processAgenticRequest(
@@ -81,7 +73,7 @@ router.post('/message', async (req, res) => {
             parts: [{ text: agentResponse.finalAnswer }],
             text: agentResponse.finalAnswer,
             timestamp: new Date(),
-            thinking: null,
+            thinking: null, // The agent's thinking process is now internal by default
             references: agentResponse.references || [],
             source_pipeline: agentResponse.sourcePipeline,
         };
@@ -102,12 +94,9 @@ router.post('/message', async (req, res) => {
         
         const errorMessageForChat = {
             sender: 'bot', role: 'model',
-            parts: [{ text: `Error: ${clientMessage}` }],
-            text: `Error: ${clientMessage}`,
-            timestamp: new Date(),
-            thinking: `Agentic flow error: ${error.message}`,
-            references: [],
-            source_pipeline: 'error-agent-pipeline'
+            parts: [{ text: `Error: ${clientMessage}` }], text: `Error: ${clientMessage}`,
+            timestamp: new Date(), thinking: `Agentic flow error: ${error.message}`,
+            references: [], source_pipeline: 'error-agent-pipeline'
         };
         
         try {
@@ -124,7 +113,7 @@ router.post('/message', async (req, res) => {
 });
 
 
-// --- Other Chat Routes (Unchanged) ---
+// Other Chat Routes (Unchanged)
 router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;

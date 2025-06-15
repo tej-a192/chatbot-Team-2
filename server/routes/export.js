@@ -47,7 +47,7 @@ router.post('/podcast', async (req, res) => {
         console.log(`[Node Export] Forwarding podcast request to Python: ${generationUrl}`);
         const fileResponse = await axios.post(generationUrl, {
             sourceDocumentText: sourceDocumentText,
-            outlineContent: analysisContent,
+            outlineContent: analysisContent, // The original analysis content is used as the 'study_focus'
             podcastOptions: podcastOptions
         }, {
             responseType: 'stream', // Crucial for handling file streams
@@ -55,15 +55,18 @@ router.post('/podcast', async (req, res) => {
         });
 
         // Stream the audio file directly back to the client
-        const filename = `Study-Podcast-${sourceDocumentName.split('.')[0]}.mp3`;
+        const filename = `Study-Podcast-${sourceDocumentName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_')}.mp3`;
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'audio/mpeg');
         fileResponse.data.pipe(res);
 
     } catch (error) {
-        const errorMsg = error.response?.data?.error || error.message || "Failed to generate podcast.";
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || "Failed to generate podcast.";
         console.error(`[Node Export] Error proxying podcast generation: ${errorMsg}`);
-        res.status(500).json({ message: errorMsg });
+        // Ensure error is sent as JSON, not streamed HTML/text
+        if (!res.headersSent) {
+            res.status(500).json({ message: errorMsg });
+        }
     }
 });
 

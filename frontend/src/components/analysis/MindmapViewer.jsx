@@ -1,7 +1,7 @@
 // frontend/src/components/analysis/MindmapViewer.jsx
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import toast from 'react-hot-toast';
-import { escapeHtml } from '../../utils/helpers.js'; // Import escapeHtml helper
+import { escapeHtml } from '../../utils/helpers.js';
 
 const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
     const svgContainerRef = useRef(null);
@@ -48,21 +48,25 @@ const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
             svgContainerRef.current.innerHTML = '<div class="flex justify-center items-center h-full w-full text-sm text-text-muted-light dark:text-text-muted-dark"><div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-2"></div>Rendering diagram...</div>';
             
             let codeToRender = mermaidCode.trim();
-            // Remove Markdown code fences: ```mermaid ... ``` or ``` ... ```
-            // Regex explanation:
-            // ^```         - Matches starting triple backticks
-            // (?:mermaid\b)? - Optionally matches "mermaid" followed by a word boundary (case-insensitive due to i flag)
-            // \s*          - Matches any whitespace (including newlines) after "mermaid" or ```
-            // ([\s\S]*?)  - Captures the actual Mermaid code (non-greedy)
-            // \s*          - Matches any whitespace before closing backticks
-            // ```$         - Matches closing triple backticks at the end of the string
-            // i            - Case-insensitive flag (for "mermaid" keyword)
-            const fenceRegex = /^```(?:mermaid\b)?\s*([\s\S]*?)\s*```$/i;
-            const match = codeToRender.match(fenceRegex);
-            if (match && match[1]) {
-                codeToRender = match[1].trim(); // Use the captured group
-            }
             
+            // --- THIS IS THE FIX ---
+            // New, more robust regex to find the diagram code.
+            // It looks for a code block that CONTAINS 'graph', 'mindmap', etc.
+            // It is no longer anchored to the start (^) of the string, so it can find the
+            // block even if there's leading garbage from the LLM.
+            const fenceRegex = /```(?:mermaid)?\s*([\s\S]*?(?:graph|mindmap|flowchart|sequenceDiagram)[\s\S]*?)\s*```/i;
+            const match = codeToRender.match(fenceRegex);
+
+            if (match && match[1]) {
+                // If we found a fenced block, use its content.
+                codeToRender = match[1].trim();
+            } else {
+                // Fallback for cases where LLM might forget the fences entirely.
+                // We still trim to remove potential whitespace.
+                codeToRender = codeToRender.trim();
+            }
+            // --- END OF FIX ---
+
             try {
                 if (typeof window.mermaid === 'undefined') {
                     throw new Error("Mermaid library failed to load or initialize properly.");

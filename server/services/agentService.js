@@ -20,7 +20,7 @@ function parseToolCall(responseText) {
 }
 
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
-    const { llmProvider, ollamaModel } = requestContext;
+    const { llmProvider, ollamaModel, criticalThinkingEnabled, documentContextName, userId } = requestContext;
 
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
@@ -46,27 +46,44 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     }
 
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
-    const tool = availableTools[toolCall.tool_name];
-    if (!tool) {
+    const mainTool = availableTools[toolCall.tool_name];
+    if (!mainTool) {
         console.error(`[AgentService] LLM tried to call an unknown tool: ${toolCall.tool_name}`);
         return { finalAnswer: "I tried to use a tool, but made a mistake. Please rephrase your request.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
     }
 
     try {
-        // --- FIX: Pass the LLM parameters AND the full request context to the tool ---
-        const toolResult = await tool.execute(toolCall.parameters, requestContext);
-        // --- END FIX ---
+        let toolPromises = [mainTool.execute(toolCall.parameters, requestContext)];
+        let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
+
+        // --- NEW LOGIC: If RAG search and Critical Thinking are on, also call KG search ---
+        if (toolCall.tool_name === 'rag_search' && criticalThinkingEnabled) {
+            console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
+            const kgTool = availableTools['kg_search'];
+            // Pass the user's ID from the request context for the KG query
+            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            pipeline += '+kg';
+        }
+
+        const toolResults = await Promise.all(toolPromises);
+        
+        const combinedToolOutput = toolResults.map((result, index) => {
+            const toolName = index === 0 ? toolCall.tool_name : 'kg_search';
+            return `--- TOOL OUTPUT: ${toolName.toUpperCase()} ---\n${result.toolOutput}`;
+        }).join('\n\n');
+        
+        const combinedReferences = toolResults.flatMap(result => result.references || []);
 
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
-        const synthesizerPrompt = createSynthesizerPrompt(userQuery, toolResult.toolOutput);
+        const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput);
         const finalAnswer = await llmService.generateContentWithHistory(
             chatHistory, synthesizerPrompt, systemPrompt, llmOptions
         );
         
         return {
             finalAnswer,
-            references: toolResult.references || [],
-            sourcePipeline: `${llmProvider}-agent-${toolCall.tool_name}`,
+            references: combinedReferences,
+            sourcePipeline: pipeline,
         };
     } catch (error) {
         console.error(`[AgentService] Error executing tool '${toolCall.tool_name}':`, error);

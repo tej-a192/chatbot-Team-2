@@ -203,15 +203,18 @@ const api = {
     return { fileBlob: response.data, filename: filename };
   },
 
-  // --- NEW FUNCTION ---
   generatePodcast: async ({ analysisContent, sourceDocumentName, podcastOptions }) => {
     const response = await apiClient.post('/export/podcast', 
       { analysisContent, sourceDocumentName, podcastOptions },
-      { responseType: 'blob' } // Request the audio file as a binary blob
+      { responseType: 'blob' }
     );
-    
-    // The response.data will be the audio blob itself
     return { audioBlob: response.data, sourceDocumentName };
+  },
+
+  // --- NEW FUNCTION ---
+  getKnowledgeGraph: async (documentName) => {
+    const response = await apiClient.get(`/kg/visualize/${encodeURIComponent(documentName)}`);
+    return response.data; // Expected to be { nodes: [...], edges: [...] }
   },
 };
 
