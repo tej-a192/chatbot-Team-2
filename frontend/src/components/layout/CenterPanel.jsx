@@ -1,12 +1,11 @@
 // frontend/src/components/layout/CenterPanel.jsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import api from '../../services/api';
 import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
-import { Info } from 'lucide-react';
 
 const THINKING_VARIANTS = ["🧠 Thinking...", "💭 Processing...", "🤔 Analyzing query..."];
 const RAG_ANALYSIS_VARIANTS = ["📚 Reviewing documents...", "🎯 Finding relevant info...", "🧩 Combining sources..."];
@@ -19,6 +18,7 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function CenterPanel({ messages, setMessages, currentSessionId }) {
     const { token: regularUserToken } = useRegularAuth();
+    // Get all necessary context from AppState
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
 
     const [useWebSearch, setUseWebSearch] = useState(false);
@@ -42,21 +42,16 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
             setUseWebSearch(false);
             toast("Web Search disabled automatically while a document is selected.", { icon: "ℹ️" });
         }
-    }, [selectedDocumentForAnalysis, selectedSubject, useWebSearch]);
-
+    }, [selectedDocumentForAnalysis, selectedSubject]);
 
     const runStatusSimulation = async (isRagActive, isWebActive, signal) => {
-        let analysisVariants;
-        if (isWebActive) analysisVariants = WEB_ANALYSIS_VARIANTS;
-        else if (isRagActive) analysisVariants = RAG_ANALYSIS_VARIANTS;
-        else analysisVariants = GENERAL_ANALYSIS_VARIANTS;
-        
+        // This simulation logic remains correct
+        let analysisVariants = isWebActive ? WEB_ANALYSIS_VARIANTS : (isRagActive ? RAG_ANALYSIS_VARIANTS : GENERAL_ANALYSIS_VARIANTS);
         const sequence = [
             { message: getRandomItem(THINKING_VARIANTS), duration: 1200 },
             { message: getRandomItem(analysisVariants), duration: 1500 },
             { message: getRandomItem(GENERATION_VARIANTS), duration: 1300 },
         ];
-        
         for (const stage of sequence) {
             if (signal.aborted) return;
             if (isMountedRef.current) setIsSending({ active: true, message: stage.message });
@@ -64,13 +59,15 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
         }
     };
 
-    const handleSendMessage = async (inputText, isCtEnabledFromInput) => {
+    const handleSendMessage = async (inputText) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isSending.active) return;
 
-        // --- FINAL FIX: Read context directly from AppState props AT THE MOMENT OF SENDING ---
+        // --- THIS IS THE FIX ---
+        // Determine the document context AT THE MOMENT THE MESSAGE IS SENT.
+        // This ensures the agent always knows whether to use RAG or not.
         const documentContextName = selectedSubject || selectedDocumentForAnalysis;
         const isRagActive = !!documentContextName;
-        // --- END FINAL FIX ---
+        // --- END OF FIX ---
 
         simulationControllerRef.current = new AbortController();
         setIsSending({ active: true, message: '...' });
@@ -83,11 +80,10 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
             query: inputText.trim(),
             history: messages.map(m => ({ role: m.role === 'model' ? 'model' : 'user', parts: m.parts || [{ text: m.text }] })),
             sessionId: currentSessionId,
-            useWebSearch: useWebSearch, // This is the user's explicit mode choice
-            llmProvider: selectedLLM,
+            useWebSearch: useWebSearch,
             systemPrompt,
-            criticalThinkingEnabled: isCtEnabledFromInput,
-            documentContextName: documentContextName, // Pass the directly read context
+            criticalThinkingEnabled: criticalThinkingEnabled,
+            documentContextName: documentContextName, // Pass the determined context to the backend
         };
 
         try {
@@ -119,7 +115,10 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
                         <p className="max-w-md mx-auto">
                             Assistant Mode: <span className="italic">"{systemPrompt.length > 60 ? systemPrompt.substring(0,60)+'...' : systemPrompt}"</span>
                         </p>
-                        {(selectedSubject || selectedDocumentForAnalysis) && (<p className="mt-1 font-medium">Chat Focus: <span className="text-indigo-500 dark:text-indigo-400">{selectedSubject || selectedDocumentForAnalysis}</span></p>)}
+                        {/* This part correctly shows the user which document is active */}
+                        {(selectedSubject || selectedDocumentForAnalysis) && (
+                            <p className="mt-1 font-medium">Chat Focus: <span className="text-indigo-500 dark:text-indigo-400">{selectedSubject || selectedDocumentForAnalysis}</span></p>
+                        )}
                     </div>
                 </div>
             )}

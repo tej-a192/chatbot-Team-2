@@ -1,63 +1,86 @@
 // server/workers/analysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
-// const path = require('path'); // Not strictly needed if paths below are correct
+const path = require('path');
 
-// Assuming worker is in server/workers/ and services/models are in server/services/, server/models/
+// Import models and services
 const User = require('../models/User');
 const connectDB = require('../config/db');
-const geminiService = require('../services/geminiService'); // For actual LLM calls
-const ollamaService = require('../services/ollamaService'); // Import Ollama service
-const { ANALYSIS_PROMPTS } = require('../config/promptTemplates'); // For prompts
+const geminiService = require('../services/geminiService');
+const ollamaService = require('../services/ollamaService');
+const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
 
-// This function will now contain the actual analysis generation logic
+// Load .env variables from the server's root directory for the worker
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+/**
+ * Performs the actual analysis generation for FAQ, Topics, and Mindmap.
+ * This function is designed to be called by the main 'run' function of the worker.
+ */
 async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel) {
-    console.log(`[Analysis Worker ${process.pid}] Starting actual analysis generation for '${originalName}'. Text length: ${textForAnalysis.length}`);
+    const logPrefix = `[Analysis Worker ${process.pid}, Doc: ${originalName}]`;
+    console.log(`${logPrefix} Starting analysis. Text length: ${textForAnalysis.length}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
-    let allIndividualAnalysesSuccessful = true; // Tracks if each specific analysis type was successful
+    let allIndividualAnalysesSuccessful = true;
 
-    // Helper for a single analysis type, similar to what was in upload.js
-    async function generateSingleAnalysis(type, promptContentForLLM, context) {
+    // --- THIS IS THE FIX ---
+    // Background analysis is a system task. It must use the server's main API key,
+    // as it does not have access to a specific user's encrypted key in this isolated process.
+    const serverApiKey = process.env.GEMINI_API_KEY;
+    if (llmProvider === 'gemini' && !serverApiKey) {
+        console.error(`${logPrefix} FATAL: Server's GEMINI_API_KEY is not defined in the worker's environment.`);
+        const errorMessage = "Error: Analysis service is not configured with a valid API key.";
+        // Return a failure object that can be stored in the DB
+        return { 
+            success: false, 
+            results: { faq: errorMessage, topics: errorMessage, mindmap: errorMessage }
+        };
+    }
+    // For Ollama, we might not need a key, so we don't check for it here.
+    // The ollamaService will handle its own connection.
+    // --- END OF FIX ---
+
+    // Inner helper function to generate a single type of analysis
+    async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
-            console.log(`[Analysis Worker] Generating ${type} for '${context.originalName}' (User: ${context.userId}).`);
-            const historyForGemini = [{ role: 'user', parts: [{ text: "Please perform the requested analysis based on the system instruction provided." }] }];
+            console.log(`${logPrefix} Generating ${type} for '${originalName}' (User: ${userId}).`);
+            const historyForLLM = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction provided." }] }];
             
             let generatedText;
             if (llmProvider === 'ollama') {
                 generatedText = await ollamaService.generateContentWithHistory(
-                    historyForGemini, // This structure might need adjustment for ollamaService's prompt formatter
-                    promptContentForLLM, // This is the system prompt + document text
-                    { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT } // Pass model and token options
+                    historyForLLM,
+                    promptContentForLLM, // Ollama service expects system prompt as second argument
+                    { model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT }
                 );
             } else { // Default to Gemini
                 generatedText = await geminiService.generateContentWithHistory(
-                    historyForGemini,
-                    promptContentForLLM // This is the full prompt including the document text
+                    historyForLLM,
+                    promptContentForLLM, // Gemini service expects full prompt as second argument
+                    null, // System prompt is embedded in the template, so this is null
+                    { apiKey: serverApiKey } // Explicitly pass the server's key
                 );
             }
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
-                console.warn(`[Analysis Worker] Gemini returned empty content for ${type} for '${context.originalName}'.`);
+                console.warn(`${logPrefix} LLM returned empty content for ${type}.`);
                 return { success: false, content: `Notice: No content generated by the AI for ${type}.` };
             }
-            console.log(`[Analysis Worker] ${type} generation successful for '${context.originalName}'.`);
+            console.log(`${logPrefix} ${type} generation successful.`);
             return { success: true, content: generatedText.trim() };
         } catch (error) {
-            console.error(`[Analysis Worker] Error during ${type} generation for '${context.originalName}': ${error.message}`);
-            allIndividualAnalysesSuccessful = false; // Mark that at least one analysis type failed
+            console.error(`${logPrefix} Error during ${type} generation: ${error.message}`);
+            allIndividualAnalysesSuccessful = false;
             return { success: false, content: `Error generating ${type}: ${error.message.split('\n')[0].substring(0, 250)}` };
         }
     }
 
-    const logCtx = { userId, originalName };
-
-    // --- Generate FAQ, Topics, and Mindmap IN PARALLEL within this worker ---
-    // This makes the worker itself more efficient if the LLM calls are independent.
+    // --- Generate FAQ, Topics, and Mindmap IN PARALLEL ---
     const analysisPromises = [
-        generateSingleAnalysis('FAQ', ANALYSIS_PROMPTS.faq.getPrompt(textForAnalysis), logCtx),
-        generateSingleAnalysis('Topics', ANALYSIS_PROMPTS.topics.getPrompt(textForAnalysis), logCtx),
-        generateSingleAnalysis('Mindmap', ANALYSIS_PROMPTS.mindmap.getPrompt(textForAnalysis), logCtx)
+        generateSingleAnalysis('FAQ', ANALYSIS_PROMPTS.faq.getPrompt(textForAnalysis)),
+        generateSingleAnalysis('Topics', ANALYSIS_PROMPTS.topics.getPrompt(textForAnalysis)),
+        generateSingleAnalysis('Mindmap', ANALYSIS_PROMPTS.mindmap.getPrompt(textForAnalysis))
     ];
 
     const [faqOutcome, topicsOutcome, mindmapOutcome] = await Promise.allSettled(analysisPromises);
@@ -66,31 +89,28 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
     if (faqOutcome.status === 'fulfilled') {
         analysisResults.faq = faqOutcome.value.content;
         if (!faqOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else { // rejected
+    } else {
         analysisResults.faq = `Error generating FAQ: ${faqOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
         allIndividualAnalysesSuccessful = false;
-        console.error(`[Analysis Worker] FAQ generation promise rejected for ${originalName}:`, faqOutcome.reason);
     }
 
     if (topicsOutcome.status === 'fulfilled') {
         analysisResults.topics = topicsOutcome.value.content;
         if (!topicsOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else { // rejected
+    } else {
         analysisResults.topics = `Error generating Topics: ${topicsOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
         allIndividualAnalysesSuccessful = false;
-        console.error(`[Analysis Worker] Topics generation promise rejected for ${originalName}:`, topicsOutcome.reason);
     }
 
     if (mindmapOutcome.status === 'fulfilled') {
         analysisResults.mindmap = mindmapOutcome.value.content;
         if (!mindmapOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else { // rejected
+    } else {
         analysisResults.mindmap = `Error generating Mindmap: ${mindmapOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
         allIndividualAnalysesSuccessful = false;
-        console.error(`[Analysis Worker] Mindmap generation promise rejected for ${originalName}:`, mindmapOutcome.reason);
     }
     
-    // Update MongoDB with all results (even if some failed, we store what we have or the error messages)
+    // Update MongoDB with all results
     const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
     try {
         await User.updateOne(
@@ -105,42 +125,37 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
                 }
             }
         );
-        console.log(`[Analysis Worker ${process.pid}] Analysis results for '${originalName}' (Status: ${finalAnalysisStatus}) stored in DB.`);
-        return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed successfully' : 'completed with some failures'}.`, results: analysisResults };
+        console.log(`${logPrefix} Analysis results (Status: ${finalAnalysisStatus}) stored in DB.`);
+        return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with failures'}.`, results: analysisResults };
     } catch (dbError) {
-        console.error(`[Analysis Worker ${process.pid}] DB Error storing analysis results for '${originalName}':`, dbError);
-        // This is a critical error for the worker's task.
-        // The 'analysisStatus' might remain 'processing' or be whatever it was before this attempt.
+        console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
         return { success: false, message: `DB Error storing analysis: ${dbError.message}`, results: analysisResults };
     }
 }
 
+/**
+ * Main worker function to orchestrate the entire process.
+ */
 async function run() {
     const { userId, originalName, textForAnalysis, llmProvider, ollamaModel } = workerData;
     let dbConnected = false;
-    let overallTaskSuccess = false; // Renamed for clarity for the worker's overall task
+    let overallTaskSuccess = false;
     let finalMessageToParent = "Analysis worker encountered an issue.";
 
     try {
         console.log(`[Analysis Worker ${process.pid}] Received task for: ${originalName}, User: ${userId}`);
-        if (!process.env.MONGO_URI) {
-            throw new Error("MONGO_URI not set in Analysis worker environment.");
-        }
-        if (!userId || !originalName) {
-            throw new Error("Missing userId or originalName in workerData.");
-        }
+        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in worker environment.");
+        if (!userId || !originalName) throw new Error("Missing userId or originalName in workerData.");
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
         console.log(`[Analysis Worker ${process.pid}] DB Connected for ${originalName}.`);
 
-        // Update status to 'processing_analysis'
         await User.updateOne(
             { _id: userId, "uploadedDocuments.filename": originalName },
             { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
         );
         console.log(`[Analysis Worker ${process.pid}] Set analysisStatus to 'processing' for ${originalName}.`);
-
 
         if (!textForAnalysis || textForAnalysis.trim() === '') {
             console.warn(`[Analysis Worker ${process.pid}] No text provided for analysis for ${originalName}. Marking as skipped.`);
@@ -148,9 +163,8 @@ async function run() {
                 { _id: userId, "uploadedDocuments.filename": originalName },
                 { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
             );
-            overallTaskSuccess = true; // Not a failure of the worker, just nothing to do.
+            overallTaskSuccess = true;
             finalMessageToParent = "Analysis skipped: No text provided.";
-            // Fall through to postMessage and finally block.
         } else {
             const analysisServiceResult = await performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel);
             overallTaskSuccess = analysisServiceResult.success;
@@ -158,26 +172,21 @@ async function run() {
         }
 
         if (parentPort) {
-            parentPort.postMessage({
-                success: overallTaskSuccess,
-                originalName: originalName,
-                message: finalMessageToParent
-                // Optionally send back analysisServiceResult.results if the main thread needs them
-            });
+            parentPort.postMessage({ success: overallTaskSuccess, originalName, message: finalMessageToParent });
         }
 
     } catch (error) {
-        console.error(`[Analysis Worker ${process.pid}] Critical error processing '${originalName}':`, error.message, error.stack);
+        console.error(`[Analysis Worker ${process.pid}] Critical error processing '${originalName}':`, error);
         finalMessageToParent = error.message || "Unknown critical error in Analysis worker.";
-        overallTaskSuccess = false; // Ensure this is false on critical error
-        if (dbConnected && userId && originalName) { // Check if userId & originalName are defined
+        overallTaskSuccess = false;
+        if (dbConnected && userId && originalName) {
             try {
                 await User.updateOne(
                     { _id: userId, "uploadedDocuments.filename": originalName },
                     { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
                 );
             } catch (dbUpdateError) {
-                console.error(`[Analysis Worker ${process.pid}] Failed to update status to 'failed_critical' for ${originalName} after error:`, dbUpdateError);
+                console.error(`[Analysis Worker ${process.pid}] Failed to update status to 'failed_critical':`, dbUpdateError);
             }
         }
         if (parentPort) {
@@ -185,19 +194,11 @@ async function run() {
         }
     } finally {
         if (dbConnected) {
-            await mongoose.disconnect().catch(e => console.error("[Analysis Worker] Error disconnecting DB:", e));
+            await mongoose.disconnect();
             console.log(`[Analysis Worker ${process.pid}] DB Disconnected for ${originalName}.`);
         }
-        // The worker will exit automatically after the run() promise fulfills or rejects.
-        // If parentPort exists, Node.js waits for messages or explicit exit.
-        // If no parentPort (e.g. direct execution), we might need process.exit.
-        // Since we expect parentPort, this is okay.
         console.log(`[Analysis Worker ${process.pid}] Finished task for ${originalName}. Overall Success: ${overallTaskSuccess}`);
     }
 }
 
 run();
-
-
-
-

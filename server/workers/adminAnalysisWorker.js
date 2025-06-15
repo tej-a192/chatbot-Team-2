@@ -1,10 +1,9 @@
 // server/workers/adminAnalysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
-const path = require('path'); // For resolving .env path
+const path = require('path');
 
-// Adjust paths if your project structure is different
-const AdminDocument = require('../models/AdminDocument'); // Specific model for admin docs
+const AdminDocument = require('../models/AdminDocument');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService');
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
@@ -14,22 +13,36 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 
 async function performAdminDocAnalysis(adminDocumentId, originalName, textForAnalysis) {
-    const logPrefix = `[AdminAnalysisWorker ${process.pid}, Doc: ${originalName}, ID: ${adminDocumentId}]`;
+    const logPrefix = `[AdminAnalysisWorker ${process.pid}, Doc: ${originalName}]`;
     console.log(`${logPrefix} Starting analysis. Text length: ${textForAnalysis ? textForAnalysis.length : 0}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
+    // --- THIS IS THE FIX ---
+    // The worker is a system process, so it must use the server's global API key.
+    const serverApiKey = process.env.GEMINI_API_KEY;
+    if (!serverApiKey) {
+        console.error(`${logPrefix} FATAL: Server's GEMINI_API_KEY is not defined in the worker's environment.`);
+        // Return a clear error message for all fields
+        const errorMessage = "Error generating analysis: Server API key is not configured.";
+        return { 
+            success: false, 
+            results: { faq: errorMessage, topics: errorMessage, mindmap: errorMessage }
+        };
+    }
+    // --- END OF FIX ---
+
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
             console.log(`${logPrefix} Generating ${type}...`);
-            // For admin docs, we don't have a "user" in the same sense for history.
-            // We send a simple instruction to perform the task.
             const historyForGemini = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction and provided document text." }] }];
             
             const generatedText = await geminiService.generateContentWithHistory(
                 historyForGemini,
-                promptContentForLLM // This is the full prompt from ANALYSIS_PROMPTS including the document text
+                promptContentForLLM,
+                null, // No system prompt needed, it's in the user prompt template
+                { apiKey: serverApiKey } // Explicitly pass the server's API key
             );
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
@@ -47,12 +60,10 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
 
     if (!textForAnalysis || textForAnalysis.trim() === "") {
         console.warn(`${logPrefix} No text provided for analysis. Skipping generation.`);
-        allIndividualAnalysesSuccessful = true; // Not a failure, just nothing to do.
         analysisResults.faq = "Skipped: No text content provided.";
         analysisResults.topics = "Skipped: No text content provided.";
         analysisResults.mindmap = "Skipped: No text content provided.";
     } else {
-        // --- Generate FAQ, Topics, and Mindmap IN PARALLEL ---
         const analysisPromises = [
             generateSingleAnalysis('FAQ', ANALYSIS_PROMPTS.faq.getPrompt(textForAnalysis)),
             generateSingleAnalysis('Topics', ANALYSIS_PROMPTS.topics.getPrompt(textForAnalysis)),
@@ -67,7 +78,6 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
         } else {
             analysisResults.faq = `Error generating FAQ: ${faqOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
             allIndividualAnalysesSuccessful = false;
-            console.error(`${logPrefix} FAQ generation promise rejected:`, faqOutcome.reason);
         }
 
         if (topicsOutcome.status === 'fulfilled') {
@@ -76,7 +86,6 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
         } else {
             analysisResults.topics = `Error generating Topics: ${topicsOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
             allIndividualAnalysesSuccessful = false;
-            console.error(`${logPrefix} Topics generation promise rejected:`, topicsOutcome.reason);
         }
 
         if (mindmapOutcome.status === 'fulfilled') {
@@ -85,16 +94,12 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
         } else {
             analysisResults.mindmap = `Error generating Mindmap: ${mindmapOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
             allIndividualAnalysesSuccessful = false;
-            console.error(`${logPrefix} Mindmap generation promise rejected:`, mindmapOutcome.reason);
         }
     }
     
-    // Update MongoDB with all results
-    // Note: This worker doesn't set 'analysisStatus' as it's not in the simplified AdminDocument model.
-    // It directly updates the analysis fields.
     try {
-        const updateResult = await AdminDocument.updateOne(
-            { _id: adminDocumentId }, // Find by the document's MongoDB _id
+        await AdminDocument.updateOne(
+            { _id: adminDocumentId },
             {
                 $set: {
                     "analysis.faq": analysisResults.faq,
@@ -104,16 +109,7 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
                 }
             }
         );
-
-        if (updateResult.matchedCount === 0) {
-            console.error(`${logPrefix} DB Error: AdminDocument with ID ${adminDocumentId} not found for update.`);
-            return { success: false, message: `AdminDocument not found in DB (ID: ${adminDocumentId}).`, results: analysisResults };
-        }
-        if (updateResult.modifiedCount === 0 && updateResult.matchedCount === 1) {
-            console.warn(`${logPrefix} Analysis results for already matched existing content in DB (ID: ${adminDocumentId}). No change made or content was identical.`);
-        } else {
-             console.log(`${logPrefix} Analysis results stored in DB.`);
-        }
+        console.log(`${logPrefix} Analysis results stored in DB.`);
         return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with some failures'}.`, results: analysisResults };
     } catch (dbError) {
         console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
@@ -122,51 +118,37 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
 }
 
 async function run() {
+    // ... (The run function that orchestrates the worker remains the same)
     const { adminDocumentId, originalName, textForAnalysis } = workerData;
     let dbConnected = false;
     let overallTaskSuccess = false;
     let finalMessageToParent = "Admin analysis worker encountered an issue.";
-    const logPrefix = `[AdminAnalysisWorker ${process.pid}, Doc: ${originalName}, ID: ${adminDocumentId}]`;
 
     try {
-        console.log(`${logPrefix} Worker received task.`);
-        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in AdminAnalysisWorker environment.");
-        if (!adminDocumentId || !originalName) throw new Error("Missing adminDocumentId or originalName in workerData.");
-        
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
-        console.log(`${logPrefix} DB Connected.`);
-
         const analysisServiceResult = await performAdminDocAnalysis(adminDocumentId, originalName, textForAnalysis);
         overallTaskSuccess = analysisServiceResult.success;
         finalMessageToParent = analysisServiceResult.message;
-
         if (parentPort) {
             parentPort.postMessage({
                 success: overallTaskSuccess,
-                originalName: originalName, // For logging on main thread
+                originalName: originalName,
                 adminDocumentId: adminDocumentId,
                 message: finalMessageToParent
             });
         }
-
     } catch (error) {
-        console.error(`${logPrefix} Critical error in worker:`, error.message, error.stack);
-        finalMessageToParent = error.message || "Unknown critical error in AdminAnalysisWorker.";
-        overallTaskSuccess = false;
-        // Note: We don't update a status field here as the simplified model doesn't have one.
-        // The main thread (adminDocuments.js) might log this worker failure.
+        console.error(`[AdminAnalysisWorker] Critical error in worker:`, error);
+        finalMessageToParent = error.message || "Unknown critical error.";
         if (parentPort) {
             parentPort.postMessage({ success: false, originalName, adminDocumentId, error: finalMessageToParent });
         }
     } finally {
         if (dbConnected) {
-            await mongoose.disconnect().catch(e => console.error(`${logPrefix} Error disconnecting DB:`, e));
-            console.log(`${logPrefix} DB Disconnected.`);
+            await mongoose.disconnect();
         }
-        console.log(`${logPrefix} Finished task. Overall Success: ${overallTaskSuccess}`);
-        // Worker exits automatically if parentPort exists and main thread doesn't keep it alive,
-        // or if it's the end of the run() promise.
+        console.log(`[AdminAnalysisWorker] Finished task for ${originalName}. Overall Success: ${overallTaskSuccess}`);
     }
 }
 

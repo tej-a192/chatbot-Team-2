@@ -2,34 +2,51 @@
 const { createAgenticSystemPrompt, createSynthesizerPrompt } = require('../config/promptTemplates.js');
 const { availableTools } = require('./toolRegistry.js');
 const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
-const geminiService = require('./geminiService.js');
-const ollamaService = require('./ollamaService.js');
+const geminiService = require('../services/geminiService.js');
+const ollamaService = require('../services/ollamaService.js');
+const User = require('../models/User');
+const { decrypt } = require('../utils/crypto');
 
 function parseToolCall(responseText) {
     const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
     const jsonString = jsonMatch ? jsonMatch[2] : responseText;
     try {
         const jsonResponse = JSON.parse(jsonString);
-        if (jsonResponse && jsonResponse.tool_call) {
-            return jsonResponse.tool_call;
-        }
-        return null;
+        return jsonResponse.tool_call || null;
     } catch (e) {
         return null;
     }
 }
 
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, criticalThinkingEnabled, documentContextName, userId } = requestContext;
+    const { llmProvider, ollamaModel, userId } = requestContext;
+
+    // Fetch user to get their encrypted API key
+    const user = await User.findById(userId).select('+encryptedApiKey');
+    if (!user) {
+        throw new Error("User not found during agent processing.");
+    }
+
+    // Decrypt the key once for use in this request
+    const userApiKey = decrypt(user.encryptedApiKey);
+    if (llmProvider === 'gemini' && !userApiKey) {
+        throw { status: 400, message: "User's Gemini API key is missing or could not be decrypted. Please update it in your profile settings." };
+    }
 
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
     const agenticSystemPrompt = createAgenticSystemPrompt(modelContext, agenticContext, requestContext);
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
-    const llmOptions = llmProvider === 'ollama' ? { model: ollamaModel } : {};
+    
+    // Create the options object ONCE with the user's key and use it for all calls.
+    const llmOptions = {
+        ...(llmProvider === 'ollama' && { model: ollamaModel }),
+        apiKey: userApiKey,
+    };
 
     console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
+    // Pass the llmOptions with the key to the Router call
     const routerResponseText = await llmService.generateContentWithHistory(
         chatHistory, userQuery, agenticSystemPrompt, llmOptions
     );
@@ -48,20 +65,17 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
-        console.error(`[AgentService] LLM tried to call an unknown tool: ${toolCall.tool_name}`);
-        return { finalAnswer: "I tried to use a tool, but made a mistake. Please rephrase your request.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
+        return { finalAnswer: "I tried to use a tool, but made a mistake.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
     }
 
     try {
         let toolPromises = [mainTool.execute(toolCall.parameters, requestContext)];
         let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
 
-        // --- NEW LOGIC: If RAG search and Critical Thinking are on, also call KG search ---
-        if (toolCall.tool_name === 'rag_search' && criticalThinkingEnabled) {
+        if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
-            // Pass the user's ID from the request context for the KG query
-            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            toolPromises.push(kgTool.execute(toolCall.parameters, requestContext));
             pipeline += '+kg';
         }
 
@@ -76,6 +90,8 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
 
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
         const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput);
+        
+        // Pass the same llmOptions with the key to the Synthesizer call
         const finalAnswer = await llmService.generateContentWithHistory(
             chatHistory, synthesizerPrompt, systemPrompt, llmOptions
         );

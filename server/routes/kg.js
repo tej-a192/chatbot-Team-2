@@ -3,9 +3,9 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const User = require('../models/User');
-const AdminDocument = require('../models/AdminDocument'); // For checking admin docs
+const AdminDocument = require('../models/AdminDocument');
 
-// Note: authMiddleware will be applied to this router in server.js
+// Note: authMiddleware is applied to this router in server.js
 
 // @route   GET /api/kg/visualize/:documentName
 // @desc    Get knowledge graph data for a specific document for visualization.
@@ -19,15 +19,15 @@ router.get('/visualize/:documentName', async (req, res) => {
     }
 
     try {
-        let targetUserIdForKg = null; // This will hold the ID used to query the Python service
+        let targetUserIdForKg = null;
 
         // 1. Check if it's an admin document ("Subject")
         const isAdminDoc = await AdminDocument.exists({ originalName: documentName });
 
         if (isAdminDoc) {
-            // Admin docs are stored under a generic ID in the Python service's Neo4j handler.
-            targetUserIdForKg = "fixed_admin_id_marker"; 
-            console.log(`[KG Visualize] Request for admin subject '${documentName}'. Using generic admin ID for KG lookup.`);
+            // Use the exact same generic ID that the upload/KG creation process uses.
+            targetUserIdForKg = "fixed_admin_text_extraction_user"; 
+            console.log(`[KG Visualize] Request for admin subject '${documentName}'. Using consistent generic admin ID for KG lookup.`);
         } else {
             // 2. If not an admin doc, check if it belongs to the current user.
             const user = await User.exists({ _id: currentUserId, "uploadedDocuments.filename": documentName });
@@ -37,7 +37,6 @@ router.get('/visualize/:documentName', async (req, res) => {
             }
         }
         
-        // 3. If the document doesn't exist as an admin subject or for the current user, deny access.
         if (!targetUserIdForKg) {
             console.warn(`[KG Visualize] User ${currentUserId} requested unauthorized or non-existent KG for document: ${documentName}`);
             return res.status(403).json({ message: 'Access denied or knowledge graph not found for this document.' });
@@ -48,7 +47,7 @@ router.get('/visualize/:documentName', async (req, res) => {
             return res.status(500).json({ message: "Knowledge Graph service is not configured." });
         }
         
-        // 4. Call the Python service with the correct user ID (either the actual user's or the generic admin's)
+        // 4. Call the Python service with the correct user ID
         const getKgUrl = `${pythonServiceUrl}/kg/${targetUserIdForKg}/${encodeURIComponent(documentName)}`;
         
         console.log(`[KG Visualize] Proxying request to Python service: ${getKgUrl}`);

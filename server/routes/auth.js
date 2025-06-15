@@ -1,141 +1,116 @@
 // server/routes/auth.js
 const express = require('express');
-const jwt = require('jsonwebtoken'); // <-- Import jsonwebtoken
+const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const User = require('../models/User');
 const { authMiddleware } = require('../middleware/authMiddleware');
-require('dotenv').config(); // Ensures process.env has values from .env
+require('dotenv').config();
 
 const router = express.Router();
-
-const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '1h'; // Default to 1 hour
+const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '1h';
 
 // --- @route   POST /api/auth/signup ---
-// --- @desc    Register a new user ---
-// --- @access  Public ---
 router.post('/signup', async (req, res) => {
-  const { username, password } = req.body;
+  const { email, password, apiKey, preferredLlmProvider } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Please provide username and password' });
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required.' });
   }
-  if (password.length < 6) {
-     return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+
+  if (preferredLlmProvider === 'gemini' && !apiKey) {
+    return res.status(400).json({ message: 'Gemini API Key is required when Gemini is selected.' });
   }
 
   try {
-    const existingUser = await User.findOne({ username });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'Username already exists' });
+      return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    const newUser = new User({ username, password });
+    const newUser = new User({
+      email,
+      password,
+      preferredLlmProvider: preferredLlmProvider || 'gemini',
+      encryptedApiKey: apiKey,
+    });
     await newUser.save();
 
-    const sessionId = uuidv4(); // Initial session ID
-
-    // Create JWT Payload
-    const payload = {
-      userId: newUser._id,
-      username: newUser.username,
-    };
-
-    // Sign the token
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET, // Make sure JWT_SECRET is in your .env
-      { expiresIn: JWT_EXPIRATION }
-    );
+    const payload = { userId: newUser._id, email: newUser.email };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
     res.status(201).json({
-      token: token, // <-- Send token
+      token,
       _id: newUser._id,
-      username: newUser.username,
-      sessionId: sessionId,
+      email: newUser.email,
+      sessionId: uuidv4(),
       message: 'User registered successfully',
     });
-
   } catch (error) {
     console.error('Signup Error:', error);
-    if (error.code === 11000) {
-        return res.status(400).json({ message: 'Username already exists.' });
+    if (error.name === 'ValidationError') {
+        return res.status(400).json({ message: error.message });
     }
-    res.status(500).json({ message: 'Server error during signup' });
+    res.status(500).json({ message: 'Server error during signup.' });
   }
 });
 
 // --- @route   POST /api/auth/signin ---
-// --- @desc    Authenticate user & return JWT ---
-// --- @access  Public ---
 router.post('/signin', async (req, res) => {
-  const { username, password } = req.body;
+  const { email, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Please provide username and password' });
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Please provide email and password.' });
   }
 
   try {
-    const user = await User.findByCredentials(username, password);
+    // Get the admin credentials from the server's environment variables
+    const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
+    const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
 
+    // --- THIS IS THE FIX ---
+    // Special check for the admin user BEFORE hitting the database
+    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+        console.log("Admin login successful via special auth check.");
+        // The frontend will use this flag to set the admin session state.
+        // No JWT is needed for this type of frontend-only admin session management.
+        return res.status(200).json({
+            isAdminLogin: true, // A flag for the frontend to recognize
+            message: 'Admin login successful',
+        });
+    }
+    // --- END OF FIX ---
+
+    // If it's not the admin, proceed with the regular user database lookup
+    const user = await User.findByCredentials(email, password);
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Invalid email address or password.' });
     }
 
-    const sessionId = uuidv4(); // New session ID for this login
-
-    // Create JWT Payload
-    const payload = {
-      userId: user._id,
-      username: user.username,
-    };
-
-    // Sign the token
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_EXPIRATION }
-    );
+    const payload = { userId: user._id, email: user.email };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
     res.status(200).json({
-      token: token, // <-- Send token
+      token,
       _id: user._id,
-      username: user.username,
-      sessionId: sessionId,
+      email: user.email,
+      sessionId: uuidv4(),
       message: 'Login successful',
     });
-
   } catch (error) {
     console.error('Signin Error:', error);
-    res.status(500).json({ message: 'Server error during signin' });
+    res.status(500).json({ message: 'Server error during signin.' });
   }
 });
 
 // --- @route   GET /api/auth/me ---
-// --- @desc    Get current authenticated user's details (requires JWT middleware) ---
-// --- @access  Private ---
-// We will add the middleware for this route in server.js
-router.get('/me',authMiddleware, async (req, res) => {
-    // If the JWT middleware (to be created next) runs successfully,
-    // req.user will be populated.
-    if (!req.user) {
-        // This should ideally be caught by the middleware itself,
-        // but as a fallback.
-        return res.status(401).json({ message: 'Not authorized, user context missing.' });
-    }
-    try {
-        // req.user is already the user document (excluding password typically)
-        // thanks to the upcoming authMiddleware.
-        res.status(200).json({
-            _id: req.user._id,
-            username: req.user.username,
-            // Add any other fields you want the frontend to know about the user
-            // e.g., email, roles, preferences, if stored.
-        });
-    } catch (error) {
-        console.error('Error in /api/auth/me:', error);
-        res.status(500).json({ message: 'Server error fetching user details.' });
-    }
+router.get('/me', authMiddleware, async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authorized.' });
+  }
+  res.status(200).json({
+    _id: req.user._id,
+    email: req.user.email,
+  });
 });
-
 
 module.exports = router;

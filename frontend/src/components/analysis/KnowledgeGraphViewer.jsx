@@ -8,6 +8,10 @@ import IconButton from '../core/IconButton.jsx';
 const KnowledgeGraphViewer = ({ graphData }) => {
     const { theme } = useTheme();
 
+    // --- FIX START: Add state to hold the network instance ---
+    const [network, setNetwork] = useState(null);
+    // --- FIX END ---
+
     // Memoize options to prevent re-renders
     const options = useMemo(() => {
         const isDark = theme === 'dark';
@@ -82,8 +86,6 @@ const KnowledgeGraphViewer = ({ graphData }) => {
         };
     }, [theme]);
 
-    const [network, setNetwork] = useState(null);
-
     const formattedGraph = useMemo(() => {
         if (!graphData || !graphData.nodes || !graphData.edges) {
             return { nodes: [], edges: [] };
@@ -104,9 +106,11 @@ const KnowledgeGraphViewer = ({ graphData }) => {
         return { nodes, edges };
     }, [graphData, theme]);
 
+    // --- FIX START: These handlers will now work because 'network' is in state ---
     const handleZoomIn = () => network?.zoomIn();
     const handleZoomOut = () => network?.zoomOut();
     const handleFit = () => network?.fit();
+    // --- FIX END ---
 
     if (!graphData) {
         return (
@@ -138,10 +142,12 @@ const KnowledgeGraphViewer = ({ graphData }) => {
     return (
         <div className="relative w-full h-[70vh] border border-border-light dark:border-border-dark rounded-md bg-gray-50 dark:bg-gray-800/50">
             <Graph
-                key={theme} // Force re-render on theme change to apply new options
+                key={theme}
                 graph={formattedGraph}
                 options={options}
+                // --- FIX START: Use the 'getNetwork' callback to update our state ---
                 getNetwork={net => setNetwork(net)}
+                // --- FIX END ---
             />
             <div className="absolute top-2 right-2 flex flex-col gap-1.5 bg-surface-light dark:bg-surface-dark p-1.5 rounded-md shadow-lg border border-border-light dark:border-border-dark">
                 <IconButton icon={ZoomIn} onClick={handleZoomIn} title="Zoom In" size="sm" />

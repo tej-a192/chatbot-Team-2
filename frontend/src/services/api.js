@@ -51,45 +51,6 @@ function parseAnalysisOutput(rawOutput) {
 // --- API Definition Object ---
 const api = {
   
-  requestAnalysis: async (payload) => {
-    const { filename, analysis_type } = payload;
-    if (!filename || !analysis_type) {
-      throw new Error("Filename and analysis type are required for requestAnalysis.");
-    }
-    const toastId = toast.loading(`Fetching stored ${analysis_type} for "${filename}"...`);
-    try {
-      const response = await apiClient.get(`/analysis/${encodeURIComponent(filename)}`);
-      const fullAnalysisObject = response.data;
-
-      const rawOutput = fullAnalysisObject[analysis_type];
-
-      if (!rawOutput || typeof rawOutput !== 'string' || rawOutput.trim() === "") {
-         toast.success(`No stored ${analysis_type} found for "${filename}".`, { id: toastId });
-         return {
-            content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-            thinking: "No analysis data found in the database for this type."
-         };
-      }
-      
-      const { content, thinking } = parseAnalysisOutput(rawOutput);
-      
-      toast.success(`Successfully retrieved stored ${analysis_type} for "${filename}".`, { id: toastId });
-      return {
-          content: content,
-          thinking: thinking || `Retrieved stored ${analysis_type} data.`
-      };
-
-    } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
-      toast.error(`Error fetching ${analysis_type}: ${errorMessage}`, { id: toastId });
-      console.error(`Error in requestAnalysis for ${filename} (${analysis_type}):`, error);
-      return {
-          content: `Error: Could not retrieve analysis for "${filename}".\n${errorMessage}`,
-          thinking: "An error occurred while fetching the analysis data from the server."
-      };
-    }
-  },
-
   login: async (credentials) => {
     const response = await apiClient.post("/auth/signin", credentials);
     return response.data;
@@ -125,6 +86,11 @@ const api = {
     return response.data;
   },
 
+  deleteChatSession: async (sessionId) => {
+    const response = await apiClient.delete(`/chat/session/${sessionId}`);
+    return response.data;
+  },
+
   uploadFile: async (formData, onUploadProgress) => {
     const response = await apiClient.post("/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
@@ -144,20 +110,17 @@ const api = {
   },
 
   updateUserLLMConfig: async (configData) => {
-    console.warn("api.updateUserLLMConfig: This is a local mock via api.js.");
-    return new Promise(resolve => setTimeout(() => {
-      localStorage.setItem("selectedLLM", configData.llmProvider);
-      resolve({ message: `LLM preference for ${configData.llmProvider} noted (local mock).` });
-    }, 100));
+    const response = await apiClient.put("/llm/config", configData);
+    return response.data;
   },
 
   getOrchestratorStatus: async () => {
-    return new Promise(resolve => setTimeout(() => {
-      resolve({
-        status: "ok",
-        message: "Backend (Node.js - Mocked Status via Frontend API)",
-      });
-    }, 50));
+    try {
+      const response = await apiClient.get("/network/ip");
+      return { status: "ok", message: `Backend Online at ${response.data.ips[0]}` };
+    } catch (e) {
+      return { status: "error", message: "Backend Unreachable" };
+    }
   },
   
   getUserProfile: async () => {
@@ -174,15 +137,39 @@ const api = {
     const response = await apiClient.get("/subjects");
     return response.data;
   },
+  
+  // --- MISSING FUNCTIONS ADDED BACK ---
 
-  getSyllabus: async (subjectId) => {
-    const response = await apiClient.get(`/syllabus/${subjectId}`);
-    return response.data.syllabus;
-  },
+  requestAnalysis: async (payload) => {
+    const { filename, analysis_type } = payload;
+    if (!filename || !analysis_type) {
+      throw new Error("Filename and analysis type are required.");
+    }
+    const toastId = toast.loading(`Generating ${analysis_type} for "${filename}"...`);
+    try {
+      // This single endpoint now intelligently fetches from either User or Admin docs on the backend
+      const response = await apiClient.get(`/analysis/${encodeURIComponent(filename)}`);
+      const fullAnalysisObject = response.data;
 
-  getMindmap: async () => {
-    const response = await apiClient.get('/mindmap');
-    return response.data;
+      const rawOutput = fullAnalysisObject[analysis_type];
+
+      if (!rawOutput || typeof rawOutput !== 'string' || rawOutput.trim() === "") {
+         toast.success(`No stored ${analysis_type} found for "${filename}".`, { id: toastId });
+         return {
+            content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
+            thinking: "No analysis data found in the database for this type."
+         };
+      }
+      
+      const { content, thinking } = parseAnalysisOutput(rawOutput);
+      
+      toast.success(`Successfully generated ${analysis_type} for "${filename}".`, { id: toastId });
+      return { content, thinking };
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+      toast.error(`Error generating ${analysis_type}: ${errorMessage}`, { id: toastId });
+      throw error;
+    }
   },
 
   generateDocument: async ({ markdownContent, docType, sourceDocumentName }) => {
@@ -199,7 +186,6 @@ const api = {
             filename = filenameMatch[1];
         }
     }
-    
     return { fileBlob: response.data, filename: filename };
   },
 
@@ -211,10 +197,9 @@ const api = {
     return { audioBlob: response.data, sourceDocumentName };
   },
 
-  // --- NEW FUNCTION ---
   getKnowledgeGraph: async (documentName) => {
     const response = await apiClient.get(`/kg/visualize/${encodeURIComponent(documentName)}`);
-    return response.data; // Expected to be { nodes: [...], edges: [...] }
+    return response.data;
   },
 };
 

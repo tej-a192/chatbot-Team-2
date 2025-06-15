@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
-import { X, MessageSquareText, Loader2, AlertTriangle, Trash2 } from 'lucide-react'; // Added Trash2
+import { X, MessageSquareText, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import Modal from '../core/Modal.jsx';
-import IconButton from '../core/IconButton.jsx'; // Import IconButton
+import IconButton from '../core/IconButton.jsx';
 
 const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -30,11 +30,8 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         setLoadingSessions(true);
         setError('');
         try {
-            const data = await api.getChatSessions(); // Fetches { sessionId, preview, updatedAt, ... }
+            const data = await api.getChatSessions();
             setSessions(Array.isArray(data) ? data : []);
-            if (data.length === 0) {
-                toast.info("No past chat sessions found.");
-            }
         } catch (err) {
             toast.error("Failed to load chat sessions.");
             setError(err.message || "Could not fetch sessions.");
@@ -56,19 +53,16 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
 
         setSelectedSessionId(sessionId);
         setLoadingMessages(true);
-        setSessionMessages([]); // Clear previous preview
+        setSessionMessages([]);
         setError(''); 
         try {
-            // FIX: api.getChatHistory returns a full session object, not just messages.
             const sessionData = await api.getChatHistory(sessionId);
-
-            // FIX: Check if sessionData and sessionData.messages are valid before mapping.
             const messagesArray = Array.isArray(sessionData.messages) ? sessionData.messages : [];
             
             setSessionMessages(messagesArray.map(msg => ({
                 id: msg.id || msg._id || `hist-${Date.now()}-${Math.random()}`,
-                sender: msg.sender, // 'user' or 'bot'
-                text: msg.text, // Main text content
+                sender: msg.role === 'model' ? 'bot' : 'user',
+                text: msg.parts?.[0]?.text,
                 timestamp: msg.timestamp
             })));
         } catch (err) {
@@ -88,23 +82,28 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         }
     };
     
+    // --- THIS FUNCTION IS NOW CORRECTED ---
     const handleDeleteSession = async (sessionIdToDelete, e) => {
-        e.stopPropagation(); // Prevent selecting the session
+        e.stopPropagation();
         if (!window.confirm(`Are you sure you want to delete session ${sessionIdToDelete.substring(0,8)}...? This action cannot be undone.`)) return;
         
-        const toastId = toast.loading(`Deleting session ${sessionIdToDelete.substring(0,8)}... (mock)`);
-        // In a real implementation, you would make an API call here.
-        // For now, we simulate success and update the UI.
-        setTimeout(() => {
-            toast.success(`Mock: Session ${sessionIdToDelete.substring(0,8)} would be deleted.`, { id: toastId });
-            // FIX: Uncomment the optimistic UI update to remove the item from the list.
+        const toastId = toast.loading(`Deleting session...`);
+        
+        try {
+            await api.deleteChatSession(sessionIdToDelete);
+            
+            toast.success(`Session deleted successfully.`, { id: toastId });
+            
+            // Optimistically update the UI
             setSessions(prev => prev.filter(s => s.sessionId !== sessionIdToDelete)); 
             if (selectedSessionId === sessionIdToDelete) {
                 setSelectedSessionId(null);
                 setSessionMessages([]);
             }
-        }, 1000);
-
+        } catch (error) {
+            const errorMessage = error.response?.data?.message || "Failed to delete session.";
+            toast.error(errorMessage, { id: toastId });
+        }
     };
 
     return (
@@ -133,7 +132,7 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
                                     icon={Trash2}
                                     size="sm"
                                     variant="ghost"
-                                    title="Delete session (Mock)"
+                                    title="Delete session"
                                     className="absolute top-1 right-1 p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity !rounded-full hover:bg-red-500/10"
                                     onClick={(e) => handleDeleteSession(session.sessionId, e)}
                                 />

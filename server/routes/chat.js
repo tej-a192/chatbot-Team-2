@@ -8,6 +8,7 @@ const { processAgenticRequest } = require('../services/agentService');
 
 const router = express.Router();
 
+// @route   POST /api/chat/message
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch,
@@ -30,7 +31,7 @@ router.post('/message', async (req, res) => {
     try {
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
-            User.findById(userId).select('preferredLlmProvider ollamaModel').lean()
+            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel').lean()
         ]);
 
         const llmProvider = user?.preferredLlmProvider || 'gemini';
@@ -58,7 +59,8 @@ router.post('/message', async (req, res) => {
             llmProvider,
             ollamaModel,
             isWebSearchEnabled: !!useWebSearch,
-            userId: userId.toString(), // <<< PASS THE USER ID TO THE AGENT
+            userId: userId.toString(),
+            userApiKey: user.encryptedApiKey, // Pass the encrypted key
         };
 
         const agentResponse = await processAgenticRequest(
@@ -73,7 +75,7 @@ router.post('/message', async (req, res) => {
             parts: [{ text: agentResponse.finalAnswer }],
             text: agentResponse.finalAnswer,
             timestamp: new Date(),
-            thinking: null, // The agent's thinking process is now internal by default
+            thinking: null,
             references: agentResponse.references || [],
             source_pipeline: agentResponse.sourcePipeline,
         };
@@ -112,8 +114,7 @@ router.post('/message', async (req, res) => {
     }
 });
 
-
-// Other Chat Routes (Unchanged)
+// @route   POST /api/chat/history
 router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
@@ -141,6 +142,7 @@ router.post('/history', async (req, res) => {
     }
 });
 
+// @route   GET /api/chat/sessions
 router.get('/sessions', async (req, res) => {
     try {
         const sessions = await ChatHistory.find({ userId: req.user._id }).sort({ updatedAt: -1 }).select('sessionId createdAt updatedAt messages').lean();
@@ -157,6 +159,7 @@ router.get('/sessions', async (req, res) => {
     }
 });
 
+// @route   GET /api/chat/session/:sessionId
 router.get('/session/:sessionId', async (req, res) => {
     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
@@ -168,5 +171,36 @@ router.get('/session/:sessionId', async (req, res) => {
         res.status(500).json({ message: 'Failed to retrieve chat session details.' });
     }
 });
+
+// --- NEW ENDPOINT: DELETE A CHAT SESSION ---
+// @route   DELETE /api/chat/session/:sessionId
+// @desc    Delete a specific chat session for the authenticated user
+// @access  Private
+router.delete('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+
+    if (!sessionId) {
+        return res.status(400).json({ message: 'Session ID is required.' });
+    }
+
+    try {
+        console.log(`>>> DELETE /api/chat/session: User=${userId}, Session=${sessionId}`);
+        const result = await ChatHistory.deleteOne({ sessionId: sessionId, userId: userId });
+
+        if (result.deletedCount === 0) {
+            console.warn(`   Session not found for deletion or user not authorized. Session: ${sessionId}`);
+            return res.status(404).json({ message: 'Chat session not found or you do not have permission to delete it.' });
+        }
+
+        console.log(`<<< Session ${sessionId} deleted successfully from database for user ${userId}.`);
+        res.status(200).json({ message: 'Chat session deleted successfully.' });
+
+    } catch (error) {
+        console.error(`!!! Error deleting chat session ${sessionId} for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while deleting chat session.' });
+    }
+});
+
 
 module.exports = router;

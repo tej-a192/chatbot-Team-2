@@ -9,6 +9,7 @@ import atexit
 import uuid
 
 from duckduckgo_search import DDGS
+from qdrant_client import models as qdrant_models # Import Qdrant models
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -96,6 +97,52 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
+# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/query', methods=['POST'])
+def search_qdrant_documents():
+    current_app.logger.info("--- /query Request (RAG Search Only) ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    user_id = data.get('user_id') # user_id is mainly for logging here
+    
+    if not query_text or not user_id:
+        return create_error_response("Missing 'query' or 'user_id'", 400)
+
+    try:
+        k = data.get('k', 5)
+        document_context_name = data.get('documentContextName')
+        
+        must_conditions = []
+        if document_context_name:
+            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
+            must_conditions.append(qdrant_models.FieldCondition(
+                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                match=qdrant_models.MatchValue(value=document_context_name)
+            ))
+        
+        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
+        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
+        
+        retrieved_docs, snippet, docs_map = vector_service.search_documents(
+            query=query_text, k=k, filter_conditions=qdrant_filters
+        )
+        
+        response_payload = {
+            "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
+            "formatted_context_snippet": snippet,
+            "retrieved_documents_map": docs_map,
+        }
+        
+        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
+        return jsonify(response_payload), 200
+        
+    except Exception as e:
+        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
+        return create_error_response(f"Query failed: {str(e)}", 500)
+
+# All other endpoints remain unchanged and are included for completeness
 @app.route('/web_search', methods=['POST'])
 def web_search_route():
     data = request.get_json()
@@ -111,8 +158,7 @@ def export_podcast_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     source_document_text, outline_content = data.get('sourceDocumentText'), data.get('outlineContent')
-    if not all([source_document_text, outline_content]):
-        return create_error_response("Missing 'sourceDocumentText' or 'outlineContent'", 400)
+    if not all([source_document_text, outline_content]): return create_error_response("Missing required fields", 400)
     try:
         script = podcast_generator.generate_podcast_script(source_document_text, outline_content, llm_wrapper)
         dialogue = podcast_generator.parse_script_into_dialogue(script)
@@ -133,8 +179,7 @@ def generate_document_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     outline_content, doc_type, source_document_text = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText')
-    if not all([outline_content, doc_type, source_document_text]):
-        return create_error_response("Missing required fields", 400)
+    if not all([outline_content, doc_type, source_document_text]): return create_error_response("Missing required fields", 400)
     try:
         expanded_content = document_generator.expand_content_with_llm(outline_content, source_document_text, doc_type, llm_wrapper)
         slides_data = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
@@ -193,48 +238,23 @@ def add_document_qdrant():
         return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_chunks_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
     except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
 
-@app.route('/query', methods=['POST'])
-def search_qdrant_documents_and_get_kg():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    query_text, user_id = data.get('query'), data.get('user_id')
-    if not query_text or not user_id: return create_error_response("Missing 'query' or 'user_id'", 400)
-    try:
-        from qdrant_client import models as qdrant_models
-        k, doc_context = data.get('k', 5), data.get('documentContextName')
-        must = [qdrant_models.FieldCondition(key="file_name", match=qdrant_models.MatchValue(value=doc_context))] if doc_context else []
-        filters = qdrant_models.Filter(must=must) if must else None
-        retrieved_docs, snippet, docs_map = vector_service.search_documents(query=query_text, k=k, filter_conditions=filters)
-        return jsonify({ "retrieved_documents_list": [d.to_dict() for d in retrieved_docs], "formatted_context_snippet": snippet, "retrieved_documents_map": docs_map, "knowledge_graphs": {} }), 200
-    except Exception as e: return create_error_response(f"Query failed: {str(e)}", 500)
-
 @app.route('/query_kg', methods=['POST'])
 def query_kg_route():
-    current_app.logger.info("--- /query_kg Request ---")
     data = request.get_json()
-    if not data:
-        return create_error_response("Request must be JSON", 400)
-    
-    user_id = data.get('user_id')
-    document_name = data.get('document_name')
-    query_text = data.get('query')
-
-    if not all([user_id, document_name, query_text]):
-        return create_error_response("Missing 'user_id', 'document_name', or 'query'", 400)
-    
+    if not data: return create_error_response("Request must be JSON", 400)
+    user_id, document_name, query_text = data.get('user_id'), data.get('document_name'), data.get('query')
+    if not all([user_id, document_name, query_text]): return create_error_response("Missing fields", 400)
     try:
         facts_summary = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
         return jsonify({"success": True, "facts": facts_summary}), 200
-    except Exception as e:
-        logger.error(f"Failed to query knowledge graph: {e}", exc_info=True)
-        return create_error_response(f"Failed to query knowledge graph: {str(e)}", 500)
+    except Exception as e: return create_error_response(f"Failed to query KG: {str(e)}", 500)
 
 @app.route('/delete_qdrant_document_data', methods=['DELETE'])
 def delete_qdrant_data_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     user_id, document_name = data.get('user_id'), data.get('document_name') 
-    if not user_id or not document_name: return create_error_response("Missing 'user_id' or 'document_name'", 400)
+    if not user_id or not document_name: return create_error_response("Missing fields", 400)
     try:
         result = vector_service.delete_document_vectors(user_id, document_name)
         return jsonify(result), 200

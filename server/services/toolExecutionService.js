@@ -3,21 +3,24 @@ const axios = require('axios');
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_RAG_SERVICE_URL;
 
-async function queryPythonRagService(query, documentContextName, criticalThinkingEnabled, clientFilter = null, k = 5) {
+async function queryPythonRagService(query, documentContextName, clientFilter = null, k = 5) {
     if (!PYTHON_SERVICE_URL) {
         throw new Error("RAG service is not configured on the server.");
     }
     const searchUrl = `${PYTHON_SERVICE_URL}/query`;
+    
+    // The payload is now simpler and only contains RAG-specific information.
     const payload = {
         query: query,
         k: k,
         user_id: "agent_user", // The agent queries on behalf of the user
-        use_kg_critical_thinking: !!criticalThinkingEnabled,
         documentContextName: documentContextName || null
     };
+    
     if (clientFilter) {
         payload.filter = clientFilter;
     }
+
     try {
         const response = await axios.post(searchUrl, payload, { timeout: 30000 });
         const relevantDocs = response.data?.retrieved_documents_list || [];
@@ -32,7 +35,6 @@ async function queryPythonRagService(query, documentContextName, criticalThinkin
             : "No relevant context was found in the specified documents for this query.";
 
         return { references, toolOutput };
-
     } catch (error) {
         const errorMsg = error.response?.data?.error || `Python Service Error: ${error.message}`;
         console.error(`[toolExecutionService] Error calling RAG service:`, errorMsg);
@@ -40,6 +42,7 @@ async function queryPythonRagService(query, documentContextName, criticalThinkin
     }
 }
 
+// This function remains unchanged and correct.
 async function queryKgService(query, documentName, userId) {
     if (!PYTHON_SERVICE_URL) {
         throw new Error("Knowledge Graph service is not configured on the server.");
@@ -56,7 +59,6 @@ async function queryKgService(query, documentName, userId) {
     } catch (error) {
         const errorMsg = error.response?.data?.error || `KG Service Error: ${error.message}`;
         console.error(`[toolExecutionService] Error calling KG service:`, errorMsg);
-        // It's better to return a failure message than to throw, as KG is supplementary.
         return `Could not retrieve facts from knowledge graph: ${errorMsg}`;
     }
 }
