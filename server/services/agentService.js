@@ -27,60 +27,67 @@ function parseToolCall(responseText) {
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
     const { llmProvider, ollamaModel, userId } = requestContext;
 
+    // 1. Get user and API Key (using your friend's robust logic)
     const user = await User.findById(userId).select('+encryptedApiKey');
     if (!user) {
         throw new Error("User not found during agent processing.");
     }
-    
     const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
     if (user.encryptedApiKey && !userApiKey) {
         console.warn(`[AgentService] Failed to decrypt API key for user ${userId}. LLM will use server fallback key if configured.`);
     }
 
+    // 2. Prepare contexts for the agent
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
-    
     const agenticSystemPrompt = createAgenticSystemPrompt(
         modelContext, 
         agenticContext, 
-        { ...requestContext, userQuery } 
+        { ...requestContext, userQuery }
     );
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
     const llmOptions = {
         ...(llmProvider === 'ollama' && { model: ollamaModel }),
-        apiKey: userApiKey, 
+        apiKey: userApiKey,
     };
 
+    // 3. Call the Router agent (using your correct, clean logic)
+    console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
     const routerResponseText = await llmService.generateContentWithHistory(
-        [{ role: 'user', parts: [{ text: "Analyze context and query then return JSON decision."}] }], 
-        "Analyze context and query then return JSON decision.", 
+        [], // Router gets no prior chat history to prevent confusion
+        "Please analyze the provided context and user query and return your JSON decision.", // A simple instruction
         agenticSystemPrompt,
         llmOptions
     );
 
     const toolCall = parseToolCall(routerResponseText);
 
+    // 4. Handle Direct Answer path (your correct logic)
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer.');
         const directAnswer = await llmService.generateContentWithHistory(
-            chatHistory, 
-            userQuery,   
+            chatHistory,
+            userQuery,
             systemPrompt,
             llmOptions
         );
         return {
-            finalAnswer: directAnswer, references: [], sourcePipeline: `${llmProvider}-agent-direct`,
+            finalAnswer: directAnswer,
+            references: [],
+            sourcePipeline: `${llmProvider}-agent-direct`,
         };
     }
 
+    // 5. Handle Tool Call path
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
-        return { finalAnswer: "I tried to use a tool that doesn't exist.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
+        return { finalAnswer: "I tried to use a tool that doesn't exist. Please try again.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
     }
 
     try {
+        // 6. Execute tools in parallel (using your clean, correct logic)
         const toolExecutionPromises = [];
         const executedToolNames = [];
 
@@ -92,7 +99,8 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
-            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId: userId.toString() })); 
+            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            executedToolNames.push('kg_search');
             pipeline += '+kg';
         }
 
@@ -103,24 +111,18 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
             return `--- TOOL OUTPUT: ${toolName.toUpperCase()} ---\n${result.toolOutput}`;
         }).join('\n\n');
         
-        // --- THIS IS THE FIX ---
-        // This correctly flattens the arrays of references from all tool results into one.
         const combinedReferences = toolResults.flatMap(result => result.references || []);
-        // --- END OF FIX ---
 
+        // 7. Call the Synthesizer agent to generate the final answer
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
-        
         const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
         const finalAnswer = await llmService.generateContentWithHistory(
-            chatHistory,         
-            synthesizerPrompt,   
-            systemPrompt,        
-            llmOptions
+            chatHistory, synthesizerPrompt, systemPrompt, llmOptions
         );
         
         return {
             finalAnswer,
-            references: combinedReferences, // Now this will contain the web search references
+            references: combinedReferences,
             sourcePipeline: pipeline,
         };
     } catch (error) {
@@ -128,6 +130,7 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], sourcePipeline: `agent-error-tool-failed` };
     }
 }
+
 
 
 

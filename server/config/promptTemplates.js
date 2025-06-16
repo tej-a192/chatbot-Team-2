@@ -268,18 +268,22 @@ const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext)
 
   let activeModeInstructions;
 
-  // Determine the unbreakable rule based on the request context
+  // --- THIS IS THE NEW, SMARTER LOGIC ---
   if (requestContext.isWebSearchEnabled) {
-      activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. You MUST select the 'web_search' tool. This is not optional.`;
+      activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. Your decision MUST be 'web_search'. This is not optional.`;
   } 
   else if (requestContext.documentContextName) {
-      activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". You MUST select the 'rag_search' tool to answer questions about it. This is not optional.`;
+      activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". Your decision MUST be 'rag_search'. This is not optional.`;
   }
   else {
-      activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool is required. You should answer directly.`;
+      // This is the new, more intelligent instruction for Direct Chat mode.
+      activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool has been selected by the user. You must analyze the user's query to make a decision.
+-   If the query asks for general knowledge, definitions, explanations, or concepts (like "what is X?", "explain Y", "how does Z work?"), your decision MUST be 'direct_answer'.
+-   Only if the query explicitly asks for very recent, real-time information (e.g., "what is the weather today?", "latest news") should you consider 'web_search'.
+-   For this query, 'direct_answer' is the most appropriate choice.`;
   }
+  // --- END OF NEW LOGIC ---
 
-  // Inject the user's actual query directly into the system prompt for the router's context
   const userQueryForPrompt = requestContext.userQuery || "[User query not provided]";
 
   return `
@@ -292,36 +296,30 @@ You are a "Router" agent. Your single task is to analyze the user's query and th
 - ${activeModeInstructions}
 - User's Query: "${userQueryForPrompt}"
 
-**AVAILABLE TOOLS (for reference if a tool is required):**
-[
-${toolsFormatted}
-]
-
 **YOUR TASK:**
-Based on the CURRENT MODE described in the context, you MUST choose one action. Your entire output MUST be a single, valid JSON object. Do not provide any other text or explanation.
+Based on the CURRENT MODE and QUERY ANALYSIS, you MUST choose one action. Your entire output MUST be a single, valid JSON object with a "tool_call" key. Do not provide any other text or explanation.
 
-- If the mode requires a tool ('web_search' or 'rag_search'), format your response like this, using the user's original query as the parameter:
+- If your decision is 'web_search' or 'rag_search', format as:
   \`\`\`json
   {
     "tool_call": {
-      "tool_name": "the_required_tool_name",
-      "parameters": {
-        "query": "${userQueryForPrompt}"
-      }
+      "tool_name": "the_tool_name_you_chose",
+      "parameters": { "query": "${userQueryForPrompt}" }
     }
   }
   \`\`\`
 
-- If the mode is "Direct Chat", format your response like this:
+- If your decision is 'direct_answer', format as:
   \`\`\`json
   {
     "tool_call": null
   }
   \`\`\`
 
-Analyze the context and the query, then provide your JSON decision.
+Provide your JSON decision now.
 `;
 };
+
 
 const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
     // Shared instruction block for all synthesizer prompts
