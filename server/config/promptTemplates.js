@@ -37,17 +37,29 @@ const ANALYSIS_PROMPTS = {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
-**TASK:** Generate 5-7 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text.
+**TASK:** Generate a set of 5-7 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text. To ensure a logical flow, you MUST organize the FAQs by the main themes found in the document.
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the first FAQ (after your detailed thinking process, if used). Do **NOT** include any preamble before the first 'Q:'.
-*   Format each FAQ as:
-    Q: [Question derived ONLY from the text]
-    A: [Answer derived ONLY from the text, concise]
-*   If the text doesn't support an answer for a potential question, do not invent one. Stick to what's explicitly stated or directly implied.
-*   Use Markdown for formatting within answers if appropriate (e.g., lists).
+1.  **Thematic Grouping:** Identify 2-3 major themes from the document. For each theme, create a Markdown H3 heading (e.g., \`### Core Concepts\`).
+2.  **Question/Answer Format:** Under each theme heading, list 2-3 relevant questions and their corresponding answers.
+3.  **Q&A Style:** Format each FAQ as:
+    *   **Q:** [Question derived ONLY from the text]
+    *   **A:** [Answer derived ONLY from the text, concise and clear]
+4.  **Content Adherence:** Stick strictly to what is stated or directly implied in the text. Do not invent information.
 
-**BEGIN OUTPUT (Start with 'Q:' or \`<thinking>\`):**
+**EXAMPLE OUTPUT STRUCTURE:**
+
+### Theme 1: Core Concepts
+*   **Q:** What is the primary subject of the document?
+*   **A:** The document is about...
+*   **Q:** What is the definition of X?
+*   **A:** X is defined as...
+
+### Theme 2: Methodology
+*   **Q:** What method was used to gather data?
+*   **A:** The data was gathered using...
+
+**BEGIN OUTPUT (Start with '###' for the first theme or \`<thinking>\`):**
 `;
             return baseTemplate;
         }
@@ -56,14 +68,25 @@ const ANALYSIS_PROMPTS = {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
-**TASK:** Identify the 5-8 most important topics discussed in the provided text. For each topic, provide a 1-2 sentence explanation based ONLY on the text.
+**TASK:** Identify the 5-7 most important topics or concepts from the provided text. For each topic, provide a clear explanation and include a specific example or key data point from the text to illustrate it.
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the first topic (after your detailed thinking process, if used). Do **NOT** include any preamble before the first bullet point.
-*   Format as a Markdown bulleted list:
-    *   **Topic Name:** Brief explanation derived ONLY from the text content (1-2 sentences max).
+*   Use Markdown H3 (###) for each topic name for clear separation and structure.
+*   Beneath each heading, provide:
+    *   An **Explanation:** of the topic in your own words, but based strictly on the text. Start this with the bolded label '**Explanation:**'.
+    *   A specific **Example from Text:**. Start this with the bolded label '**Example from Text:**' followed by a direct quote or a paraphrased key data point from the source document.
 
-**BEGIN OUTPUT (Start with '*   **' or \`<thinking>\`):**
+**EXAMPLE OUTPUT STRUCTURE:**
+
+### Topic 1: Name of the First Key Concept
+**Explanation:** A brief summary of what this concept is and why it's important, according to the document.
+**Example from Text:** "The document states that 'the reaction requires a temperature of over 100 million degrees Celsius' which highlights the extreme conditions needed."
+
+### Topic 2: Name of the Second Key Concept
+**Explanation:** A summary of how this second concept relates to the first one, based on the text provided.
+**Example from Text:** "For instance, the authors mention that 'this process is what powers stars like our sun'."
+
+**BEGIN OUTPUT (Start with '###' for the first topic or \`<thinking>\`):**
 `;
             return baseTemplate;
         }
@@ -86,17 +109,33 @@ const ANALYSIS_PROMPTS = {
     *   You can define a simple class for the root/main node: \`classDef rootStyle fill:#DCEFFD,stroke:#3A77AB,stroke-width:2px,color:#333;\`
     *   Apply it: \`class A rootStyle;\` (assuming 'A' is your root node ID).
 
-**OUTPUT FORMAT (Strict):**
-*   Start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`graph LR;\`) (after your detailed thinking process, if used).
-*   Do **NOT** include any preamble or explanation before the Mermaid code block.
-*   The entire output after the thinking block (if any) must be valid Mermaid.js syntax.
+**OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):**
+*   Your response **MUST** start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`mindmap\`).
+*   **DO NOT** wrap your response in a Markdown code block like \`\`\`mermaid ... \`\`\`.
+*   **DO NOT** include any preamble, explanation, or any text before the first line of Mermaid code.
 
-**BEGIN OUTPUT (Start with e.g., \`graph TD;\` or \`<thinking>\`):**
+**EXAMPLE OF A WRONG OUTPUT (DO NOT DO THIS):**
+\`\`\`
+Here is the mindmap you requested:
+\`\`\`mermaid
+graph TD;
+    A --> B;
+\`\`\`
+\`\`\`
+
+**EXAMPLE OF A CORRECT OUTPUT (DO THIS):**
+\`\`\`
+graph TD;
+    A --> B;
+\`\`\`
+
+**BEGIN OUTPUT (Start immediately with 'graph', 'mindmap', etc.):**
 `;
             return baseTemplate;
         }
     }
 };
+
 
 
 // ==============================================================================
@@ -169,11 +208,24 @@ const CHAT_MAIN_SYSTEM_PROMPT = `You are an expert AI assistant. Your primary go
 **Core Principles for Your Response:**
 1.  **Think Step-by-Step (Internal CoT):** Before generating your answer, thoroughly analyze the query. Break down complex questions. Outline the logical steps and information needed. This is your internal process to ensure a high-quality response. *Do NOT output this internal thinking process in your final response to the user.*
 2.  **Prioritize Accuracy & Provided Context:** Base your answers on reliable information. If "Context Documents" are provided with the user's query, **they are your primary source of information for formulating the answer.** You should synthesize information from these documents as needed to comprehensively address the user's query.
-3.  **Session Memory and User Identity (MANDATORY):** You MUST remember information provided by the user within the current conversation session. If the user tells you their name or provides other personal context, you must retain and use this information for the duration of the session. Do not default to a generic privacy-focused answer if the answer is present in the preceding turns of the conversation history.
+
+    {/* --- UPDATED SECTION FOR STRICTER LATENT MEMORY --- */}
+3.  **Session Memory (MANDATORY RULE):**
+    -   A summary of your previous conversations may be provided under a "CONTEXT" block.
+    -   You **MUST IGNORE** this summary and treat the conversation as brand new, **UNLESS** the user's current query explicitly asks you to recall past information (e.g., "what is my name?", "what did we discuss before?", "remind me about X").
+    -   **Example Scenario:**
+        -   CONTEXT: "The user, Pavan, was previously asking about quantum computing."
+        -   User's Query: "Hi"
+        -   Correct AI Response: "Hello! How can I help you today?" (Ignores both name and topic).
+        -   User's Query: "What is my name?"
+        -   Correct AI Response: "Your name is Pavan." (Accesses summary because asked directly).
+
 4.  **Format for Maximum Clarity (MANDATORY):** Structure your responses using Markdown (headings, lists, bold), KaTeX for math (\`$$...$$\` for block, \`$...$\` for inline), and fenced code blocks. Autonomously choose the best format to make your answer easy to understand.
 5.  **Working with "Context Documents" (RAG):** If "Context Documents" are provided, base your answer primarily on them. If the documents don't answer a part of the query, state so clearly, then you may provide a general knowledge answer for that part. **DO NOT INCLUDE CITATION MARKERS like [1], [2] in your textual response.**
 `;
 
+
+// ... (keep all other prompts and the module.exports block)
 const WEB_SEARCH_CHAT_SYSTEM_PROMPT = `You are a helpful AI research assistant. Your primary goal is to answer the user's query based **exclusively** on the provided web search results context.
 
 **Core Instructions:**
@@ -216,6 +268,7 @@ const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext)
 
   let activeModeInstructions;
 
+  // Determine the unbreakable rule based on the request context
   if (requestContext.isWebSearchEnabled) {
       activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. You MUST select the 'web_search' tool. This is not optional.`;
   } 
@@ -270,21 +323,91 @@ Analyze the context and the query, then provide your JSON decision.
 `;
 };
 
-const createSynthesizerPrompt = (originalQuery, toolOutput) => {
-  return `
-You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query.
-Your task is to synthesize this information into a single, comprehensive, and helpful response for the user.
-If the information is insufficient, state that and answer to the best of your ability. Do not mention that a tool was used. Just provide the final answer.
+const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
+    // Shared instruction block for all synthesizer prompts
+    const formattingInstructions = `
+**Formatting Guidelines (MANDATORY):**
+- **Structure:** Use Markdown for headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>).
+- **Clarity:** Use the most appropriate combination of formatting elements to make your answer easy to read and understand.
+- **Tables:** If data is tabular, present it as a Markdown table.
+- **Code:** If the answer involves code, use fenced code blocks with language identifiers (e.g., \`\`\`python ... \`\`\`).
+`;
 
---- USER'S ORIGINAL QUERY ---
+    // Default prompt for RAG and other tools (no change here)
+    let systemInstruction = `
+You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
+
+**Response Guidelines:**
+1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
+2.  **BE COMPREHENSIVE:** Do not just give a one-sentence answer. Elaborate on the information found, providing context and detailed explanations based on the tool's output.
+3.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used.
+4.  **DO NOT CITE:** Do not include citation markers like [1], [2] in your answer. This will be handled separately.
+
+${formattingInstructions}
+
+---
+**USER'S ORIGINAL QUERY:**
+${originalQuery}
+---
+**INFORMATION GATHERED BY TOOL (Output from '${toolName}'):**
+${toolOutput}
+---
+
+**FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
+`;
+
+    // --- **THIS IS THE MODIFIED SECTION FOR WEB SEARCH** ---
+    if (toolName === 'web_search') {
+        systemInstruction = `
+You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
+
+Your final response MUST follow this two-part structure precisely:
+A detailed, well-written answer to the user's query.
+**References Section:** A formatted list of the sources used.
+
+---
+**PART 1: MAIN ANSWER INSTRUCTIONS**
+
+-   Your answer **MUST** be based on the provided search results.
+-   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]." If information comes from multiple sources, cite them all, like so: "[2, 3]".
+-   Be comprehensive. Do not just give a one-sentence answer. Synthesize information from multiple sources to build a full, well-rounded explanation.
+-   Use rich Markdown formatting (headings, lists, bolding, tables) to make the answer clear and engaging.
+
+---
+**PART 2: REFERENCES SECTION INSTRUCTIONS**
+
+-   After you have finished writing the main answer, add a horizontal rule (\`---\`).
+-   After the line, add a heading: \`## References\`.
+-   Below the heading, create a numbered list of all the sources you cited.
+-   Format each reference like this: \`[1] [Source Title](Source URL)\`.
+
+---
+**EXAMPLE OF COMPLETE OUTPUT:**
+
+The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2]. While violet light is scattered even more than blue, our eyes are more sensitive to blue light, which is why we perceive the sky as blue [1, 3].
+
+---
+## References
+[1] [Why Is the Sky Blue? - NASA SpacePlace](https://spaceplace.nasa.gov/blue-sky/en/)
+[2] [Rayleigh scattering - Wikipedia](https://en.wikipedia.org/wiki/Rayleigh_scattering)
+[3] [Optics: The Blue Sky - The Physics Classroom](https://www.physicsclassroom.com/class/light/Lesson-2/Blue-Skies)
+
+---
+**Now, perform this task using the following information:**
+
+**USER'S ORIGINAL QUERY:**
 ${originalQuery}
 
---- INFORMATION GATHERED BY TOOL ---
+**WEB SEARCH RESULTS:**
 ${toolOutput}
 
---- FINAL ANSWER ---
+**YOUR COMPLETE, FORMATTED RESPONSE:**
 `;
+    }
+
+    return systemInstruction;
 };
+
 
 
 // ==============================================================================

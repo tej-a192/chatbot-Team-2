@@ -8,6 +8,29 @@ const { processAgenticRequest } = require('../services/agentService');
 
 const router = express.Router();
 
+function doesQuerySuggestRecall(query) {
+    const lowerCaseQuery = query.toLowerCase();
+    const recallKeywords = [
+        // Identity
+        'my name', 'my profession', 'i am', 'i told you',
+        // Direct Recall
+        'remember', 'recall', 'remind me', 'go back to',
+        // Past Reference
+        'previously', 'before', 'we discussed', 'we were talking about',
+        'earlier', 'yesterday', 'last session',
+        // Questioning Memory
+        'what did i say', 'what was', 'what were', 'who am i',
+        'do you know', 'can you tell me again',
+        // Continuation
+        'continue with', 'let\'s continue', 'pick up where we left off',
+        'the last thing', 'another question about that',
+        // General Context
+        'about that topic', 'regarding that', 'on that subject',
+        'the document we', 'the file i uploaded', 'in that paper',
+    ];
+    return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
+}
+
 // @route   POST /api/chat/message
 router.post('/message', async (req, res) => {
     const {
@@ -42,11 +65,21 @@ router.post('/message', async (req, res) => {
         
         const historyForLlm = [];
 
-        if (summaryFromDb) {
-            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT: Here is a summary of our conversation so far. Use it to inform your response but do not mention the summary itself in your answer:\n\n"""\n${summaryFromDb}\n"""` }] });
-            historyForLlm.push({ role: 'model', parts: [{ text: "Okay, I have reviewed the summary of our previous conversation. I will use this context for my next response. How can I help you now?" }] });
+        // --- THIS IS THE CORRECTED LOGIC ---
+        // Only inject the summary as context if the user's query suggests they want to recall something.
+        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
+            console.log(`[Chat Route] Recall detected in query. Injecting summary into context.`);
+            historyForLlm.push({ 
+                role: 'user', 
+                parts: [{ text: `CONTEXT: Here is a summary of our previous conversations. Use it to answer my current question.\n\n"""\n${summaryFromDb}\n"""` }] 
+            });
+            historyForLlm.push({ 
+                role: 'model', 
+                parts: [{ text: "Okay, I have reviewed the summary of our previous conversation. I will now answer your question based on that context." }] 
+            });
         }
-        
+        // --- END OF FIX ---
+
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
@@ -60,7 +93,7 @@ router.post('/message', async (req, res) => {
             ollamaModel,
             isWebSearchEnabled: !!useWebSearch,
             userId: userId.toString(),
-            userApiKey: user.encryptedApiKey, // Pass the encrypted key
+            userApiKey: user.encryptedApiKey,
         };
 
         const agentResponse = await processAgenticRequest(
@@ -113,6 +146,7 @@ router.post('/message', async (req, res) => {
         res.status(statusCode).json({ message: clientMessage, reply: errorMessageForChat });
     }
 });
+
 
 // @route   POST /api/chat/history
 router.post('/history', async (req, res) => {

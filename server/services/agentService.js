@@ -12,10 +12,12 @@ function parseToolCall(responseText) {
     const jsonString = jsonMatch ? jsonMatch[2] : responseText;
     try {
         const jsonResponse = JSON.parse(jsonString);
+        // Check that the key 'tool_call' exists in the object.
+        // It can be an object or null, but it must be present.
         if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
             return jsonResponse.tool_call;
         }
-        return null; // Return null if tool_call key is missing
+        return null; // Return null if the key is missing
     } catch (e) {
         console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}`);
         return null;
@@ -31,15 +33,11 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     }
     
     const userApiKey = decrypt(user.encryptedApiKey);
-
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
     
-    // Pass the userQuery into the context for the new prompt template
     const agenticSystemPrompt = createAgenticSystemPrompt(
-        modelContext, 
-        agenticContext, 
-        { ...requestContext, userQuery }
+        modelContext, agenticContext, { ...requestContext, userQuery }
     );
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
@@ -48,70 +46,67 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         apiKey: userApiKey,
     };
 
-    console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
     const routerResponseText = await llmService.generateContentWithHistory(
-        [], // Router gets no prior chat history to prevent confusion
-        "Please analyze the provided context and user query and return your JSON decision.", // A simple instruction
-        agenticSystemPrompt,
-        llmOptions
+        [], "Please analyze the provided context and user query and return your JSON decision.", agenticSystemPrompt, llmOptions
     );
 
     const toolCall = parseToolCall(routerResponseText);
 
-    // If no tool_call object, or if tool_call is explicitly null, answer directly.
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer.');
-        
-        // Perform a second LLM call for the actual conversational response.
         const directAnswer = await llmService.generateContentWithHistory(
-            chatHistory,
-            userQuery,
-            systemPrompt, // Use the original, simpler system prompt for answering
-            llmOptions
+            chatHistory, userQuery, systemPrompt, llmOptions
         );
-        
         return {
-            finalAnswer: directAnswer,
-            references: [],
-            sourcePipeline: `${llmProvider}-agent-direct`,
+            finalAnswer: directAnswer, references: [], sourcePipeline: `${llmProvider}-agent-direct`,
         };
     }
 
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
-        return { finalAnswer: "I tried to use a tool that doesn't exist. Please try again.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
+        return { finalAnswer: "I tried to use a tool that doesn't exist.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
     }
 
     try {
-        let toolPromises = [mainTool.execute(toolCall.parameters, requestContext)];
+        const toolExecutionPromises = [];
+        const executedToolNames = [];
+
+        toolExecutionPromises.push(mainTool.execute(toolCall.parameters, requestContext));
+        executedToolNames.push(toolCall.tool_name);
+        
         let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
 
         if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
-            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            executedToolNames.push('kg_search');
             pipeline += '+kg';
         }
 
-        const toolResults = await Promise.all(toolPromises);
+        const toolResults = await Promise.all(toolExecutionPromises);
         
         const combinedToolOutput = toolResults.map((result, index) => {
-            const toolName = index === 0 ? toolCall.tool_name : 'kg_search';
+            const toolName = executedToolNames[index];
             return `--- TOOL OUTPUT: ${toolName.toUpperCase()} ---\n${result.toolOutput}`;
         }).join('\n\n');
         
+        // --- THIS IS THE FIX ---
+        // This correctly flattens the arrays of references from all tool results into one.
         const combinedReferences = toolResults.flatMap(result => result.references || []);
+        // --- END OF FIX ---
 
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
-        const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput);
+        
+        const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
         const finalAnswer = await llmService.generateContentWithHistory(
             chatHistory, synthesizerPrompt, systemPrompt, llmOptions
         );
         
         return {
             finalAnswer,
-            references: combinedReferences,
+            references: combinedReferences, // Now this will contain the web search references
             sourcePipeline: pipeline,
         };
     } catch (error) {
@@ -119,6 +114,8 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], sourcePipeline: `agent-error-tool-failed` };
     }
 }
+
+
 
 module.exports = {
     processAgenticRequest,
