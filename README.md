@@ -206,7 +206,8 @@ This project is a collaborative effort. The contributors are listed below and th
 ## 📽️ Demo Video
 
 [Click here to watch the full demo](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing)
-**Features that are not added into video:**
+
+## **Features that are not added into video:**
 1. Agentic Framework
 2. Web Search
 3. Podcast Generation
