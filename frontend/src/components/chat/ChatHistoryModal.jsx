@@ -57,15 +57,13 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         setError(''); 
         try {
             const sessionData = await api.getChatHistory(sessionId);
-            const messagesArray = Array.isArray(sessionData.messages) ? sessionData.messages : [];
             
-            const formattedMessages = messagesArray.map(msg => ({
-                id: msg.id || msg._id || `hist-${Date.now()}-${Math.random()}`,
-                sender: msg.role === 'model' ? 'bot' : 'user',
-                text: msg.parts?.[0]?.text || msg.text || '',
-                timestamp: msg.timestamp
-            }));
-            setSessionMessages(formattedMessages);
+            // --- THIS IS THE CORRECTED LOGIC ---
+            // We trust the API to send correctly formatted data with the 'sender' property.
+            const messagesArray = Array.isArray(sessionData.messages) ? sessionData.messages : [];
+            setSessionMessages(messagesArray);
+            // --- END OF CORRECTION ---
+
         } catch (err) {
             toast.error("Failed to load messages for this session.");
             setError(`Error loading messages: ${err.message}`);
@@ -130,13 +128,11 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
                     <div className="flex-grow bg-gray-50 dark:bg-gray-800/50 p-3 rounded-md overflow-y-auto custom-scrollbar border border-border-light dark:border-border-dark">
                         {loadingMessages && <div className="flex justify-center p-4"><Loader2 className="animate-spin text-primary" size={24} /></div>}
                         
-                        {/* --- THIS IS THE DEFINITIVE FIX --- */}
-                        <div className="space-y-3">
+                        <div className="space-y-3 flex flex-col">
                             {sessionMessages.map(msg => {
                                 const isUser = msg.sender === 'user';
                                 return (
-                                    // By wrapping each bubble in a flex container, we can reliably align it.
-                                    <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                                    <div key={msg.id} className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
                                         <div className={`p-2.5 rounded-lg shadow-sm w-fit max-w-[90%] text-xs
                                             ${isUser 
                                                 ? 'bg-blue-500 text-white' 
@@ -150,7 +146,6 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
                                 );
                             })}
                         </div>
-                        {/* --- END OF FIX --- */}
 
                         {!loadingMessages && !selectedSessionId && (
                             <div className="flex flex-col items-center justify-center h-full text-text-muted-light dark:text-text-muted-dark text-sm">
