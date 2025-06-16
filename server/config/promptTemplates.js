@@ -1,7 +1,8 @@
 // server/config/promptTemplates.js
 
-// ... (All other prompts like ANALYSIS_PROMPTS, KG_PROMPTS, CHAT_MAIN_SYSTEM_PROMPT, createAgenticSystemPrompt, etc., remain exactly the same) ...
-// The only function we are changing is createSynthesizerPrompt at the very end.
+// ==============================================================================
+// === DOCUMENT ANALYSIS PROMPTS (for FAQ, Topics, Mindmap) ===
+// ==============================================================================
 
 const ANALYSIS_THINKING_PREFIX_TEMPLATE = `**STEP 1: THINKING PROCESS (Recommended):**
 *   Before generating the analysis, outline your step-by-step plan in detail within \`<thinking>\` tags.
@@ -97,6 +98,11 @@ const ANALYSIS_PROMPTS = {
     }
 };
 
+
+// ==============================================================================
+// === KNOWLEDGE GRAPH (KG) PROMPTS ===
+// ==============================================================================
+
 const KG_GENERATION_SYSTEM_PROMPT = `You are an expert academic in the field relevant to the provided text. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment.
 The output MUST be a valid JSON object with "nodes" and "edges" sections.
 
@@ -153,6 +159,11 @@ Here are the text chunks:
 Remember to output ONLY the JSON array containing one JSON KG object per input chunk.
 `;
 
+
+// ==============================================================================
+// === CHAT & AGENT PROMPTS ===
+// ==============================================================================
+
 const CHAT_MAIN_SYSTEM_PROMPT = `You are an expert AI assistant. Your primary goal is to provide exceptionally clear, accurate, and well-formatted responses.
 
 **Core Principles for Your Response:**
@@ -189,114 +200,202 @@ const CHAT_USER_PROMPT_TEMPLATES = {
             fullQuery += `ADDITIONAL USER INSTRUCTIONS TO CONSIDER (Apply these to your final answer, in conjunction with the RAG context):\n${additionalClientInstructions.trim()}\n\n---\n`;
         }
         fullQuery += "--- Context Documents ---\n";
-        fullQuery += ragContextString;
+        fullQuery += ragContextString; // ragContextString is pre-formatted with [1] Source: ... for LLM's internal reference
         fullQuery += "\n--- End of Context ---\n\nUSER QUERY:\n" + userQuery;
         return fullQuery;
     }
 };
 
+// ==============================================================================
+// === AGENTIC FRAMEWORK PROMPTS - V5 (Classification-Based Logic) ===
+// ==============================================================================
 const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext) => {
   const toolsFormatted = modelContext.available_tools.map(tool => 
-    `- Tool Name: "${tool.name}"\n  Description: ${tool.description}\n  Parameters: ${JSON.stringify(tool.parameters)}`
-  ).join('\n\n');
+    `{ "tool_name": "${tool.name}", "description": "${tool.description}" }`
+  ).join(',\n');
 
-  let contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- General Conversation Mode: No specific tool mode is active.
-`;
+  let activeModeInstructions;
 
   if (requestContext.isWebSearchEnabled) {
-      contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- **MODE ACTIVE: Web Search**
-- **UNBREAKABLE RULE #1:** The user has explicitly enabled "Web Search" mode. You **MUST** use the "web_search" tool to answer the query, even if you think you know the answer or the query seems simple. Your own knowledge is not current. This rule overrides any other instruction.
-- **ACTION:** Use the "web_search" tool. The user's full query should be the 'query' parameter for the tool.
-`;
+      activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. You MUST select the 'web_search' tool. This is not optional.`;
   } 
   else if (requestContext.documentContextName) {
-      contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- **MODE ACTIVE: Document RAG**
-- **CONTEXT:** A specific document is currently selected for discussion: "${requestContext.documentContextName}".
-- **UNBREAKABLE RULE #2:** Because a document is selected, you **MUST** use the "rag_search" tool to answer the user's query. This is mandatory for all questions related to the document, including "summarize this," "what is this about?", or any other general query. This rule overrides any other instruction.
-- **ACTION:** Use the "rag_search" tool. The user's full query should be the 'query' parameter for the tool.
-`;
+      activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". You MUST select the 'rag_search' tool to answer questions about it. This is not optional.`;
+  }
+  else {
+      activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool is required. You should answer directly.`;
   }
 
+  // Inject the user's actual query directly into the system prompt for the router's context
+  const userQueryForPrompt = requestContext.userQuery || "[User query not provided]";
+
   return `
-You are a master AI Tutor. Your defined role is: "${agenticContext.agent_role}".
-Your primary objectives are: ${agenticContext.agent_objectives.join(', ')}.
-Your base instructions are: "${agenticContext.base_instructions}"
+You are a "Router" agent. Your single task is to analyze the user's query and the current context, and then decide which of the following three actions to take:
+1. 'web_search'
+2. 'rag_search'
+3. 'direct_answer'
 
-${contextualTriggersSection}
+**CONTEXT FOR YOUR DECISION:**
+- ${activeModeInstructions}
+- User's Query: "${userQueryForPrompt}"
 
-You have access to the following tools to help you answer user queries:
---- AVAILABLE TOOLS ---
+**AVAILABLE TOOLS (for reference if a tool is required):**
+[
 ${toolsFormatted}
---- END TOOLS ---
+]
 
-**DECISION-MAKING PROCESS (ABSOLUTE):**
+**YOUR TASK:**
+Based on the CURRENT MODE described in the context, you MUST choose one action. Your entire output MUST be a single, valid JSON object. Do not provide any other text or explanation.
 
-1.  **ANALYZE CONTEXT:** First, check the "CONTEXTUAL TRIGGERS" section above.
-2.  **RULE-BASED DECISION (HIGHEST PRIORITY):**
-    *   If an "UNBREAKABLE RULE" is present in the triggers, you have **NO CHOICE**. You **MUST** follow it.
-    *   Your *entire response* must be a single, valid JSON object with a 'tool_call' key, formatted exactly as shown below.
-    *   Do not add any other text, explanation, or conversational filler. Your only output is the JSON.
-    *   **This is not optional. Your primary function is to obey the rule and call the specified tool.**
-
-    Required JSON format for tool call:
-    \`\`\`json
-    {
-      "tool_call": {
-        "tool_name": "the_tool_name_from_the_rule",
-        "parameters": {
-          "query": "The user's original query text"
-        }
+- If the mode requires a tool ('web_search' or 'rag_search'), format your response like this, using the user's original query as the parameter:
+  \`\`\`json
+  {
+    "tool_call": {
+      "tool_name": "the_required_tool_name",
+      "parameters": {
+        "query": "${userQueryForPrompt}"
       }
     }
-    \`\`\`
+  }
+  \`\`\`
 
-3.  **DIRECT ANSWER (FALLBACK ONLY):**
-    *   If and only if there are **NO** "UNBREAKABLE RULE" triggers active, you may answer the user directly and conversationally.
+- If the mode is "Direct Chat", format your response like this:
+  \`\`\`json
+  {
+    "tool_call": null
+  }
+  \`\`\`
 
-**Execute your decision-making process now based on the user's request.**
+Analyze the context and the query, then provide your JSON decision.
 `;
 };
 
-
-// --- THIS IS THE CORRECTED PROMPT ---
 const createSynthesizerPrompt = (originalQuery, toolOutput) => {
   return `
-You are an expert AI Tutor. A tool was used to gather specific information to answer the user's query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
+You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query.
+Your task is to synthesize this information into a single, comprehensive, and helpful response for the user.
+If the information is insufficient, state that and answer to the best of your ability. Do not mention that a tool was used. Just provide the final answer.
 
-**Response Guidelines:**
-
-1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
-2.  **ENRICH, DON'T REPLACE:** After you have explained the core points from the tool's output, you MAY enrich the answer with your own general knowledge to provide more context, background, or a more complete explanation. However, do not contradict the provided information.
-3.  **ACKNOWLEDGE LIMITS:** If the gathered information is insufficient to fully answer the query, clearly state that. For example, "Based on the provided document, the project manager is Jane Doe. The document does not contain details about the project's budget."
-4.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used or separate the "provided information" from your "general knowledge". The user should experience it as one helpful explanation.
-5.  **BE COMPREHENSIVE:** Aim to provide a thorough, educational response that fully addresses the user's original query, using the tool's output as your factual foundation.
-
----
-**USER'S ORIGINAL QUERY:**
+--- USER'S ORIGINAL QUERY ---
 ${originalQuery}
----
-**INFORMATION GATHERED BY TOOL:**
-${toolOutput}
----
 
-**FINAL, SYNTHESIZED ANSWER:**
+--- INFORMATION GATHERED BY TOOL ---
+${toolOutput}
+
+--- FINAL ANSWER ---
 `;
 };
 
 
+// ==============================================================================
+// === CONTENT CREATION PROMPTS (PPTX, DOCX, PODCAST) ===
+// ==============================================================================
+
+const DOCX_EXPANSION_PROMPT_TEMPLATE = `
+You are a professional content creator and subject matter expert. Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, multi-page document in Markdown format. You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge. The final output must be a single block of well-structured Markdown text.
+
+**INSTRUCTIONS:**
+1.  **Main Title:** Start the document with a main title using H1 syntax (e.g., '# Expanded Report on Key Topics').
+2.  **Section per Outline Point:** For each point in the OUTLINE, create a detailed section with a clear H2 or H3 heading (e.g., '## Topic Name').
+3.  **Content Expansion:** For each section, write detailed, professional paragraphs that elaborate on the outline point. Extract relevant facts, figures, and explanations from the SOURCE DOCUMENT TEXT.
+4.  **Markdown Usage:** Use bullet points, bold text, and clear paragraphs to structure the content effectively.
+
+---
+**SOURCE DOCUMENT TEXT (Your knowledge base):**
+{source_document_text}
+---
+**OUTLINE (Topics/FAQs to expand into a document):**
+{outline_content}
+---
+
+**FINAL DOCUMENT MARKDOWN:**
+`;
+
+const PPTX_EXPANSION_PROMPT_TEMPLATE = `
+You are a professional presentation designer and subject matter expert. Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, 6-8 slide presentation. You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge. Your output MUST be a single, valid JSON array, where each object represents a slide.
+
+**JSON Object Schema for each slide:**
+{{
+  "slide_title": "A concise and engaging title for the slide.",
+  "slide_content": "Detailed, professional paragraph(s) and/or bullet points elaborating on the outline point. This text will be displayed on the slide. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
+  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E or Midjourney) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition. Example: 'A photorealistic image of a futuristic server room with glowing blue data streams flowing between racks, symbolizing data processing. Cinematic lighting.'"
+}}
+
+**INSTRUCTIONS:**
+1.  **Analyze Outline & Source:** For each point in the OUTLINE, create at least one slide object in the JSON array.
+2.  **Expand Content:** Elaborate on each outline point using only information from the SOURCE DOCUMENT TEXT.
+3.  **Create Image Prompts:** For each slide, generate a unique and descriptive \`image_prompt\` that visually represents the slide's content.
+4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
+
+---
+**SOURCE DOCUMENT TEXT (Your knowledge base):**
+{source_document_text}
+---
+**OUTLINE (Topics/FAQs to expand into a presentation):**
+{outline_content}
+---
+
+**FINAL PRESENTATION JSON ARRAY:**
+`;
+
+const PODCAST_SCRIPT_PROMPT_TEMPLATE = `
+You are an AI podcast script generator. Your SOLE task is to generate a realistic, two-speaker educational dialogue based on the provided text.
+
+**CRITICAL INSTRUCTION:** Your entire output must be ONLY the script itself. Start directly with "SPEAKER_A:". Do NOT include any preamble, introduction, or metadata like "Here is the script:".
+
+---
+## Podcast Style Guide
+
+- **Format**: Two-speaker conversational podcast.
+- **SPEAKER_A**: The "Curious Learner". Asks clarifying questions and represents the student's perspective.
+- **SPEAKER_B**: The "Expert Teacher". Provides clear explanations and examples based on the document text.
+- **Dialogue Flow**: The conversation must be a natural back-and-forth. SPEAKER_A asks a question, SPEAKER_B answers, and SPEAKER_A follows up.
+- **Content Source**: All explanations and facts provided by SPEAKER_B MUST come from the \`DOCUMENT TEXT\` provided below.
+
+---
+## Script Structure
+
+### 1. Opening
+The script must begin with a brief, engaging conversation to set the stage.
+\`SPEAKER_A: Hey, I was just reading this document about {study_focus}, and I'm a bit stuck on a few things. Can we talk through it?\`
+\`SPEAKER_B: Absolutely! I'd be happy to. What's on your mind?\`
+
+### 2. Main Body
+The main part of the script should be a question-and-answer dialogue driven by SPEAKER_A, focusing on the key points of the \`STUDY FOCUS\`. Use the \`DOCUMENT TEXT\` to formulate SPEAKER_B's expert answers.
+
+### 3. Closing
+Conclude the podcast with a quick summary and an encouraging sign-off.
+\`SPEAKER_A: This makes so much more sense now. Thanks for clarifying everything!\`
+\`SPEAKER_B: You're welcome! The key is to break it down. Keep up the great work!\`
+
+---
+## Source Material
+
+**STUDY FOCUS (The main topic for the podcast):**
+{study_focus}
+
+**DOCUMENT TEXT (Use this for all factual answers):**
+{document_content}
+
+---
+**FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_A:")**
+`;
+
 module.exports = {
+    // Analysis
     ANALYSIS_PROMPTS,
+    // KG
     KG_GENERATION_SYSTEM_PROMPT,
     KG_BATCH_USER_PROMPT_TEMPLATE,
+    // Chat
     CHAT_MAIN_SYSTEM_PROMPT,
     WEB_SEARCH_CHAT_SYSTEM_PROMPT,
     CHAT_USER_PROMPT_TEMPLATES,
+    // Agentic Framework
     createAgenticSystemPrompt,
     createSynthesizerPrompt,
+    // Content Generation
+    DOCX_EXPANSION_PROMPT_TEMPLATE,
+    PPTX_EXPANSION_PROMPT_TEMPLATE,
+    PODCAST_SCRIPT_PROMPT_TEMPLATE,
 };
