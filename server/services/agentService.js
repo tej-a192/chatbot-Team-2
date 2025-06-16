@@ -15,9 +15,9 @@ function parseToolCall(responseText) {
         if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
             return jsonResponse.tool_call;
         }
-        return null; // Return null if tool_call key is missing
+        return null;
     } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}`);
+        console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}. Response: ${responseText.substring(0, 200)}...`);
         return null;
     }
 }
@@ -30,46 +30,44 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         throw new Error("User not found during agent processing.");
     }
     
-    const userApiKey = decrypt(user.encryptedApiKey);
+    const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+    if (user.encryptedApiKey && !userApiKey) {
+        console.warn(`[AgentService] Failed to decrypt API key for user ${userId}. LLM will use server fallback key if configured.`);
+    }
 
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
     
-    // Pass the userQuery into the context for the new prompt template
     const agenticSystemPrompt = createAgenticSystemPrompt(
         modelContext, 
         agenticContext, 
-        { ...requestContext, userQuery }
+        { ...requestContext, userQuery } 
     );
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
     const llmOptions = {
         ...(llmProvider === 'ollama' && { model: ollamaModel }),
-        apiKey: userApiKey,
+        apiKey: userApiKey, 
     };
 
     console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
     const routerResponseText = await llmService.generateContentWithHistory(
-        [], // Router gets no prior chat history to prevent confusion
-        "Please analyze the provided context and user query and return your JSON decision.", // A simple instruction
+        [{ role: 'user', parts: [{ text: "Analyze context and query then return JSON decision."}] }], 
+        "Analyze context and query then return JSON decision.", 
         agenticSystemPrompt,
         llmOptions
     );
 
     const toolCall = parseToolCall(routerResponseText);
 
-    // If no tool_call object, or if tool_call is explicitly null, answer directly.
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer.');
-        
-        // Perform a second LLM call for the actual conversational response.
         const directAnswer = await llmService.generateContentWithHistory(
-            chatHistory,
-            userQuery,
-            systemPrompt, // Use the original, simpler system prompt for answering
+            chatHistory, 
+            userQuery,   
+            systemPrompt,
             llmOptions
         );
-        
         return {
             finalAnswer: directAnswer,
             references: [],
@@ -90,7 +88,7 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
-            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId: userId.toString() })); 
             pipeline += '+kg';
         }
 
@@ -106,7 +104,10 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
         const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput);
         const finalAnswer = await llmService.generateContentWithHistory(
-            chatHistory, synthesizerPrompt, systemPrompt, llmOptions
+            chatHistory,         
+            synthesizerPrompt,   
+            systemPrompt,        
+            llmOptions
         );
         
         return {
