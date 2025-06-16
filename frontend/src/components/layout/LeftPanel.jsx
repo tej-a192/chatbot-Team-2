@@ -50,9 +50,11 @@ function LeftPanel() {
         try {
             const response = await api.getSubjects(); // Calls /api/subjects
             // The backend returns { subjects: ["Subject 1", "Subject 2", ...] }
-            setAvailableSubjects(Array.isArray(response.subjects) ? response.subjects : []);
-            if (response.subjects.length === 0) {
-                toast.info("No admin-defined subjects found to select for chat focus.");
+            const subjects = Array.isArray(response.subjects) ? response.subjects : [];
+            setAvailableSubjects(subjects);
+            if (subjects.length === 0) {
+                // FIX: Changed toast.info to just toast() for a standard informational message.
+                toast("No admin-defined subjects found to select for chat focus.");
             }
         } catch (error) {
             const errorMsg = error.response?.data?.message || error.message || "Failed to load available subjects.";
