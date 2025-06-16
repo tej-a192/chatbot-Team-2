@@ -4,6 +4,8 @@ This project is a comprehensive AI-powered tutoring application designed to assi
 
 ## Prerequisites
 
+
+
 Before you begin, ensure you have the following installed and configured:
 
 *   **Node.js**: Version 18.x or later.

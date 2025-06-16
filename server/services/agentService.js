@@ -17,9 +17,9 @@ function parseToolCall(responseText) {
         if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
             return jsonResponse.tool_call;
         }
-        return null; // Return null if the key is missing
+        return null;
     } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}`);
+        console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}. Response: ${responseText.substring(0, 200)}...`);
         return null;
     }
 }
@@ -32,22 +32,31 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         throw new Error("User not found during agent processing.");
     }
     
-    const userApiKey = decrypt(user.encryptedApiKey);
+    const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+    if (user.encryptedApiKey && !userApiKey) {
+        console.warn(`[AgentService] Failed to decrypt API key for user ${userId}. LLM will use server fallback key if configured.`);
+    }
+
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
     
     const agenticSystemPrompt = createAgenticSystemPrompt(
-        modelContext, agenticContext, { ...requestContext, userQuery }
+        modelContext, 
+        agenticContext, 
+        { ...requestContext, userQuery } 
     );
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
     const llmOptions = {
         ...(llmProvider === 'ollama' && { model: ollamaModel }),
-        apiKey: userApiKey,
+        apiKey: userApiKey, 
     };
 
     const routerResponseText = await llmService.generateContentWithHistory(
-        [], "Please analyze the provided context and user query and return your JSON decision.", agenticSystemPrompt, llmOptions
+        [{ role: 'user', parts: [{ text: "Analyze context and query then return JSON decision."}] }], 
+        "Analyze context and query then return JSON decision.", 
+        agenticSystemPrompt,
+        llmOptions
     );
 
     const toolCall = parseToolCall(routerResponseText);
@@ -55,7 +64,10 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer.');
         const directAnswer = await llmService.generateContentWithHistory(
-            chatHistory, userQuery, systemPrompt, llmOptions
+            chatHistory, 
+            userQuery,   
+            systemPrompt,
+            llmOptions
         );
         return {
             finalAnswer: directAnswer, references: [], sourcePipeline: `${llmProvider}-agent-direct`,
@@ -80,8 +92,7 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
-            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
-            executedToolNames.push('kg_search');
+            toolPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId: userId.toString() })); 
             pipeline += '+kg';
         }
 
@@ -101,7 +112,10 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         
         const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
         const finalAnswer = await llmService.generateContentWithHistory(
-            chatHistory, synthesizerPrompt, systemPrompt, llmOptions
+            chatHistory,         
+            synthesizerPrompt,   
+            systemPrompt,        
+            llmOptions
         );
         
         return {
