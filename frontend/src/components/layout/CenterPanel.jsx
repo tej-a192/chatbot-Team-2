@@ -16,7 +16,7 @@ const GENERATION_VARIANTS = ["✨ Generating response...", "🚀 Crafting answer
 const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-function CenterPanel({ messages, setMessages, currentSessionId }) {
+function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
     const { token: regularUserToken } = useRegularAuth();
     // Get all necessary context from AppState
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
@@ -27,6 +27,10 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
     
     const isMountedRef = useRef(true);
     const simulationControllerRef = useRef(new AbortController());
+
+    const [currentStatusMessage, setCurrentStatusMessage] = useState('');
+    const [isActuallySendingAPI, setIsActuallySendingAPI] = useState(false);
+
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -54,13 +58,13 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
         ];
         for (const stage of sequence) {
             if (signal.aborted) return;
-            if (isMountedRef.current) setIsSending({ active: true, message: stage.message });
+            if (isMountedRef.current) setCurrentStatusMessage(stage.message);
             await wait(stage.duration + (Math.random() * 400 - 200));
         }
     };
 
     const handleSendMessage = async (inputText) => {
-        if (!inputText.trim() || !regularUserToken || !currentSessionId || isSending.active) return;
+        if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
 
         // --- THIS IS THE FIX ---
         // Determine the document context AT THE MOMENT THE MESSAGE IS SENT.
@@ -70,8 +74,13 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
         // --- END OF FIX ---
 
         simulationControllerRef.current = new AbortController();
-        setIsSending({ active: true, message: '...' });
+        onChatProcessingChange(true);
+        setIsActuallySendingAPI(true);
+        setCurrentStatusMessage('...');
+
+
         runStatusSimulation(isRagActive, useWebSearch, simulationControllerRef.current.signal);
+
 
         const clientSideId = `user-${Date.now()}`;
         setMessages(prev => [...prev, { id: clientSideId, sender: 'user', role: 'user', text: inputText.trim(), parts: [{ text: inputText.trim() }], timestamp: new Date().toISOString() }]);
@@ -100,7 +109,11 @@ function CenterPanel({ messages, setMessages, currentSessionId }) {
             toast.error(errorText);
         } finally {
             simulationControllerRef.current.abort();
-            if (isMountedRef.current) setIsSending({ active: false, message: '' });
+            if (isMountedRef.current) {
+                onChatProcessingChange(false); // Notify parent that processing ended
+                setIsActuallySendingAPI(false); // Release local lock
+                setCurrentStatusMessage(''); // Clear status message
+            }
         }
     };
 

@@ -14,9 +14,17 @@ router.post('/signup', async (req, res) => {
   const { email, password, apiKey, preferredLlmProvider } = req.body;
 
   if (!email || !password) {
+    // FIX: Update error message to reflect email
     return res.status(400).json({ message: 'Email and password are required.' });
   }
-
+  // Basic email format validation (can be more robust)
+  // The Mongoose schema also has a match validator which is good.
+  if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
+    return res.status(400).json({ message: 'Please provide a valid email address.' });
+  }
+  if (password.length < 6) {
+     return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+  }
   if (preferredLlmProvider === 'gemini' && !apiKey) {
     return res.status(400).json({ message: 'Gemini API Key is required when Gemini is selected.' });
   }
@@ -31,7 +39,7 @@ router.post('/signup', async (req, res) => {
       email,
       password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
-      encryptedApiKey: apiKey,
+      encryptedApiKey: apiKey, // This will be encrypted by the pre-save hook
     });
     await newUser.save();
 
@@ -42,13 +50,18 @@ router.post('/signup', async (req, res) => {
       token,
       _id: newUser._id,
       email: newUser.email,
-      sessionId: uuidv4(),
+      sessionId: uuidv4(), // Consider if sessionID should come from a successful LLM call or just be client-side init
       message: 'User registered successfully',
     });
   } catch (error) {
     console.error('Signup Error:', error);
+    if (error.code === 11000 || error.message.includes('duplicate key error collection')) { // More robust duplicate check
+        return res.status(400).json({ message: 'An account with this email already exists.' });
+    }
+    // Handle Mongoose validation errors more gracefully
     if (error.name === 'ValidationError') {
-        return res.status(400).json({ message: error.message });
+        const messages = Object.values(error.errors).map(val => val.message);
+        return res.status(400).json({ message: messages.join(', ') });
     }
     res.status(500).json({ message: 'Server error during signup.' });
   }

@@ -38,6 +38,8 @@ function decrypt(text) {
     const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY_BUFFER, iv);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
+    console.log(`Decrypted key : ${decrypted.toString()}`);
+    
     return decrypted.toString();
   } catch (error) {
     console.error("Decryption failed for text:", text, "Error:", error.message, error.stack);
