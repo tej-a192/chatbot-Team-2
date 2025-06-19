@@ -7,26 +7,19 @@ const { createOrUpdateSummary } = require('../services/summarizationService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
 
-
 const router = express.Router();
 
 function doesQuerySuggestRecall(query) {
     const lowerCaseQuery = query.toLowerCase();
     const recallKeywords = [
-        // Identity
         'my name', 'my profession', 'i am', 'i told you',
-        // Direct Recall
         'remember', 'recall', 'remind me', 'go back to',
-        // Past Reference
         'previously', 'before', 'we discussed', 'we were talking about',
         'earlier', 'yesterday', 'last session',
-        // Questioning Memory
         'what did i say', 'what was', 'what were', 'who am i',
         'do you know', 'can you tell me again',
-        // Continuation
         'continue with', 'let\'s continue', 'pick up where we left off',
         'the last thing', 'another question about that',
-        // General Context
         'about that topic', 'regarding that', 'on that subject',
         'the document we', 'the file i uploaded', 'in that paper',
     ];
@@ -56,7 +49,7 @@ router.post('/message', async (req, res) => {
     try {
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
-            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel').lean()
+            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
         ]);
 
         const llmProvider = user?.preferredLlmProvider || 'gemini';
@@ -67,10 +60,8 @@ router.post('/message', async (req, res) => {
         
         const historyForLlm = [];
 
-        // --- THIS IS THE CORRECTED LOGIC ---
-        // Only inject the summary as context if the user's query suggests they want to recall something.
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            console.log(`[Chat Route] Recall detected in query. Injecting summary into context.`);
+            console.log(`[Chat Route] Recall detected. Injecting summary with a targeted role-play prompt.`);
             historyForLlm.push({ 
                 role: 'user', 
                 parts: [{ text: `
@@ -84,14 +75,14 @@ ${summaryFromDb}
 **MANDATORY RULE:** You MUST IGNORE the "Optional Background Information" provided above UNLESS the user's new query below is EXPLICITLY asking about a past conversation (e.g., "what did we talk about?", "what is my name?"). 
 
 If the user's query is a new topic, a greeting, or unrelated, answer it directly without using the background information. Do not mention the summary or your memory.
-` }] 
+` 
+                }] 
             });
             historyForLlm.push({ 
                 role: 'model', 
-                parts: [{ text: "Okay, I have reviewed the summary of our previous conversation. I will now answer your question based on that context." }] 
+                parts: [{ text: "Understood. I will only use the background information if the user's query is explicitly about our past conversations. Otherwise, I will ignore it." }] 
             });
         }
-        // --- END OF FIX ---
 
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
@@ -106,8 +97,13 @@ If the user's query is a new topic, a greeting, or unrelated, answer it directly
             ollamaModel,
             isWebSearchEnabled: !!useWebSearch,
             userId: userId.toString(),
-            userApiKey: user.encryptedApiKey,
+            ollamaUrl: user.ollamaUrl
         };
+
+        if (llmProvider === 'gemini') {
+            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+            requestContext.apiKey = userApiKey;
+        }
 
         const agentResponse = await processAgenticRequest(
             query.trim(),
@@ -170,36 +166,35 @@ router.post('/history', async (req, res) => {
 
     if (previousSessionId) {
         try {
-            // --- THIS IS THE FIX ---
-            // 1. Find the old session AND the user's data (including the key) in parallel.
             const [oldSession, user] = await Promise.all([
                 ChatHistory.findOne({ sessionId: previousSessionId, userId: userId }),
-                User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel').lean()
+                User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean()
             ]);
-            
-            // 2. Check if the old session has messages.
+
             if (oldSession && oldSession.messages?.length > 0) {
-                const llmProvider = user?.preferredLlmProvider || 'gemini';
-                const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+                const llmProvider = user.preferredLlmProvider || 'gemini';
+                const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+                
+                const userOllamaUrl = user.ollamaUrl || null;
+                let userApiKey = null;
+                if (llmProvider === 'gemini') {
+                    userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+                }
 
-                // 3. Decrypt the user's key.
-                const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-
-                // 4. Pass the user's API key to the summarization service.
                 summaryOfOldSession = await createOrUpdateSummary(
                     oldSession.messages, 
                     oldSession.summary, 
                     llmProvider, 
                     ollamaModel,
-                    userApiKey // <<< PASS THE KEY HERE
+                    userApiKey,
+                    userOllamaUrl
                 );
             }
-            // --- END OF FIX ---
-
         } catch (summaryError) {
             console.error(`!!! Could not summarize previous session ${previousSessionId}:`, summaryError);
         }
     }
+    
     try {
         await ChatHistory.create({ userId: userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
         res.status(200).json({ message: 'New session started.', newSessionId: newSessionId });
@@ -227,6 +222,7 @@ router.get('/sessions', async (req, res) => {
     }
 });
 
+
 // @route   GET /api/chat/session/:sessionId
 router.get('/session/:sessionId', async (req, res) => {
     try {
@@ -240,10 +236,8 @@ router.get('/session/:sessionId', async (req, res) => {
     }
 });
 
-// --- NEW ENDPOINT: DELETE A CHAT SESSION ---
+
 // @route   DELETE /api/chat/session/:sessionId
-// @desc    Delete a specific chat session for the authenticated user
-// @access  Private
 router.delete('/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.user._id;

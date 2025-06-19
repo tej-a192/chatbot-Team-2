@@ -31,7 +31,7 @@ const UserSchema = new mongoose.Schema({
     type: ProfileSchema,
     default: () => ({})
   },
-  encryptedApiKey: { // Field to store the encrypted API key
+  encryptedApiKey: { 
     type: String,
     select: false, 
   },
@@ -39,6 +39,11 @@ const UserSchema = new mongoose.Schema({
     type: String,
     enum: ['gemini', 'ollama'],
     default: 'gemini',
+  },
+  ollamaUrl: {
+    type: String,
+    trim: true,
+    default: '',
   },
   ollamaModel: {
     type: String,

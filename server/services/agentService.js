@@ -25,16 +25,16 @@ function parseToolCall(responseText) {
 }
 
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, userId } = requestContext;
+    const { llmProvider, ollamaModel, userId, ollamaUrl } = requestContext;
 
-    // 1. Get user and API Key (using your friend's robust logic)
+    // 2. Fetch the user's key (this part is already correct)
     const user = await User.findById(userId).select('+encryptedApiKey');
     if (!user) {
         throw new Error("User not found during agent processing.");
     }
     const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
     if (user.encryptedApiKey && !userApiKey) {
-        console.warn(`[AgentService] Failed to decrypt API key for user ${userId}. LLM will use server fallback key if configured.`);
+        console.warn(`[AgentService] Failed to decrypt API key for user ${userId}.`);
     }
 
     // 2. Prepare contexts for the agent
@@ -50,6 +50,7 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     const llmOptions = {
         ...(llmProvider === 'ollama' && { model: ollamaModel }),
         apiKey: userApiKey,
+        ollamaUrl: ollamaUrl
     };
 
     // 3. Call the Router agent (using your correct, clean logic)

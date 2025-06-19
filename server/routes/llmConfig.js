@@ -2,68 +2,50 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const { encrypt } = require('../utils/crypto'); // For encrypting API key
+const { encrypt } = require('../utils/crypto');
 
 // @route   PUT /api/llm/config
-// @desc    Update user's LLM preferences (provider and API key)
-// @access  Private (authMiddleware will be applied in server.js)
+// @desc    Update user's LLM preferences (provider, key, or URL)
+// @access  Private
 router.put('/config', async (req, res) => {
-    const { llmProvider, geminiApiKey, ollamaApiKey } = req.body;
+    // 1. Destructure all possible fields.
+    const { llmProvider, apiKey, ollamaUrl, ollamaModel } = req.body;
     const userId = req.user._id;
 
     try {
+        // 2. Start with a blank object. We will only update what is sent.
         const updates = {};
-        let newApiKeyToEncrypt = null;
 
         if (llmProvider) {
             if (!['gemini', 'ollama'].includes(llmProvider)) {
                 return res.status(400).json({ message: "Invalid LLM provider specified." });
             }
             updates.preferredLlmProvider = llmProvider;
-
-            if (llmProvider === 'gemini' && geminiApiKey && typeof geminiApiKey === 'string' && geminiApiKey.trim() !== "") {
-                newApiKeyToEncrypt = geminiApiKey.trim();
-            } else if (llmProvider === 'ollama' && ollamaApiKey && typeof ollamaApiKey === 'string' && ollamaApiKey.trim() !== "") {
-                newApiKeyToEncrypt = ollamaApiKey.trim();
-            } else if (llmProvider) { 
-                updates.encryptedApiKey = null;
-            }
-        } else {
-            const currentUser = await User.findById(userId).select('preferredLlmProvider');
-            if (!currentUser) return res.status(404).json({ message: "User not found." });
-
-            if (currentUser.preferredLlmProvider === 'gemini' && geminiApiKey && typeof geminiApiKey === 'string' && geminiApiKey.trim() !== "") {
-                newApiKeyToEncrypt = geminiApiKey.trim();
-            } else if (currentUser.preferredLlmProvider === 'ollama' && ollamaApiKey && typeof ollamaApiKey === 'string' && ollamaApiKey.trim() !== "") {
-                newApiKeyToEncrypt = ollamaApiKey.trim();
-            }
-        }
-        
-        if (newApiKeyToEncrypt) {
-            updates.encryptedApiKey = encrypt(newApiKeyToEncrypt);
-            if (!updates.encryptedApiKey && newApiKeyToEncrypt) { 
-                console.error(`User ${userId}: API key encryption failed for provided key.`);
-                return res.status(500).json({ message: "Failed to secure API key. Update aborted." });
-            }
-        } else if (llmProvider && !newApiKeyToEncrypt) {
-             // If provider is changing AND no new key for the new provider is given, clear the existing key.
-             // This condition ensures we only clear if the provider is indeed changing.
-             const user = await User.findById(userId).select('preferredLlmProvider');
-             if (user && user.preferredLlmProvider !== llmProvider) {
-                 updates.encryptedApiKey = null;
-             }
         }
 
+        // If a new API key is provided, encrypt and add it to updates.
+        if (apiKey) {
+            updates.encryptedApiKey = encrypt(apiKey);
+        }
 
+        // If a new Ollama URL is provided, add it to updates.
+        if (typeof ollamaUrl === 'string') {
+            updates.ollamaUrl = ollamaUrl.trim();
+        }
+
+        // If a new Ollama model is provided, add it to updates.
+        if (ollamaModel) {
+            updates.ollamaModel = ollamaModel;
+        }
+
+        // 3. If the updates object is empty, nothing was sent to change.
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({ message: "No valid update information provided." });
         }
         
-        const updatedUser = await User.findByIdAndUpdate(userId, { $set: updates }, { new: true });
-
-        if (!updatedUser) {
-            return res.status(404).json({ message: "User not found during update." });
-        }
+        // 4. Use $set to only modify the fields present in the 'updates' object.
+        // This will NEVER delete a field that isn't included in the request.
+        await User.updateOne({ _id: userId }, { $set: updates });
 
         res.status(200).json({ message: "LLM preferences updated successfully." });
     } catch (error) {
@@ -72,16 +54,19 @@ router.put('/config', async (req, res) => {
     }
 });
 
+
+// This GET route is correct and doesn't need changes, but it should also return ollamaUrl
 router.get('/config', async (req, res) => {
     const userId = req.user._id;
     try {
-        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel');
+        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl');
         if (!user) {
             return res.status(404).json({ message: "User not found." });
         }
         res.status(200).json({
             preferredLlmProvider: user.preferredLlmProvider,
-            ollamaModel: user.ollamaModel
+            ollamaModel: user.ollamaModel,
+            ollamaUrl: user.ollamaUrl // Also return the URL
         });
     } catch (error) {
         console.error(`Error fetching LLM config for user ${userId}:`, error);

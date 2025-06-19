@@ -34,35 +34,37 @@ const ANALYSIS_THINKING_PREFIX_TEMPLATE = `**STEP 1: THINKING PROCESS (Recommend
 
 const ANALYSIS_PROMPTS = {
     faq: {
-        getPrompt: (docTextForLlm) => {
-            let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
-            baseTemplate += `
-**TASK:** Generate a set of 5-7 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text. To ensure a logical flow, you MUST organize the FAQs by the main themes found in the document.
+    getPrompt: (docTextForLlm) => {
+        let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
+        baseTemplate += `
+**TASK:** Generate a set of 10-15 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text. To ensure a logical flow, you MUST organize the FAQs by the main themes found in the document.
 
 **OUTPUT FORMAT (Strict):**
-1.  **Thematic Grouping:** Identify 2-3 major themes from the document. For each theme, create a Markdown H3 heading (e.g., \`### Core Concepts\`).
-2.  **Question/Answer Format:** Under each theme heading, list 2-3 relevant questions and their corresponding answers.
-3.  **Q&A Style:** Format each FAQ as:
-    *   **Q:** [Question derived ONLY from the text]
-    *   **A:** [Answer derived ONLY from the text, concise and clear]
+1.  **Thematic Grouping:** Identify 5-6 major themes from the document. For each theme, create a Markdown H2 heading (e.g., \`## Core Concepts\`).
+2.  **Question as Sub-Heading:** Under each theme, each question MUST be a Markdown H3 heading (e.g., \`### 1. What is the primary subject?\`).
+3.  **Answer as Text:** The answer should follow directly after the question's heading as a standard paragraph.
 4.  **Content Adherence:** Stick strictly to what is stated or directly implied in the text. Do not invent information.
+5.  **Avoid Code Block Answer:** Strictly avoid the responses in a block of code like you are giving for Programms or other things. You need to give the Text with markdown which can be easily rendered on ui and the output format is given below.
 
 **EXAMPLE OUTPUT STRUCTURE:**
 
-### Theme 1: Core Concepts
-*   **Q:** What is the primary subject of the document?
-*   **A:** The document is about...
-*   **Q:** What is the definition of X?
-*   **A:** X is defined as...
+## Core Concepts
 
-### Theme 2: Methodology
-*   **Q:** What method was used to gather data?
-*   **A:** The data was gathered using...
+### What is the primary subject of the document?
+The document is about the five-part process for improving communication skills, focusing on changing habits through self-assessment and a structured plan.
 
-**BEGIN OUTPUT (Start with '###' for the first theme or \`<thinking>\`):**
+### 1. What is the definition of a "transcription audit"?
+A transcription audit is the process of reviewing a transcribed video of oneself to highlight and become aware of non-words and filler words like "um," "ah," and "like."
+
+## Self-Assessment Process
+
+### 1. What is the first step in the self-assessment process?
+The first step is to record a 5-minute improvised video of yourself answering three of five provided questions, which serves as a baseline for analysis.
+
+**BEGIN OUTPUT (Start with '##' for the first theme or \`<thinking>\`):**
 `;
-            return baseTemplate;
-        }
+        return baseTemplate;
+    }
     },
     topics: {
         getPrompt: (docTextForLlm) => {
@@ -72,6 +74,7 @@ const ANALYSIS_PROMPTS = {
 
 **OUTPUT FORMAT (Strict):**
 *   Use Markdown H3 (###) for each topic name for clear separation and structure.
+**  Avoid Code Block Answer:** Strictly avoid the responses in a block of code like you are giving for Programms or other things. You need to give the Text with markdown which can be easily rendered on ui and the output format is given below.
 *   Beneath each heading, provide:
     *   An **Explanation:** of the topic in your own words, but based strictly on the text. Start this with the bolded label '**Explanation:**'.
     *   A specific **Example from Text:**. Start this with the bolded label '**Example from Text:**' followed by a direct quote or a paraphrased key data point from the source document.

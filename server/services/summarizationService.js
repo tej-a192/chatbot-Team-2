@@ -28,7 +28,7 @@ Example of a good updated summary:
  * @param {string} ollamaModel - The specific Ollama model if the provider is 'ollama'.
  * @returns {Promise<string>} The generated summary text.
  */
-async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmProvider, ollamaModel, userApiKey) { // <<< ADD userApiKey here
+async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmProvider, ollamaModel, userApiKey, userOllamaUrl) {
     if (!messagesToSummarize || messagesToSummarize.length === 0) {
         return existingSummary || "";
     }
@@ -52,26 +52,19 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
 
     try {
         let summary;
-        // --- THIS IS THE FIX ---
         const llmOptions = { 
-            apiKey: userApiKey, // Pass the key in the options object
+            apiKey: userApiKey,
+            ollamaUrl: userOllamaUrl
         };
         if (llmProvider === 'ollama') {
             summary = await ollamaService.generateContentWithHistory(
-                historyForLlm,
-                SUMMARIZATION_SYSTEM_PROMPT,
-                { ...llmOptions, model: ollamaModel, maxOutputTokens: 2048 }
+                historyForLlm, SUMMARIZATION_SYSTEM_PROMPT, null, { ...llmOptions, model: ollamaModel }
             );
-        } else { // Default to Gemini
+        } else {
             summary = await geminiService.generateContentWithHistory(
-                historyForLlm,
-                SUMMARIZATION_SYSTEM_PROMPT,
-                null, // systemPromptText is in the user prompt for this service
-                llmOptions // Pass the options object containing the user's key
+                historyForLlm, SUMMARIZATION_SYSTEM_PROMPT, null, llmOptions
             );
         }
-        // --- END OF FIX ---
-
         console.log(`[SummarizationService] Summary generated successfully.`);
         return summary.trim();
     } catch (error) {

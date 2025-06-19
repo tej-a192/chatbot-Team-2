@@ -7,26 +7,29 @@ const { authMiddleware } = require('../middleware/authMiddleware');
 require('dotenv').config();
 
 const router = express.Router();
-const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '1h';
+const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
 // --- @route   POST /api/auth/signup ---
 router.post('/signup', async (req, res) => {
-  const { email, password, apiKey, preferredLlmProvider } = req.body;
+  // 1. Destructure all possible fields from the request body
+  const { email, password, apiKey, ollamaUrl, preferredLlmProvider } = req.body;
 
   if (!email || !password) {
-    // FIX: Update error message to reflect email
     return res.status(400).json({ message: 'Email and password are required.' });
   }
-  // Basic email format validation (can be more robust)
-  // The Mongoose schema also has a match validator which is good.
   if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
     return res.status(400).json({ message: 'Please provide a valid email address.' });
   }
   if (password.length < 6) {
      return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
   }
-  if (preferredLlmProvider === 'gemini' && !apiKey) {
-    return res.status(400).json({ message: 'Gemini API Key is required when Gemini is selected.' });
+
+  // 2. Validate provider-specific fields
+  if (preferredLlmProvider === 'gemini' && (!apiKey || apiKey.trim() === '')) {
+    return res.status(400).json({ message: 'A Gemini API Key is required when Gemini is selected.' });
+  }
+  if (preferredLlmProvider === 'ollama' && (!ollamaUrl || ollamaUrl.trim() === '')) {
+    return res.status(400).json({ message: 'An Ollama URL is required when Ollama is selected.' });
   }
 
   try {
@@ -35,12 +38,16 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
+    // 3. Create a new user with conditional logic for credentials
     const newUser = new User({
       email,
-      password,
+      password, // Password will be hashed by the pre-save hook
       preferredLlmProvider: preferredLlmProvider || 'gemini',
-      encryptedApiKey: apiKey, // This will be encrypted by the pre-save hook
+      // Only save the credential that matches the chosen provider
+      encryptedApiKey: (preferredLlmProvider === 'gemini') ? apiKey : null,
+      ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
     });
+    
     await newUser.save();
 
     const payload = { userId: newUser._id, email: newUser.email };
@@ -50,15 +57,14 @@ router.post('/signup', async (req, res) => {
       token,
       _id: newUser._id,
       email: newUser.email,
-      sessionId: uuidv4(), // Consider if sessionID should come from a successful LLM call or just be client-side init
+      sessionId: uuidv4(),
       message: 'User registered successfully',
     });
   } catch (error) {
     console.error('Signup Error:', error);
-    if (error.code === 11000 || error.message.includes('duplicate key error collection')) { // More robust duplicate check
+    if (error.code === 11000 || error.message.includes('duplicate key error collection')) {
         return res.status(400).json({ message: 'An account with this email already exists.' });
     }
-    // Handle Mongoose validation errors more gracefully
     if (error.name === 'ValidationError') {
         const messages = Object.values(error.errors).map(val => val.message);
         return res.status(400).json({ message: messages.join(', ') });
@@ -76,24 +82,17 @@ router.post('/signin', async (req, res) => {
   }
 
   try {
-    // Get the admin credentials from the server's environment variables
     const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
     const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
 
-    // --- THIS IS THE FIX ---
-    // Special check for the admin user BEFORE hitting the database
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
         console.log("Admin login successful via special auth check.");
-        // The frontend will use this flag to set the admin session state.
-        // No JWT is needed for this type of frontend-only admin session management.
         return res.status(200).json({
-            isAdminLogin: true, // A flag for the frontend to recognize
+            isAdminLogin: true,
             message: 'Admin login successful',
         });
     }
-    // --- END OF FIX ---
 
-    // If it's not the admin, proceed with the regular user database lookup
     const user = await User.findByCredentials(email, password);
     if (!user) {
       return res.status(401).json({ message: 'Invalid email address or password.' });

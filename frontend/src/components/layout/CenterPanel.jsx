@@ -1,4 +1,5 @@
 // frontend/src/components/layout/CenterPanel.jsx
+
 import React, { useState, useEffect, useRef } from 'react';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
@@ -18,19 +19,16 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
     const { token: regularUserToken } = useRegularAuth();
-    // Get all necessary context from AppState
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
 
     const [useWebSearch, setUseWebSearch] = useState(false);
-    const [isSending, setIsSending] = useState({ active: false, message: '' });
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
-    
+
+    const [botStatusPlaceholder, setBotStatusPlaceholder] = useState(null); // 🌟 Custom status bubble
+
     const isMountedRef = useRef(true);
     const simulationControllerRef = useRef(new AbortController());
-
-    const [currentStatusMessage, setCurrentStatusMessage] = useState('');
     const [isActuallySendingAPI, setIsActuallySendingAPI] = useState(false);
-
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -49,16 +47,16 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     }, [selectedDocumentForAnalysis, selectedSubject]);
 
     const runStatusSimulation = async (isRagActive, isWebActive, signal) => {
-        // This simulation logic remains correct
         let analysisVariants = isWebActive ? WEB_ANALYSIS_VARIANTS : (isRagActive ? RAG_ANALYSIS_VARIANTS : GENERAL_ANALYSIS_VARIANTS);
         const sequence = [
             { message: getRandomItem(THINKING_VARIANTS), duration: 1200 },
             { message: getRandomItem(analysisVariants), duration: 1500 },
             { message: getRandomItem(GENERATION_VARIANTS), duration: 1300 },
         ];
+
         for (const stage of sequence) {
             if (signal.aborted) return;
-            if (isMountedRef.current) setCurrentStatusMessage(stage.message);
+            setBotStatusPlaceholder(stage.message);
             await wait(stage.duration + (Math.random() * 400 - 200));
         }
     };
@@ -66,80 +64,100 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const handleSendMessage = async (inputText) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
 
-        // --- THIS IS THE FIX ---
-        // Determine the document context AT THE MOMENT THE MESSAGE IS SENT.
-        // This ensures the agent always knows whether to use RAG or not.
         const documentContextName = selectedSubject || selectedDocumentForAnalysis;
         const isRagActive = !!documentContextName;
-        // --- END OF FIX ---
 
+        simulationControllerRef.current.abort();
         simulationControllerRef.current = new AbortController();
         onChatProcessingChange(true);
         setIsActuallySendingAPI(true);
-        setCurrentStatusMessage('...');
 
+        const userMessage = {
+            id: `user-${Date.now()}`,
+            sender: 'user',
+            role: 'user',
+            text: inputText.trim(),
+            parts: [{ text: inputText.trim() }],
+            timestamp: new Date().toISOString(),
+        };
+
+        setMessages(prev => [...prev, userMessage]);
+        setBotStatusPlaceholder("🧠 Thinking...");
 
         runStatusSimulation(isRagActive, useWebSearch, simulationControllerRef.current.signal);
 
-
-        const clientSideId = `user-${Date.now()}`;
-        setMessages(prev => [...prev, { id: clientSideId, sender: 'user', role: 'user', text: inputText.trim(), parts: [{ text: inputText.trim() }], timestamp: new Date().toISOString() }]);
-        
-        const payload = {
-            query: inputText.trim(),
-            history: messages.map(m => ({ role: m.role === 'model' ? 'model' : 'user', parts: m.parts || [{ text: m.text }] })),
-            sessionId: currentSessionId,
-            useWebSearch: useWebSearch,
-            systemPrompt,
-            criticalThinkingEnabled: criticalThinkingEnabled,
-            documentContextName: documentContextName, // Pass the determined context to the backend
-        };
-
         try {
-            const response = await api.sendMessage(payload);
+            const response = await api.sendMessage({
+                query: inputText.trim(),
+                history: messages.map(m => ({
+                    role: m.role === 'model' ? 'model' : 'user',
+                    parts: m.parts || [{ text: m.text }]
+                })),
+                sessionId: currentSessionId,
+                useWebSearch,
+                systemPrompt,
+                criticalThinkingEnabled,
+                documentContextName
+            });
+
             if (response && response.reply) {
-                if (isMountedRef.current) setMessages(prev => [...prev, { ...response.reply, id: `bot-${Date.now()}` }]);
+                if (isMountedRef.current) {
+                    setBotStatusPlaceholder(null); // Hide status
+                    setMessages(prev => [...prev, { ...response.reply, id: `bot-${Date.now()}` }]);
+                }
             } else {
                 throw new Error("Invalid response from AI service.");
             }
         } catch (error) {
             const errorText = error.response?.data?.message || error.message || 'Failed to get response from AI.';
-            const errorReply = { id: `error-${Date.now()}`, sender: 'bot', role: 'model', text: `Error: ${errorText}`, parts: [{ text: `Error: ${errorText}` }], timestamp: new Date().toISOString(), source_pipeline: "error-pipeline" };
-            if (isMountedRef.current) setMessages(prev => [...prev, errorReply]);
+            const errorReply = {
+                id: `error-${Date.now()}`,
+                sender: 'bot',
+                role: 'model',
+                text: `Error: ${errorText}`,
+                parts: [{ text: `Error: ${errorText}` }],
+                timestamp: new Date().toISOString(),
+                source_pipeline: "error-pipeline"
+            };
+            if (isMountedRef.current) {
+                setBotStatusPlaceholder(null);
+                setMessages(prev => [...prev, errorReply]);
+            }
             toast.error(errorText);
         } finally {
             simulationControllerRef.current.abort();
             if (isMountedRef.current) {
-                onChatProcessingChange(false); // Notify parent that processing ended
-                setIsActuallySendingAPI(false); // Release local lock
-                setCurrentStatusMessage(''); // Clear status message
+                onChatProcessingChange(false);
+                setIsActuallySendingAPI(false);
             }
         }
     };
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
-            {messages.length === 0 && !isSending.active && currentSessionId && (
-                 <div className="p-6 sm:p-8 text-center text-text-muted-light dark:text-text-muted-dark animate-fadeIn">
+            {messages.length === 0 && !isActuallySendingAPI && currentSessionId ? (
+                <div className="p-6 sm:p-8 text-center text-text-muted-light dark:text-text-muted-dark animate-fadeIn">
                     <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-text-light dark:text-text-dark">AI Engineering Tutor</h2>
-                    <p className="text-base sm:text-lg mb-3">Session ID: {currentSessionId.substring(0,8)}...</p>
+                    <p className="text-base sm:text-lg mb-3">Session ID: {currentSessionId.substring(0, 8)}...</p>
                     <div className="text-xs sm:text-sm space-y-1">
                         <p>Current LLM: <span className="font-semibold text-accent">{selectedLLM.toUpperCase()}</span>.</p>
                         <p className="max-w-md mx-auto">
-                            Assistant Mode: <span className="italic">"{systemPrompt.length > 60 ? systemPrompt.substring(0,60)+'...' : systemPrompt}"</span>
+                            Assistant Mode: <span className="italic">"{systemPrompt.length > 60 ? systemPrompt.substring(0, 60) + '...' : systemPrompt}"</span>
                         </p>
-                        {/* This part correctly shows the user which document is active */}
                         {(selectedSubject || selectedDocumentForAnalysis) && (
-                            <p className="mt-1 font-medium">Chat Focus: <span className="text-indigo-500 dark:text-indigo-400">{selectedSubject || selectedDocumentForAnalysis}</span></p>
+                            <p className="mt-1 font-medium">
+                                Chat Focus: <span className="text-indigo-500 dark:text-indigo-400">{selectedSubject || selectedDocumentForAnalysis}</span>
+                            </p>
                         )}
                     </div>
                 </div>
-            )}
+            ) : null}
 
-            <ChatHistory messages={messages} isLoading={isSending} />
+            <ChatHistory messages={messages} botStatusPlaceholder={botStatusPlaceholder} />
+
             <ChatInput
                 onSendMessage={handleSendMessage}
-                isLoading={isSending.active}
+                isLoading={isActuallySendingAPI}
                 useWebSearch={useWebSearch}
                 setUseWebSearch={setUseWebSearch}
                 criticalThinkingEnabled={criticalThinkingEnabled}
