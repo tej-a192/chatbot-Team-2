@@ -2,181 +2,215 @@
 
 This project is a comprehensive AI-powered tutoring application designed to assist users through interactive chat, document analysis, and knowledge exploration. It integrates multiple Large Language Models (LLMs), Retrieval Augmented Generation (RAG) for contextual understanding from user-uploaded documents, and knowledge graph capabilities for critical thinking. The system also includes an admin interface for managing shared knowledge resources.
 
+---
+
+## 🐧 One-Time Linux Setup (Run as Root)
+
+```bash
+# Install Docker & Docker Compose
+curl -fsSL https://get.docker.com | sh
+systemctl start docker
+systemctl enable docker
+
+# Install Node.js (18.x) & npm
+curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+apt install -y nodejs
+
+# Install Python 3.11 & pip
+apt update
+apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
+
+# Install Tesseract OCR
+apt install -y tesseract-ocr
+
+# Install FFmpeg
+apt install -y ffmpeg
+
+# Install MongoDB
+curl -fsSL https://pgp.mongodb.com/server-6.0.asc | gpg -o /usr/share/keyrings/mongodb-server-6.0.gpg --dearmor
+echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/6.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-6.0.list
+apt update
+apt install -y mongodb-org
+systemctl start mongod
+systemctl enable mongod
+```
+
+---
+
 ## Prerequisites
 
-Before you begin, ensure you have the following installed and configured:
+- **Node.js**: Version 18.x or later
+- **npm**: Installed with Node.js
+- **Python**: Version 3.9–3.11 (3.11 recommended)
+- **pip**: For installing Python packages
+- **MongoDB**: For user and document data storage
+- **Docker**: Required to run Qdrant & Neo4j containers
+- **Neo4j**: Graph database (via Docker)
+- **Qdrant**: Vector store (via Docker)
+- **Google Gemini API Key**: Mandatory
+- **Tesseract OCR**: For image-based document processing
+- **FFmpeg**: For audio (podcast) generation
+- **Ollama (Optional)**: For using local LLMs
 
-- **Node.js**: Version 18.x or later.
-- **npm**: For managing Node.js packages.
-- **Python**: Version 3.9 - 3.11 recommended. Check `server/rag_service/requirements.txt` for specific library compatibility.
-- **pip**: For installing Python packages.
-- **MongoDB**: A running instance for data storage (user accounts, chat history, document metadata).
-- **Docker**: Docker desktop version is required to run the containers (Neo4j & Qdrant)
-    - **Neo4j**: A running instance for graph database (used by the Python RAG service for knowledge graphs).
-    - **Qdrant**: A running instance for vector database (used by the Python RAG service).
-- **Google Gemini API Key** (Mandatory): If you plan to use Google's Gemini models.
-- **Ollama** (Optional): If you plan to use locally hosted Ollama models. Ensure Ollama is installed, running, and accessible.
-- **Tesseract OCR** (Mandatory): For processing image-based documents in the RAG service. Ensure it's installed and the path to the executable is correctly set in `server/rag_service/config.py` (via the `TESSERACT_CMD` environment variable loaded into `server/.env`).
+---
 
 ## Installation Steps
 
-1. **Clone the Repository:**
-    ```bash
-    git clone https://github.com/tej-a192/chatbot-Team-2.git
-    cd chatbot-Team-2
-    ```
+### 1. Clone the Repository
+```bash
+git clone https://github.com/tej-a192/chatbot-Team-2.git
+cd chatbot-Team-2
+```
 
-2. **Backend Setup (Node.js Server):**
-    ```bash
-    cd server
-    cp .env.example .env
-    ```
+---
 
-    Fill `.env` with:
-    ```env
-    PORT=5001
-    MONGO_URI="your_mongodb_connection_string"
-    JWT_SECRET="your_strong_jwt_secret"
-    GEMINI_API_KEY="your_gemini_api_key"
-    PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
-    OLLAMA_API_BASE_URL="http://<ollama_host>:<ollama_port>"
-    OLLAMA_DEFAULT_MODEL="your_default_ollama_model"
-    NEO4J_URI="bolt://localhost:7687"
-    NEO4J_USERNAME="neo4j_user"
-    NEO4J_PASSWORD="password"
-    NEO4J_DATABASE="neo4j"
-    QDRANT_HOST="localhost"
-    QDRANT_PORT=6333
-    FIXED_ADMIN_USERNAME="admin"
-    FIXED_ADMIN_PASSWORD="admin123"
-    ```
+### 2. Backend Setup (Node.js Server)
 
-    Then install dependencies:
-    ```bash
-    npm install
-    ```
+```bash
+cd server
+cp .env.example .env
+```
 
-3. **Tesseract OCR Installation & Setup (Windows users):**
-    - Install from: https://github.com/UB-Mannheim/tesseract/wiki#tesseract-at-ub-mannheim
-    - Add `C:\Program Files\Tesseract-OCR` to your system's environment variables.
+Edit `.env` and fill in your keys:
+```env
+PORT=5001
+MONGO_URI="mongodb://localhost:27017/chatbot"
+JWT_SECRET="your_jwt_secret"
+GEMINI_API_KEY="your_gemini_key"
+PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
+NEO4J_URI="bolt://localhost:7687"
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=password
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+FIXED_ADMIN_USERNAME=admin
+FIXED_ADMIN_PASSWORD=admin123
+```
 
-4. **FFmpeg Installation (Windows users):**
-    - Download from: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
-    - Extract to: `C:\ffmpeg`
-    - Add `C:\ffmpeg\bin` to system’s environment variables.
+Install dependencies:
+```bash
+npm install
+```
 
-5. **Backend Setup (Python RAG & KG Service):**
-    ```bash
-    cd server/rag_service
-    cp .env.example .env
-    pip install -r requirements.txt
-    python -m spacy download en_core_web_sm
-    ```
+---
 
-6. **Run Services**
+### 3. Backend Setup (Python RAG & KG Service)
 
-    - **Start Docker Services (Neo4j & Qdrant)**:
-        ```bash
-        docker compose up -d
-        ```
+```bash
+cd server/rag_service
+cp .env.example .env  # if available
+pip install -r requirements.txt
+python3.11 -m spacy download en_core_web_sm
+```
 
-    - **Run Python Flask Service (RAG/KG):**
-        ```bash
-        python app.py
-        ```
+Edit `config.py` if needed to point to:
+```python
+TESSERACT_CMD = "/usr/bin/tesseract"
+```
 
-    - **Run Node.js Backend Server:**
-        ```bash
-        cd ../
-        npm start
-        ```
+---
 
-7. **Frontend Setup:**
-    ```bash
-    cd frontend
-    cp .env.example .env
-    ```
+### 4. Start Qdrant & Neo4j with Docker
 
-    Fill `.env` with:
-    ```env
-    VITE_API_BASE_URL=http://localhost:5001/api
-    VITE_ADMIN_USERNAME=admin
-    VITE_ADMIN_PASSWORD=admin123
-    ```
+```bash
+cd server/rag_service
+docker compose up -d
+```
 
-    Then install dependencies:
-    ```bash
-    npm install
-    ```
+---
 
-8. **Run Frontend:**
-    ```bash
-    npm run dev
-    ```
+### 5. Run Python RAG Service
+
+```bash
+cd server/rag_service
+python3.11 app.py
+```
+
+---
+
+### 6. Run Node.js Server
+
+```bash
+cd server
+npm start
+```
+
+---
+
+### 7. Frontend Setup
+
+```bash
+cd frontend
+cp .env.example .env
+```
+
+Fill in:
+```env
+VITE_API_BASE_URL=http://localhost:5001/api
+VITE_ADMIN_USERNAME=admin
+VITE_ADMIN_PASSWORD=admin123
+```
+
+Install and start:
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## ✅ Final Checklist to Run Entire App
+
+1. MongoDB is running (port `27017`)
+2. Neo4j is running (port `7687`)
+3. Qdrant is running (port `6333`)
+4. Python RAG (`localhost:5000`) is running
+5. Node backend (`localhost:5001`) is running
+6. Frontend (`localhost:5173`) is open in browser
+
+---
 
 ## Features
 
-- **User Authentication**: Secure signup and login for regular users.
-- **Admin Portal**: Dedicated login and dashboard for administrators to manage shared documents and view their analysis.
-- **Interactive Chat Interface**: Real-time chat with an AI tutor.
-- **Multi-LLM Support**:
-  - Google Gemini integration
-  - Ollama (local) integration
-  - Switch between LLMs dynamically
-- **Retrieval Augmented Generation (RAG)**:
-  - Document upload, parsing, and context-aware responses
-  - Toggle RAG usage on/off
-- **Knowledge Graph (KG) Enhanced Critical Thinking**:
-  - Auto-generated KG from document content
-  - Toggle KG-based reasoning
-- **Document Management**:
-  - Upload, list, delete, analyze (FAQs, key topics, mind map)
-- **Advanced Analysis Tools**:
-  - FAQ Generator
-  - Key Topic Extractor
-  - Mind Map Generator (Mermaid.js)
-- **Chat History**: Reload past chats
-- **System Prompts**:
-  - Friendly Tutor, Concept Explorer, Knowledge Check, Custom
-- **Subject Focus**: Chat can focus on selected admin documents
-- **Agentic Frameworks**:
-  - **Web Search Agent** using DuckDuckGo for real-time web info
-  - **Podcast Generator** using gTTS + FFmpeg to generate audio summaries
-- **Other Features**:
-  - Speech-to-Text input
-  - Text-to-Speech AI output
-  - Light/Dark theme toggle
-  - Mobile responsive UI
+- 🔐 **User Authentication** (JWT-based)
+- 📁 **Document Upload & Parsing**
+- 🔍 **RAG-enabled Chat** with document context
+- 📊 **Knowledge Graph Critical Thinking**
+- 📚 **FAQ, Topic, Mindmap Generators**
+- 🎧 **Podcast Generator (gTTS + FFmpeg)**
+- 🌐 **Web Search Agent (DuckDuckGo API)**
+- 🔄 **Multi-LLM Support (Gemini + Ollama)**
+- 📝 **Chat History and Reload**
+- 🎤 **Speech-to-Text** + 🗣️ **Text-to-Speech**
+- 🌙 **Light/Dark Mode Toggle**
+
+---
 
 ## Contributors
 
-1. **Pavan Teja B**
-2. **Livingston D**
-3. **Murali Krishna B**
-4. **Mahaboob Subhani SK**
-5. **Anusha P**
+| Name                      | Role / Branch  | Contribution Summary                                                                                          | Video |
+|---------------------------|----------------|---------------------------------------------------------------------------------------------------------------|--------|
+| **Pavan Teja B**          | `dev/rex`      | File parsing, FAQ/Topic/Map generation, KG creation, DB ops, Prompt tuning                                    | [Link](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing) |
+| **Livingston D**          | `alpha`        | Qdrant, Neo4j, Mermaid, Admin flow, Long-term memory, KG critical thinking                                    | [Link](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
+| **Murali Krishna B**      | `dev-mk`       | Front/Back integration, Multi-LLM support, Session/global state                                                | — |
+| **Mehaboob Subhani SK**   | `skms`         | UI, Web Search Agent, DOC/PPT generation, Podcast support, Profile management                                  | [Link](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
+| **Anusha P**              | `anu`          | Research, STT and TTS implementation                                                                           | — |
+
+---
 
 ## 📽️ Demo Video
 
-[Click here to watch the full demo](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing)
+👉 [Click to Watch Full Demo](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing)
 
-## Features Not in Video
+---
+
+## 🛠️ Features Not Shown in Video
 
 1. Agentic Framework
-2. Web Search
+2. Web Search Agent
 3. Podcast Generation
-4. Long Term Memory
+4. Long-Term Memory
 5. Content Generation (DOCX, PPTX)
 6. Knowledge Graph Visualization
 
 ---
-
-## 👥 Team Contributions
-
-| Name                      | Branch     | Key Contributions                                                                                       | Link |
-|---------------------------|------------|----------------------------------------------------------------------------------------------------------|------|
-| **Pavan Teja B**          | dev/rex    | File parsing, FAQ/Topic/Mindmap analysis, KG generation, DB, Prompting                                  | [Demo](https://drive.google.com/file/d/107Sbtf64_KrW18NLRDvvUS0_BnpWmFJ9/view?usp=sharing) |
-| **Rohith Syam Livingston D** | alpha  | Qdrant, Neo4j, Mermaid, Admin Features, Critical Thinking, Long Term Memory                             | [Demo](https://drive.google.com/file/d/1qmUmFZX1RuCS3icSPGMQ2kAHeJERGRAr/view?usp=drive_link) |
-| **Murali Krishna B**      | dev-mk     | Front & backend integration, Multi-LLM switch, Session & state management                                |  |
-| **Mehaboob Subhani**      | skms       | UI, Web Search agent, Content Gen (PPT/DOCX), Podcast Gen (gTTS), User Profile Mgmt                      | [Demo](https://drive.google.com/file/d/1OV0eD5PkwTATlsBHhuT6u4A-cKnuMyke/view?usp=sharing) |
-| **Anusha P**              | anu        | Research, Speech-to-Text, Text-to-Speech                                                                 |  |
