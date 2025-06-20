@@ -17,22 +17,29 @@ curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
 apt install -y nodejs
 
 # Install Python 3.11 & pip
-apt update
-apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
 
 # Install Tesseract OCR
-apt install -y tesseract-ocr
+sudo apt install -y tesseract-ocr
 
 # Install FFmpeg
-apt install -y ffmpeg
+sudo apt install -y ffmpeg
 
-# Install MongoDB
-curl -fsSL https://pgp.mongodb.com/server-6.0.asc | gpg -o /usr/share/keyrings/mongodb-server-6.0.gpg --dearmor
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/6.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-6.0.list
-apt update
-apt install -y mongodb-org
-systemctl start mongod
-systemctl enable mongod
+# Import the MongoDB public GPG key
+curl -fsSL https://pgp.mongodb.com/server-6.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg
+
+# Add the MongoDB repo for Ubuntu 22.04 (Jammy) instead of 24.04 (Noble)
+echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+
+# Update and install
+sudo apt update
+sudo apt install -y mongodb-org
+
+# Start and enable MongoDB
+sudo systemctl start mongod
+sudo systemctl enable mongod
+
 ```
 
 ---
