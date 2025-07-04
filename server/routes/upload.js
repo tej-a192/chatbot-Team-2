@@ -1,15 +1,19 @@
+
+
 // server/routes/upload.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
+const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
+
 const router = express.Router();
 
-// --- Constants & Multer Config (Unchanged) ---
+// --- Constants & Multer Config ---
 const UPLOAD_DIR = path.join(__dirname, '..', 'assets');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const allowedMimeTypes = {
@@ -93,13 +97,15 @@ async function triggerPythonRagProcessing(userId, filePath, originalName) {
     }
 }
 
-// Route handler
-router.post('/', async (req, res, next) => {
+router.post('/', (req, res) => {
     const uploader = upload.single('file');
 
     uploader(req, res, async function (err) {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication error: User context not found." });
+        }
         if (err) {
-            console.error(`Upload Route: Multer error for user '${req.user?.email || 'undefined'}': ${err.message}`);
+            console.error(`Upload Route: Multer error for user '${req.user.email}': ${err.message}`);
             return res.status(err instanceof multer.MulterError ? 400 : 500).json({ message: err.message });
         }
         if (!req.file) {
@@ -108,29 +114,17 @@ router.post('/', async (req, res, next) => {
 
         const userId = req.user._id.toString();
         const { originalname: originalName, path: tempServerPath } = req.file;
-        // Check if path exists before resolving
+
         if (!tempServerPath) {
             return res.status(500).json({ message: "File upload failed, temporary path not created." });
         }
         const absoluteFilePath = path.resolve(tempServerPath);
 
         try {
-            // Fetch user preferences AT THE START of the upload process.
             const user = await User.findById(userId).select('uploadedDocuments.filename preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
             if (!user) {
                 await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
                 return res.status(404).json({ message: "User not found." });
-            }
-
-            const llmProviderForWorkers = user.preferredLlmProvider || 'gemini';
-            const ollamaModelForWorkers = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-
-            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-            const userOllamaUrl = user.ollamaUrl || null;
-
-            if (llmProviderForWorkers === 'gemini' && !userApiKey) {
-                await fs.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(400).json({ message: "Cannot process document. Your Gemini API key is missing. Please add it in your profile settings." });
             }
 
             if (user.uploadedDocuments.some(doc => doc.filename === originalName)) {
@@ -144,7 +138,7 @@ router.post('/', async (req, res, next) => {
                 await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
                 return res.status(422).json({ message: ragResult.message || "Failed to extract text." });
             }
-
+            
             const newDocEntry = {
                 filename: originalName, text: ragResult.text,
                 analysis: {}, uploadedAt: new Date(), ragStatus: ragResult.status,
@@ -157,15 +151,21 @@ router.post('/', async (req, res, next) => {
                 originalname: originalName,
             });
 
-            // Pass the preferences to the workers
+            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+            const llmProviderForWorkers = user.preferredLlmProvider || 'gemini';
+
+            if (llmProviderForWorkers === 'gemini' && !userApiKey) {
+                console.warn(`[Upload Route] User ${userId} selected Gemini but has no API key. Workers may fail.`);
+            }
+            
             const workerData = { 
                 userId, 
                 originalName, 
                 textForAnalysis: ragResult.text, 
                 llmProvider: llmProviderForWorkers, 
-                ollamaModel: ollamaModelForWorkers,
-                apiKey: userApiKey,      
-                ollamaUrl: userOllamaUrl
+                ollamaModel: user.ollamaModel,
+                apiKey: userApiKey,
+                ollamaUrl: user.ollamaUrl
             };
             const kgWorkerData = { ...workerData, chunksForKg: ragResult.chunksForKg };
 
@@ -183,7 +183,7 @@ router.post('/', async (req, res, next) => {
 
         } catch (error) {
             console.error(`Overall Upload Error for ${originalName}:`, error);
-            if (tempServerPath && fs.existsSync(tempServerPath)) {
+            if (fs.existsSync(tempServerPath)) {
                 await fs.promises.unlink(tempServerPath).catch(e => console.error(`Final Cleanup Error: ${e.message}`));
             }
             if (!res.headersSent) {

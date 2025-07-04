@@ -1,69 +1,77 @@
+
 // server/routes/kg.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
+const { decrypt } = require('../utils/crypto');
 
-// Note: authMiddleware is applied to this router in server.js
-
-// @route   GET /api/kg/visualize/:documentName
-// @desc    Get knowledge graph data for a specific document for visualization.
-// @access  Private
 router.get('/visualize/:documentName', async (req, res) => {
     const { documentName } = req.params;
-    const currentUserId = req.user._id.toString();
+    const currentUserId = req.user._id;
 
     if (!documentName) {
         return res.status(400).json({ message: 'Document name is required.' });
     }
 
     try {
-        let targetUserIdForKg = null;
+        let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+        
+        // We need to fetch the user to get their encrypted API key
+        const user = await User.findById(currentUserId).select('uploadedDocuments.filename uploadedDocuments.text +encryptedApiKey');
 
-        // 1. Check if it's an admin document ("Subject")
-        const isAdminDoc = await AdminDocument.exists({ originalName: documentName });
-
-        if (isAdminDoc) {
-            // Use the exact same generic ID that the upload/KG creation process uses.
-            targetUserIdForKg = "fixed_admin_text_extraction_user"; 
-            console.log(`[KG Visualize] Request for admin subject '${documentName}'. Using consistent generic admin ID for KG lookup.`);
+        // Check if the requested document belongs to the user
+        const userDoc = user?.uploadedDocuments.find(doc => doc.filename === documentName);
+        
+        if (userDoc?.text) {
+            sourceDocumentText = userDoc.text;
+            // Decrypt the key if the document is a user document
+            if (user.encryptedApiKey) {
+                apiKeyForRequest = decrypt(user.encryptedApiKey);
+            }
         } else {
-            // 2. If not an admin doc, check if it belongs to the current user.
-            const user = await User.exists({ _id: currentUserId, "uploadedDocuments.filename": documentName });
-            if (user) {
-                targetUserIdForKg = currentUserId;
-                console.log(`[KG Visualize] Request for user document '${documentName}'. Using user's ID for KG lookup.`);
+            // If not a user document, check if it's an admin document (Subject)
+            const adminDoc = await AdminDocument.findOne({ originalName: documentName }).select('text');
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                // For admin docs, use the server's global API key
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
             }
         }
         
-        if (!targetUserIdForKg) {
-            console.warn(`[KG Visualize] User ${currentUserId} requested unauthorized or non-existent KG for document: ${documentName}`);
-            return res.status(403).json({ message: 'Access denied or knowledge graph not found for this document.' });
+        if (!sourceDocumentText) {
+            return res.status(404).json({ message: `Source document '${documentName}' not found.` });
         }
-        
+
+        if (!apiKeyForRequest) {
+             return res.status(400).json({ message: "API Key for document processing is missing." });
+        }
+
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) {
             return res.status(500).json({ message: "Knowledge Graph service is not configured." });
         }
         
-        // 4. Call the Python service with the correct user ID
-        const getKgUrl = `${pythonServiceUrl}/kg/${targetUserIdForKg}/${encodeURIComponent(documentName)}`;
+        const getKgUrl = `${pythonServiceUrl}/generate_kg_from_text`;
         
-        console.log(`[KG Visualize] Proxying request to Python service: ${getKgUrl}`);
+        console.log(`[KG Visualize] Proxying request to Python with API Key for KG generation.`);
         
-        const pythonResponse = await axios.get(getKgUrl, { timeout: 30000 });
+        const pythonResponse = await axios.post(getKgUrl, {
+            document_text: sourceDocumentText,
+            api_key: apiKeyForRequest // <<< Pass the correct key
+        }, { timeout: 300000 });
 
-        if (pythonResponse.data && pythonResponse.data.nodes) {
-            res.status(200).json(pythonResponse.data);
+        if (pythonResponse.data && pythonResponse.data.success) {
+            res.status(200).json(pythonResponse.data.graph_data);
         } else {
-            res.status(404).json({ message: `Knowledge graph for '${documentName}' not found or is empty.` });
+            throw new Error(pythonResponse.data.error || "Python service failed to generate the knowledge graph.");
         }
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to retrieve knowledge graph.";
-        console.error(`[KG Visualize] Error proxying KG request for '${documentName}': ${errorMsg}`);
-        const statusCode = error.response?.status || 500;
-        res.status(statusCode).json({ message: errorMsg });
+        console.error(`[KG Visualize] Error for '${documentName}': ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ error: errorMsg });
     }
 });
 

@@ -1,3 +1,4 @@
+
 // server/routes/chat.js
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
@@ -19,17 +20,13 @@ function doesQuerySuggestRecall(query) {
         'what did i say', 'what was', 'what were', 'who am i',
         'do you know', 'can you tell me again',
         'continue with', 'let\'s continue', 'pick up where we left off',
-        'the last thing', 'another question about that',
-        'about that topic', 'regarding that', 'on that subject',
-        'the document we', 'the file i uploaded', 'in that paper',
     ];
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
-// @route   POST /api/chat/message
 router.post('/message', async (req, res) => {
     const {
-        query, sessionId, useWebSearch,
+        query, sessionId, useWebSearch, useAcademicSearch,
         systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
         documentContextName, filter
     } = req.body;
@@ -61,26 +58,13 @@ router.post('/message', async (req, res) => {
         const historyForLlm = [];
 
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            console.log(`[Chat Route] Recall detected. Injecting summary with a targeted role-play prompt.`);
             historyForLlm.push({ 
                 role: 'user', 
-                parts: [{ text: `
----
-**Optional Background Information (Summary of Past Conversations):**
-"""
-${summaryFromDb}
-"""
----
-
-**MANDATORY RULE:** You MUST IGNORE the "Optional Background Information" provided above UNLESS the user's new query below is EXPLICITLY asking about a past conversation (e.g., "what did we talk about?", "what is my name?"). 
-
-If the user's query is a new topic, a greeting, or unrelated, answer it directly without using the background information. Do not mention the summary or your memory.
-` 
-                }] 
+                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
             });
             historyForLlm.push({ 
                 role: 'model', 
-                parts: [{ text: "Understood. I will only use the background information if the user's query is explicitly about our past conversations. Otherwise, I will ignore it." }] 
+                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
             });
         }
 
@@ -96,6 +80,7 @@ If the user's query is a new topic, a greeting, or unrelated, answer it directly
             llmProvider,
             ollamaModel,
             isWebSearchEnabled: !!useWebSearch,
+            isAcademicSearchEnabled: !!useAcademicSearch,
             userId: userId.toString(),
             ollamaUrl: user.ollamaUrl
         };
@@ -156,14 +141,11 @@ If the user's query is a new topic, a greeting, or unrelated, answer it directly
     }
 });
 
-
-// @route   POST /api/chat/history
 router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
     let summaryOfOldSession = "";
-
     if (previousSessionId) {
         try {
             const [oldSession, user] = await Promise.all([
@@ -174,38 +156,29 @@ router.post('/history', async (req, res) => {
             if (oldSession && oldSession.messages?.length > 0) {
                 const llmProvider = user.preferredLlmProvider || 'gemini';
                 const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-                
                 const userOllamaUrl = user.ollamaUrl || null;
                 let userApiKey = null;
                 if (llmProvider === 'gemini') {
                     userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
                 }
-
                 summaryOfOldSession = await createOrUpdateSummary(
-                    oldSession.messages, 
-                    oldSession.summary, 
-                    llmProvider, 
-                    ollamaModel,
-                    userApiKey,
-                    userOllamaUrl
+                    oldSession.messages, oldSession.summary, llmProvider, 
+                    ollamaModel, userApiKey, userOllamaUrl
                 );
             }
         } catch (summaryError) {
-            console.error(`!!! Could not summarize previous session ${previousSessionId}:`, summaryError);
+            console.error(`Could not summarize previous session ${previousSessionId}:`, summaryError);
         }
     }
     
     try {
-        await ChatHistory.create({ userId: userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
-        res.status(200).json({ message: 'New session started.', newSessionId: newSessionId });
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
+        res.status(200).json({ message: 'New session started.', newSessionId });
     } catch (dbError) {
-        console.error(`!!! Failed to create new chat session ${newSessionId} in DB:`, dbError);
-        res.status(500).json({ message: 'Failed to create new session due to a server error.' });
+        res.status(500).json({ message: 'Failed to create new session.' });
     }
 });
 
-
-// @route   GET /api/chat/sessions
 router.get('/sessions', async (req, res) => {
     try {
         const sessions = await ChatHistory.find({ userId: req.user._id }).sort({ updatedAt: -1 }).select('sessionId createdAt updatedAt messages').lean();
@@ -217,52 +190,33 @@ router.get('/sessions', async (req, res) => {
         });
         res.status(200).json(sessionSummaries);
     } catch (error) {
-        console.error(`!!! Error fetching chat sessions for user ${req.user._id}:`, error);
         res.status(500).json({ message: 'Failed to retrieve chat sessions.' });
     }
 });
 
-
-// @route   GET /api/chat/session/:sessionId
 router.get('/session/:sessionId', async (req, res) => {
     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
-        if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
+        if (!session) return res.status(404).json({ message: 'Chat session not found.' });
         const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
         res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
-        console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
-        res.status(500).json({ message: 'Failed to retrieve chat session details.' });
+        res.status(500).json({ message: 'Failed to retrieve chat session.' });
     }
 });
 
-
-// @route   DELETE /api/chat/session/:sessionId
 router.delete('/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.user._id;
-
-    if (!sessionId) {
-        return res.status(400).json({ message: 'Session ID is required.' });
-    }
-
     try {
-        console.log(`>>> DELETE /api/chat/session: User=${userId}, Session=${sessionId}`);
         const result = await ChatHistory.deleteOne({ sessionId: sessionId, userId: userId });
-
         if (result.deletedCount === 0) {
-            console.warn(`   Session not found for deletion or user not authorized. Session: ${sessionId}`);
-            return res.status(404).json({ message: 'Chat session not found or you do not have permission to delete it.' });
+            return res.status(404).json({ message: 'Chat session not found.' });
         }
-
-        console.log(`<<< Session ${sessionId} deleted successfully from database for user ${userId}.`);
         res.status(200).json({ message: 'Chat session deleted successfully.' });
-
     } catch (error) {
-        console.error(`!!! Error deleting chat session ${sessionId} for user ${userId}:`, error);
         res.status(500).json({ message: 'Server error while deleting chat session.' });
     }
 });
-
 
 module.exports = router;
