@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 // frontend/src/components/chat/ChatInput.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Mic, Plus, Brain, Zap, Globe } from 'lucide-react';
+=======
+
+
+// frontend/src/components/chat/ChatInput.jsx
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react'; // Ensure BookMarked is imported
+>>>>>>> origin/skms
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
@@ -13,6 +21,11 @@ function ChatInput({
     isLoading,
     useWebSearch,
     setUseWebSearch,
+<<<<<<< HEAD
+=======
+    useAcademicSearch, // This prop is now used
+    setUseAcademicSearch, // This prop is now used
+>>>>>>> origin/skms
     criticalThinkingEnabled,
     setCriticalThinkingEnabled
 }) {
@@ -49,7 +62,11 @@ function ChatInput({
     const handleSubmit = (e) => {
         e.preventDefault();
         if (inputValue.trim() && !isLoading) {
+<<<<<<< HEAD
             onSendMessage(inputValue.trim()); // Pass only the text. The parent (CenterPanel) will assemble the full payload.
+=======
+            onSendMessage(inputValue.trim());
+>>>>>>> origin/skms
             setInputValue('');
         }
     };
@@ -68,6 +85,17 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
+<<<<<<< HEAD
+=======
+    // Handler for the Academic Search Toggle
+    const handleAcademicSearchToggle = () => {
+        const newState = !useAcademicSearch;
+        setUseAcademicSearch(newState);
+        toast(newState ? "Academic Search enabled." : "Academic Search disabled.", { icon: newState ? "🎓" : "📄" });
+        setIsMenuOpen(false);
+    };
+
+>>>>>>> origin/skms
     const icon = criticalThinkingEnabled ? () => <img src={blueBrain} alt="Blue Brain" className="w-5 h-5" /> : Brain;
 
     return (
@@ -89,8 +117,14 @@ function ChatInput({
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
+<<<<<<< HEAD
                             className="absolute bottom-full left-0 mb-2 w-48 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
+=======
+                            className="absolute bottom-full left-0 mb-2 w-52 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
+                        >
+                            {/* Web Search Button */}
+>>>>>>> origin/skms
                             <button
                                 onClick={handleWebSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -102,6 +136,23 @@ function ChatInput({
                                 <Globe size={16} />
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
+<<<<<<< HEAD
+=======
+
+                            {/* --- THIS IS THE BUTTON THAT WAS MISSING --- */}
+                            <button
+                                onClick={handleAcademicSearchToggle}
+                                className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
+                                    useAcademicSearch
+                                    ? 'bg-purple-500/10 text-purple-600 dark:bg-purple-400/20 dark:text-purple-300'
+                                    : 'text-text-light dark:text-text-dark hover:bg-gray-100 dark:hover:bg-gray-700'
+                                }`}
+                            >
+                                <BookMarked size={16} />
+                                {useAcademicSearch ? 'Disable Academic Search' : 'Enable Academic Search'}
+                            </button>
+                             
+>>>>>>> origin/skms
                              <button
                                 onClick={() => {toast("File attachment coming soon!", { icon: "📎" }); setIsMenuOpen(false);}}
                                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -170,6 +221,17 @@ function ChatInput({
                             <Globe size={12} /> Web Search is ON
                         </motion.p>
                     )}
+<<<<<<< HEAD
+=======
+                    {useAcademicSearch && (
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
+                            className="text-xs text-purple-500 dark:text-purple-400 flex items-center gap-1.5 font-medium"
+                        >
+                            <BookMarked size={12} /> Academic Search is ON
+                        </motion.p>
+                    )}
+>>>>>>> origin/skms
                 </AnimatePresence>
             </div>
         </div>

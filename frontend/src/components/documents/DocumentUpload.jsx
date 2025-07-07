@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // // frontend/src/components/documents/DocumentUpload.jsx
 // import React, { useState, useRef, useEffect } from 'react';
 // import api from '../../services/api.js';
@@ -347,11 +348,17 @@
 
 
 
+=======
+>>>>>>> origin/skms
 // frontend/src/components/documents/DocumentUpload.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
+<<<<<<< HEAD
 import { UploadCloud, FileText, XCircle, Loader2, Paperclip, AlertTriangle } from 'lucide-react';
+=======
+import { UploadCloud, FileText, XCircle, Paperclip } from 'lucide-react';
+>>>>>>> origin/skms
 import Button from '../core/Button.jsx';
 import { motion } from 'framer-motion';
 
@@ -372,11 +379,18 @@ function DocumentUpload({ onUploadSuccess }) {
     const [currentStage, setCurrentStage] = useState('');
     const [stageMessage, setStageMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
+<<<<<<< HEAD
+=======
+    const [dragActive, setDragActive] = useState(false);
+>>>>>>> origin/skms
 
     const fileInputRef = useRef(null);
     const processingTimeoutRef = useRef(null);
     
+<<<<<<< HEAD
     // Cleanup timeout on unmount
+=======
+>>>>>>> origin/skms
     useEffect(() => {
         return () => {
             if (processingTimeoutRef.current) {
@@ -396,7 +410,10 @@ function DocumentUpload({ onUploadSuccess }) {
 
     const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); if (isProcessing) return; setDragActive(e.type === "dragenter" || e.type === "dragover"); };
     const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); if (isProcessing) return; setDragActive(false); const file = e.dataTransfer.files && e.dataTransfer.files[0]; if (file) { setSelectedFile(file); setErrorMessage(''); }};
+<<<<<<< HEAD
     const [dragActive, setDragActive] = useState(false);
+=======
+>>>>>>> origin/skms
 
     const resetState = () => {
         setSelectedFile(null);
@@ -409,18 +426,28 @@ function DocumentUpload({ onUploadSuccess }) {
     };
     
     const runProgressSimulation = (stageIndex = 0) => {
+<<<<<<< HEAD
         if (stageIndex >= RAG_STAGES.length) return; // Stop if we've shown all stages
+=======
+        if (stageIndex >= RAG_STAGES.length) return;
+>>>>>>> origin/skms
 
         const stage = RAG_STAGES[stageIndex];
         setCurrentStage(stage.name);
         setStageMessage(stage.message);
         
+<<<<<<< HEAD
         // Calculate progress percentage
+=======
+>>>>>>> origin/skms
         const totalDuration = RAG_STAGES.reduce((acc, s) => acc + s.duration, 0);
         const elapsedDuration = RAG_STAGES.slice(0, stageIndex).reduce((acc, s) => acc + s.duration, 0);
         setProgress(Math.round((elapsedDuration / totalDuration) * 100));
 
+<<<<<<< HEAD
         // Set timeout to move to the next stage
+=======
+>>>>>>> origin/skms
         processingTimeoutRef.current = setTimeout(() => {
             runProgressSimulation(stageIndex + 1);
         }, stage.duration);
@@ -434,39 +461,59 @@ function DocumentUpload({ onUploadSuccess }) {
 
         setIsProcessing(true);
         setErrorMessage('');
+<<<<<<< HEAD
         
         // Start the UI simulation immediately
+=======
+>>>>>>> origin/skms
         runProgressSimulation(0);
 
         const formData = new FormData();
         formData.append("file", selectedFile);
         
         try {
+<<<<<<< HEAD
             // The actual API call happens in the background while the UI simulates
             await api.uploadFile(formData);
 
             // API call succeeded, stop the simulation and show completion
+=======
+            await api.uploadFile(formData);
+
+>>>>>>> origin/skms
             if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
             setCurrentStage("Ready");
             setStageMessage("Document successfully processed and ready to use!");
             setProgress(100);
             toast.success(`'${selectedFile.name}' processed successfully!`);
             
+<<<<<<< HEAD
             // Allow user to see the "Ready" state for a moment before resetting
+=======
+>>>>>>> origin/skms
             setTimeout(() => {
                 resetState();
                 if (onUploadSuccess) onUploadSuccess();
             }, 2500);
 
         } catch (error) {
+<<<<<<< HEAD
             // API call failed, stop the simulation and show error
+=======
+>>>>>>> origin/skms
             if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
             const msg = error.response?.data?.message || error.message || "Upload failed.";
             setErrorMessage(msg);
             toast.error(`Upload failed: ${msg}`);
+<<<<<<< HEAD
             setIsProcessing(false); // Keep the component in an error state to allow retry
             setCurrentStage('Failed');
             setProgress(100); // Show red full bar on failure
+=======
+            setIsProcessing(false);
+            setCurrentStage('Failed');
+            setProgress(100);
+>>>>>>> origin/skms
         }
     };
 

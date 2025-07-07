@@ -9,11 +9,10 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
     }
     const searchUrl = `${PYTHON_SERVICE_URL}/query`;
     
-    // The payload is now simpler and only contains RAG-specific information.
     const payload = {
         query: query,
         k: k,
-        user_id: "agent_user", // The agent queries on behalf of the user
+        user_id: "agent_user",
         documentContextName: documentContextName || null
     };
     
@@ -42,7 +41,6 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
     }
 }
 
-// This function remains unchanged and correct.
 async function queryKgService(query, documentName, userId) {
     if (!PYTHON_SERVICE_URL) {
         throw new Error("Knowledge Graph service is not configured on the server.");

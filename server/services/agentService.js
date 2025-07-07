@@ -12,8 +12,6 @@ function parseToolCall(responseText) {
     const jsonString = jsonMatch ? jsonMatch[2] : responseText;
     try {
         const jsonResponse = JSON.parse(jsonString);
-        // Check that the key 'tool_call' exists in the object.
-        // It can be an object or null, but it must be present.
         if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
             return jsonResponse.tool_call;
         }
@@ -25,9 +23,8 @@ function parseToolCall(responseText) {
 }
 
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, userId, ollamaUrl } = requestContext;
+    const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled } = requestContext;
 
-    // 2. Fetch the user's key (this part is already correct)
     const user = await User.findById(userId).select('+encryptedApiKey');
     if (!user) {
         throw new Error("User not found during agent processing.");
@@ -37,13 +34,13 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         console.warn(`[AgentService] Failed to decrypt API key for user ${userId}.`);
     }
 
-    // 2. Prepare contexts for the agent
     const modelContext = createModelContext({ availableTools });
     const agenticContext = createAgenticContext({ systemPrompt });
+    
     const agenticSystemPrompt = createAgenticSystemPrompt(
         modelContext, 
         agenticContext, 
-        { ...requestContext, userQuery }
+        { ...requestContext, userQuery, isAcademicSearchEnabled }
     );
 
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
@@ -53,18 +50,16 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         ollamaUrl: ollamaUrl
     };
 
-    // 3. Call the Router agent (using your correct, clean logic)
     console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
     const routerResponseText = await llmService.generateContentWithHistory(
-        [], // Router gets no prior chat history to prevent confusion
-        "Please analyze the provided context and user query and return your JSON decision.", // A simple instruction
+        [], 
+        "Please analyze the provided context and user query and return your JSON decision.", 
         agenticSystemPrompt,
         llmOptions
     );
 
     const toolCall = parseToolCall(routerResponseText);
 
-    // 4. Handle Direct Answer path (your correct logic)
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer.');
         const directAnswer = await llmService.generateContentWithHistory(
@@ -80,7 +75,6 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         };
     }
 
-    // 5. Handle Tool Call path
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
@@ -88,7 +82,6 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     }
 
     try {
-        // 6. Execute tools in parallel (using your clean, correct logic)
         const toolExecutionPromises = [];
         const executedToolNames = [];
 
@@ -114,7 +107,6 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         
         const combinedReferences = toolResults.flatMap(result => result.references || []);
 
-        // 7. Call the Synthesizer agent to generate the final answer
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
         const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
         const finalAnswer = await llmService.generateContentWithHistory(
@@ -131,9 +123,6 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], sourcePipeline: `agent-error-tool-failed` };
     }
 }
-
-
-
 
 module.exports = {
     processAgenticRequest,
