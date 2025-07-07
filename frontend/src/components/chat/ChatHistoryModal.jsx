@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
-import { X, MessageSquareText, Loader2, AlertTriangle, Trash2 } from 'lucide-react'; // Added Trash2
+import { X, MessageSquareText, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import Modal from '../core/Modal.jsx';
-import IconButton from '../core/IconButton.jsx'; // Import IconButton
+import IconButton from '../core/IconButton.jsx';
 
 const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -30,11 +30,8 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         setLoadingSessions(true);
         setError('');
         try {
-            const data = await api.getChatSessions(); // Fetches { sessionId, preview, updatedAt, ... }
+            const data = await api.getChatSessions();
             setSessions(Array.isArray(data) ? data : []);
-            if (data.length === 0) {
-                toast.info("No past chat sessions found.");
-            }
         } catch (err) {
             toast.error("Failed to load chat sessions.");
             setError(err.message || "Could not fetch sessions.");
@@ -56,21 +53,17 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
 
         setSelectedSessionId(sessionId);
         setLoadingMessages(true);
-        setSessionMessages([]); // Clear previous preview
+        setSessionMessages([]);
         setError(''); 
         try {
-            // FIX: api.getChatHistory returns a full session object, not just messages.
             const sessionData = await api.getChatHistory(sessionId);
-
-            // FIX: Check if sessionData and sessionData.messages are valid before mapping.
-            const messagesArray = Array.isArray(sessionData.messages) ? sessionData.messages : [];
             
-            setSessionMessages(messagesArray.map(msg => ({
-                id: msg.id || msg._id || `hist-${Date.now()}-${Math.random()}`,
-                sender: msg.sender, // 'user' or 'bot'
-                text: msg.text, // Main text content
-                timestamp: msg.timestamp
-            })));
+            // --- THIS IS THE CORRECTED LOGIC ---
+            // We trust the API to send correctly formatted data with the 'sender' property.
+            const messagesArray = Array.isArray(sessionData.messages) ? sessionData.messages : [];
+            setSessionMessages(messagesArray);
+            // --- END OF CORRECTION ---
+
         } catch (err) {
             toast.error("Failed to load messages for this session.");
             setError(`Error loading messages: ${err.message}`);
@@ -89,22 +82,21 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
     };
     
     const handleDeleteSession = async (sessionIdToDelete, e) => {
-        e.stopPropagation(); // Prevent selecting the session
-        if (!window.confirm(`Are you sure you want to delete session ${sessionIdToDelete.substring(0,8)}...? This action cannot be undone.`)) return;
+        e.stopPropagation();
+        if (!window.confirm(`Are you sure you want to delete this session? This action cannot be undone.`)) return;
         
-        const toastId = toast.loading(`Deleting session ${sessionIdToDelete.substring(0,8)}... (mock)`);
-        // In a real implementation, you would make an API call here.
-        // For now, we simulate success and update the UI.
-        setTimeout(() => {
-            toast.success(`Mock: Session ${sessionIdToDelete.substring(0,8)} would be deleted.`, { id: toastId });
-            // FIX: Uncomment the optimistic UI update to remove the item from the list.
+        const toastId = toast.loading(`Deleting session...`);
+        try {
+            await api.deleteChatSession(sessionIdToDelete);
+            toast.success(`Session deleted.`, { id: toastId });
             setSessions(prev => prev.filter(s => s.sessionId !== sessionIdToDelete)); 
             if (selectedSessionId === sessionIdToDelete) {
                 setSelectedSessionId(null);
                 setSessionMessages([]);
             }
-        }, 1000);
-
+        } catch (err) {
+            toast.error(`Delete failed: ${err.response?.data?.message || err.message}`, { id: toastId });
+        }
     };
 
     return (
@@ -113,85 +105,60 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
                 <div className="w-full md:w-1/3 border-r border-border-light dark:border-border-dark pr-0 md:pr-2 overflow-y-auto custom-scrollbar">
                     <h3 className="text-sm font-semibold mb-2 text-text-light dark:text-text-dark px-1">Your Sessions</h3>
                     {loadingSessions && <div className="flex justify-center p-4"><Loader2 className="animate-spin text-primary" size={24}/></div>}
-                    {!loadingSessions && error && !sessions.length && <div className="text-red-500 text-xs p-2">{error}</div>}
-                    {!loadingSessions && !error && sessions.length === 0 && <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2">No past sessions found.</p>}
-                    
+                    {!loadingSessions && !sessions.length && <p className="text-xs text-text-muted-light dark:text-text-muted-dark p-2">No past sessions found.</p>}
                     <ul className="space-y-1">
                         {sessions.map(session => (
-                            <li key={session.sessionId}
-                                onClick={() => handleSessionSelectForPreview(session.sessionId)}
+                            <li key={session.sessionId} onClick={() => handleSessionSelectForPreview(session.sessionId)}
                                 className={`p-2.5 rounded-md cursor-pointer text-xs transition-colors group relative hover:shadow-md
-                                            ${selectedSessionId === session.sessionId 
-                                                ? 'bg-primary text-white dark:bg-primary-dark shadow-lg ring-2 ring-primary-dark' 
-                                                : 'bg-surface-light dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent hover:border-primary-light'}`}
-                            >
+                                            ${selectedSessionId === session.sessionId ? 'bg-primary text-white' : 'bg-surface-light dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'}`} >
                                 <div className="font-medium truncate" title={session.preview}>{session.preview || `Session ${session.sessionId.substring(0,8)}`}</div>
-                                <div className={`text-[0.7rem] ${selectedSessionId === session.sessionId ? 'text-blue-100 dark:text-blue-200' : 'text-text-muted-light dark:text-text-muted-dark'}`}>
+                                <div className={`text-[0.7rem] ${selectedSessionId === session.sessionId ? 'text-blue-200' : 'text-text-muted-light dark:text-text-muted-dark'}`}>
                                     {formatDate(session.updatedAt)} - {session.messageCount} msgs
                                 </div>
-                                <IconButton
-                                    icon={Trash2}
-                                    size="sm"
-                                    variant="ghost"
-                                    title="Delete session (Mock)"
-                                    className="absolute top-1 right-1 p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity !rounded-full hover:bg-red-500/10"
-                                    onClick={(e) => handleDeleteSession(session.sessionId, e)}
-                                />
+                                <IconButton icon={Trash2} size="sm" variant="ghost" title="Delete session"
+                                    className="absolute top-1 right-1 p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100"
+                                    onClick={(e) => handleDeleteSession(session.sessionId, e)} />
                             </li>
                         ))}
                     </ul>
                 </div>
 
                 <div className="w-full md:w-2/3 flex flex-col overflow-hidden mt-4 md:mt-0">
-                    <h3 className="text-sm font-semibold mb-2 text-text-light dark:text-text-dark">
-                        {selectedSessionId ? `Preview: ${selectedSessionId.substring(0,8)}...` : "Session Preview"}
-                    </h3>
+                    <h3 className="text-sm font-semibold mb-2 text-text-light dark:text-text-dark">Preview</h3>
                     <div className="flex-grow bg-gray-50 dark:bg-gray-800/50 p-3 rounded-md overflow-y-auto custom-scrollbar border border-border-light dark:border-border-dark">
                         {loadingMessages && <div className="flex justify-center p-4"><Loader2 className="animate-spin text-primary" size={24} /></div>}
-                        {!selectedSessionId && !loadingMessages && (
+                        
+                        <div className="space-y-3 flex flex-col">
+                            {sessionMessages.map(msg => {
+                                const isUser = msg.sender === 'user';
+                                return (
+                                    <div key={msg.id} className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`p-2.5 rounded-lg shadow-sm w-fit max-w-[90%] text-xs
+                                            ${isUser 
+                                                ? 'bg-blue-500 text-white' 
+                                                : 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
+                                            }`}>
+                                            <p className="font-semibold text-[0.7rem] mb-0.5">{isUser ? 'You' : 'AI Tutor'}</p>
+                                            <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                                            <p className={`text-[0.65rem] mt-1 text-right ${isUser ? 'opacity-70' : 'opacity-50'}`}>{formatDate(msg.timestamp)}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {!loadingMessages && !selectedSessionId && (
                             <div className="flex flex-col items-center justify-center h-full text-text-muted-light dark:text-text-muted-dark text-sm">
                                 <MessageSquareText size={40} className="mb-3 opacity-50" />
-                                <p>Select a session from the left to view its messages.</p>
+                                <p>Select a session to view its messages.</p>
                             </div>
                         )}
-                        {selectedSessionId && !loadingMessages && !error && sessionMessages.length === 0 && 
-                            <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark p-4">No messages in this session.</p>
-                        }
-                        {selectedSessionId && !loadingMessages && error && 
-                             <div className="flex flex-col items-center justify-center h-full text-red-500 dark:text-red-400 text-sm p-2">
-                                <AlertTriangle size={30} className="mb-2"/> {error}
-                            </div>
-                        }
-                        <div className="space-y-3">
-                            {sessionMessages.map(msg => (
-                                <div key={msg.id} 
-                                     className={`p-2.5 rounded-lg shadow-sm w-fit max-w-[90%] text-xs
-                                                ${msg.sender === 'user' 
-                                                    ? 'bg-blue-500 text-white ml-auto' 
-                                                    : 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100'}`}>
-                                    <p className="font-semibold text-[0.7rem] mb-0.5">{msg.sender === 'user' ? 'You' : 'AI Tutor'}</p>
-                                    <p className="whitespace-pre-wrap break-words">{msg.text}</p>
-                                    <p className="text-[0.65rem] opacity-70 mt-1 text-right">{formatDate(msg.timestamp)}</p>
-                                </div>
-                            ))}
-                        </div>
                     </div>
                 </div>
             </div>
             <div className="mt-6 pt-4 border-t border-border-light dark:border-border-dark flex justify-end gap-3">
-                <button 
-                    onClick={onClose} 
-                    className="btn-secondary !text-xs !py-1.5 !px-3"
-                >
-                    Close
-                </button>
-                <button 
-                    onClick={handleLoadSessionAndClose} 
-                    className="btn-primary !text-xs !py-1.5 !px-3"
-                    disabled={!selectedSessionId || loadingMessages || loadingSessions}
-                >
-                    Load Selected Session
-                </button>
+                <button onClick={onClose} className="btn-secondary !text-xs !py-1.5 !px-3">Cancel</button>
+                <button onClick={handleLoadSessionAndClose} className="btn-primary !text-xs !py-1.5 !px-3" disabled={!selectedSessionId || loadingMessages || loadingSessions}>Load Session</button>
             </div>
         </Modal>
     );

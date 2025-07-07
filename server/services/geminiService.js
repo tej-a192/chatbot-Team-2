@@ -1,15 +1,8 @@
 // server/services/geminiService.js
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
-const API_KEY = process.env.GEMINI_API_KEY;
+const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-1.5-flash";
-
-if (!API_KEY) {
-    console.error("FATAL ERROR: GEMINI_API_KEY is not available in the environment. Server should have exited.");
-    throw new Error("GEMINI_API_KEY is missing.");
-}
-
-const genAI = new GoogleGenerativeAI(API_KEY);
 
 const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192;
 const DEFAULT_MAX_OUTPUT_TOKENS_KG = 65536;
@@ -25,14 +18,22 @@ async function generateContentWithHistory(
     chatHistory,
     currentUserQuery,
     systemPromptText = null,
-    options = {} // Now accepts { maxOutputTokens }
+    options = {} // Now accepts { maxOutputTokens, apiKey }
 ) {
+    const apiKeyToUse = options.apiKey || FALLBACK_API_KEY;
+
+    if (!apiKeyToUse) {
+        console.error("FATAL ERROR: Gemini API key is not available for this request. Ensure server's GEMINI_API_KEY is set or user provides one.");
+        throw new Error("Gemini API key is missing. Please configure it.");
+    }
+
     try {
+        const genAI = new GoogleGenerativeAI(apiKeyToUse);
+
         if (typeof currentUserQuery !== 'string' || currentUserQuery.trim() === '') {
-            throw new Error("currentUserQuery must be a non-empty string.");
+             throw new Error("currentUserQuery must be a non-empty string.");
         }
 
-        // --- FIX: Correctly construct the generationConfig object ---
         const generationConfig = {
             temperature: 0.7,
             maxOutputTokens: options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
@@ -40,79 +41,73 @@ async function generateContentWithHistory(
         
         const model = genAI.getGenerativeModel({
             model: MODEL_NAME,
-            // Pass systemInstruction and safetySettings at the top level
-            systemInstruction: {
-                parts: [{ text: systemPromptText || "You are a helpful AI assistant." }]
-            },
+            systemInstruction: (systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '') ? 
+                { parts: [{ text: systemPromptText.trim() }] } : undefined,
             safetySettings: baseSafetySettings,
         });
-        // --- END FIX ---
 
         const historyForStartChat = (chatHistory || [])
             .map(msg => ({
-                role: msg.role,
-                parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{ text: '' }]
+                 role: msg.role, 
+                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: msg.text || ''}] 
             }))
             .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
-
+        
         const chat = model.startChat({
             history: historyForStartChat,
-            // Pass the generationConfig here, when starting the chat session
             generationConfig: generationConfig,
         });
 
-        console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. Max Output Tokens: ${generationConfig.maxOutputTokens}`);
-        console.log(`Current User Query to sendMessage: "${currentUserQuery.substring(0, 100)}..."`);
+        console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. System Prompt: ${!!systemPromptText}. Max Tokens: ${generationConfig.maxOutputTokens}`);
+        // console.log(`Current User Query to sendMessage (first 100): "${currentUserQuery.substring(0,100)}..."`); // Can be very long
 
         const result = await chat.sendMessage(currentUserQuery);
         const response = result.response;
         const candidate = response?.candidates?.[0];
 
         if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
-            const responseText = candidate?.content?.parts?.[0]?.text;
-            if (typeof responseText === 'string') {
-                if (candidate.finishReason === 'MAX_TOKENS') {
-                    console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
-                }
-                return responseText;
-            } else {
-                console.warn("Gemini response finished normally but text content is missing or invalid.", { finishReason: candidate?.finishReason, content: candidate?.content });
-                throw new Error("Received an empty or invalid response from the AI service.");
+            const responseText = candidate?.content?.parts?.[0]?.text || "";
+            if (candidate.finishReason === 'MAX_TOKENS') {
+                console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
             }
+            return responseText;
         } else {
-            const finishReason = candidate?.finishReason || 'Unknown';
-            const safetyRatings = candidate?.safetyRatings;
-            console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
-            let blockMessage = `AI response generation failed or was blocked.`;
-            if (finishReason === 'SAFETY') {
-                blockMessage += ` Reason: SAFETY.`;
-                if (safetyRatings) {
+             const finishReason = candidate?.finishReason || 'Unknown';
+             const safetyRatings = candidate?.safetyRatings;
+             console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
+             let blockMessage = `AI response generation failed or was blocked.`;
+             if (finishReason === 'SAFETY') {
+                 blockMessage += ` Reason: SAFETY.`;
+                 if (safetyRatings) {
                     const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
                     if (blockedCategories) blockMessage += ` Blocked Categories: ${blockedCategories}.`;
-                }
-            } else if (finishReason) {
-                blockMessage += ` Reason: ${finishReason}.`;
-            }
-            const error = new Error(blockMessage);
-            error.status = 400;
-            throw error;
+                 }
+             } else if (finishReason) {
+                 blockMessage += ` Reason: ${finishReason}.`;
+             }
+             const error = new Error(blockMessage);
+             error.status = 400;
+             throw error;
         }
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
-        let clientMessage = `AI Service Error: ${error.message}`;
-
-        // Keep specific error messages
+        let clientMessage = "Failed to get response from AI service.";
         if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
+        else if (error.message?.includes("API key not found")) clientMessage = "AI Service Error: API Key not found or invalid.";
+        else if (error.message?.includes("billing account")) clientMessage = "AI Service Error: Billing account issue with the provided API Key.";
+        else if (error.message?.includes("blocked due to safety")) clientMessage = "AI response blocked due to safety settings.";
+        else if (error.message?.includes("Invalid JSON payload")) clientMessage = "AI Service Error: Invalid request format sent to AI.";
         else if (error.message?.includes("User location is not supported")) clientMessage = "AI Service Error: User location is not supported for this model.";
+        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; 
         
         const enhancedError = new Error(clientMessage);
-        enhancedError.status = error.status || 500;
-        enhancedError.originalError = error;
+        enhancedError.status = error.status || 500; 
+        enhancedError.originalError = error; 
         throw enhancedError;
     }
 };
 
 module.exports = {
     generateContentWithHistory,
-    DEFAULT_MAX_OUTPUT_TOKENS_KG
+    DEFAULT_MAX_OUTPUT_TOKENS_KG 
 };

@@ -50,16 +50,23 @@ const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
             let codeToRender = mermaidCode.trim();
             
             // --- THIS IS THE FIX ---
-            // Regex to strip leading/trailing Markdown code fences.
-            // It handles ```mermaid, ```, and optional whitespace.
-            const fenceRegex = /^```(?:mermaid\b)?\s*([\s\S]*?)\s*```$/i;
+            // New, more robust regex to find the diagram code.
+            // It looks for a code block that CONTAINS a known diagram type (e.g., 'graph', 'mindmap').
+            // It is no longer anchored to the start (^) of the string, so it can find the
+            // block even if there's leading garbage or extra backticks from the LLM.
+            const fenceRegex = /```(?:mermaid)?\s*([\s\S]*?(?:graph|mindmap|flowchart|sequenceDiagram)[\s\S]*?)\s*```/i;
             const match = codeToRender.match(fenceRegex);
+
             if (match && match[1]) {
-                console.log("MindmapViewer: Stripped Markdown fences from input.");
-                codeToRender = match[1].trim(); // Use the captured group if fences were found
+                // If we found a fenced block, use its content.
+                codeToRender = match[1].trim();
+            } else {
+                // Fallback for cases where LLM might forget the fences entirely.
+                // We still trim to remove potential whitespace.
+                codeToRender = codeToRender.trim();
             }
             // --- END OF FIX ---
-            
+
             try {
                 if (typeof window.mermaid === 'undefined') {
                     throw new Error("Mermaid library failed to load or initialize properly.");
@@ -85,8 +92,8 @@ const MindmapViewer = forwardRef(({ mermaidCode }, ref) => {
                 const errorMsg = e.message || "Failed to render mind map. Invalid Mermaid syntax?";
                 setError(errorMsg);
                 if (svgContainerRef.current) {
-                    const codeSnippet = escapeHtml(codeToRender.substring(0, 1000) + (codeToRender.length > 1000 ? "..." : ""));
-                    svgContainerRef.current.innerHTML = `<div class="p-4 text-center text-red-500 dark:text-red-400 text-xs break-all"><strong>Error rendering:</strong> ${escapeHtml(errorMsg)}<br><strong class='mt-2 block'>Input Code (first 1000 chars):</strong><pre class='text-left text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded mt-1 whitespace-pre-wrap'>${codeSnippet}</pre></div>`;
+                    const codeSnippet = escapeHtml(codeToRender.substring(0, 200) + (codeToRender.length > 200 ? "..." : ""));
+                    svgContainerRef.current.innerHTML = `<div class="p-4 text-center text-red-500 dark:text-red-400 text-xs break-all"><strong>Error rendering:</strong> ${escapeHtml(errorMsg)}<br><strong class='mt-2 block'>Input Code (first 200 chars):</strong><pre class='text-left text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded mt-1 whitespace-pre-wrap'>${codeSnippet}</pre></div>`;
                 }
             } finally {
                 setIsLoading(false);

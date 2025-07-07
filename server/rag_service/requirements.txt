@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # flask
 # requests
 # faiss-cpu # or faiss-gpu
@@ -76,3 +77,45 @@ reportlab
 google-generativeai
 gTTS
 
+=======
+
+# server/rag_service/requirements.txt
+
+# --- Core and Web ---
+flask
+python-dotenv
+requests
+pydub
+
+# --- Document Parsing ---
+pdfplumber
+PyMuPDF
+pypdf
+python-docx
+python-pptx
+
+# --- AI & NLP ---
+google-generativeai
+langchain
+langchain-community
+langchain-huggingface
+ollama
+sentencepiece
+sentence_transformers
+spacy
+transformers
+
+# --- Vector & Graph Databases ---
+neo4j
+qdrant-client
+
+# --- Search & Utility ---
+arxiv
+duckduckgo-search
+opencv-python
+pytesseract
+soundfile
+
+# --- Final, Simple, and Free TTS ---
+gTTS
+>>>>>>> cb3980c292a0516451c7d44abf66797c94422238

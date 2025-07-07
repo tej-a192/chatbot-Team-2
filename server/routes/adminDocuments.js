@@ -1,3 +1,5 @@
+
+
 // server/routes/adminDocuments.js
 const express = require('express');
 const multer = require('multer');
@@ -10,7 +12,7 @@ const axios = require('axios');
 
 const router = express.Router();
 
-// --- Constants, Multer Config, Helpers (EXISTING CODE - no changes here for this step) ---
+// --- Constants & Multer Config ---
 const ADMIN_UPLOAD_DIR_BASE = path.join(__dirname, '..', 'assets', '_admin_uploads_');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const allowedAdminMimeTypes = {
@@ -68,12 +70,10 @@ async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
         return { success: false, message: `Python RAG call failed: ${errorMsg}`, text: null };
     }
 }
-// --- End Existing Code ---
 
 
-// @route   POST /api/admin/documents/upload (EXISTING - NO CHANGES FOR THIS STEP)
+// @route   POST /api/admin/documents/upload
 router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), async (req, res) => {
-    // ... (existing upload logic remains the same)
     if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded or file type rejected.' });
     }
@@ -99,22 +99,31 @@ router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), asy
         });
         await adminDocRecord.save();
         await fsPromises.unlink(tempServerPath).catch(e => console.error(`Admin Upload: Non-critical error deleting temp file ${tempServerPath} after DB save:`, e));
+        
         res.status(202).json({
             message: `Admin document '${originalName}' uploaded. Text extracted. Analysis initiated.`,
             filename: serverFilename, originalname: originalName,
         });
+
         const { Worker } = require('worker_threads');
         const adminAnalysisWorkerPath = path.resolve(__dirname, '..', 'workers', 'adminAnalysisWorker.js');
         if (fs.existsSync(adminAnalysisWorkerPath)) {
+            // --- THIS IS THE CRITICAL FIX ---
+            // The admin worker always uses the server's global API key.
             const worker = new Worker(adminAnalysisWorkerPath, {
                 workerData: {
                     adminDocumentId: adminDocRecord._id.toString(),
-                    originalName: originalName, textForAnalysis: textExtractionResult.text
+                    originalName: originalName,
+                    textForAnalysis: textExtractionResult.text,
+                    // NOTE: Admin analysis ALWAYS uses the server's Gemini key
+                    llmProvider: 'gemini', 
+                    apiKey: process.env.GEMINI_API_KEY // Pass the global key from .env
                 }
             });
             worker.on('message', (msg) => console.log(`Admin Analysis Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
             worker.on('error', (err) => console.error(`Admin Analysis Worker Error [Doc: ${originalName}]:`, err));
             worker.on('exit', (code) => console.log(`Admin Analysis Worker [Doc: ${originalName}] exited (code ${code}).`));
+            // --- END OF FIX ---
         } else {
             console.error(`Admin Upload: adminAnalysisWorker.js not found at ${adminAnalysisWorkerPath}.`);
         }
@@ -128,9 +137,8 @@ router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), asy
     }
 });
 
-// @route   GET /api/admin/documents (EXISTING - NO CHANGES FOR THIS STEP)
+// @route   GET /api/admin/documents
 router.get('/', fixedAdminAuthMiddleware, async (req, res) => {
-    // ... (existing list logic remains the same)
     try {
         const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
             .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap');
@@ -147,9 +155,8 @@ router.get('/', fixedAdminAuthMiddleware, async (req, res) => {
     }
 });
 
-// @route   DELETE /api/admin/documents/:serverFilename (EXISTING - NO CHANGES FOR THIS STEP)
+// @route   DELETE /api/admin/documents/:serverFilename
 router.delete('/:serverFilename', fixedAdminAuthMiddleware, async (req, res) => {
-    // ... (existing delete logic remains the same)
     const { serverFilename } = req.params;
     if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
     try {
@@ -161,9 +168,8 @@ router.delete('/:serverFilename', fixedAdminAuthMiddleware, async (req, res) => 
     }
 });
 
-// @route   GET /api/admin/documents/:serverFilename/analysis (EXISTING - NO CHANGES FOR THIS STEP)
+// @route   GET /api/admin/documents/:serverFilename/analysis
 router.get('/:serverFilename/analysis', fixedAdminAuthMiddleware, async (req, res) => {
-    // ... (existing analysis fetch by serverFilename logic remains the same)
     const { serverFilename } = req.params;
     if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
     try {
@@ -184,47 +190,25 @@ router.get('/:serverFilename/analysis', fixedAdminAuthMiddleware, async (req, re
     }
 });
 
-// --- NEW ROUTE FOR STEP 2 ---
 // @route   GET /api/admin/documents/by-original-name/:originalName/analysis
-// @desc    Get analysis data for a specific admin document by its originalName
-// @access  Admin Only (via fixedAdminAuthMiddleware)
 router.get('/by-original-name/:originalName/analysis', fixedAdminAuthMiddleware, async (req, res) => {
     const { originalName } = req.params;
     if (!originalName) {
         return res.status(400).json({ message: 'Original name parameter is required.' });
     }
-
     try {
         const decodedOriginalName = decodeURIComponent(originalName);
         const adminDoc = await AdminDocument.findOne({ originalName: decodedOriginalName })
-            .select('originalName filename analysis analysisUpdatedAt'); // Select necessary fields
+            .select('originalName filename analysis analysisUpdatedAt');
 
         if (!adminDoc) {
             return res.status(404).json({ message: `Admin document with original name '${decodedOriginalName}' not found.` });
         }
-
-        // Check if the analysis object or its specific fields are empty/null
-        if (!adminDoc.analysis ||
-            (!adminDoc.analysis.faq?.trim() && // Check if specific fields are empty strings after trim
-             !adminDoc.analysis.topics?.trim() &&
-             !adminDoc.analysis.mindmap?.trim())) {
-            return res.status(200).json({
-                originalName: adminDoc.originalName,
-                serverFilename: adminDoc.filename,
-                message: 'Analysis has not been generated or is empty for this document.',
-                analysis: { // Return a default empty structure
-                    faq: adminDoc.analysis?.faq || "",
-                    topics: adminDoc.analysis?.topics || "",
-                    mindmap: adminDoc.analysis?.mindmap || ""
-                },
-                analysisUpdatedAt: adminDoc.analysisUpdatedAt
-            });
-        }
-
+        
         res.status(200).json({
             originalName: adminDoc.originalName,
-            serverFilename: adminDoc.filename, // Include serverFilename for context if frontend needs it
-            analysis: adminDoc.analysis,       // This contains { faq, topics, mindmap } strings
+            serverFilename: adminDoc.filename,
+            analysis: adminDoc.analysis,
             analysisUpdatedAt: adminDoc.analysisUpdatedAt
         });
     } catch (error) {
@@ -232,6 +216,5 @@ router.get('/by-original-name/:originalName/analysis', fixedAdminAuthMiddleware,
         res.status(500).json({ message: 'Server error while retrieving admin document analysis by original name.' });
     }
 });
-
 
 module.exports = router;

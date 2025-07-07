@@ -5,23 +5,29 @@ const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { createOrUpdateSummary } = require('../services/summarizationService');
 const { processAgenticRequest } = require('../services/agentService');
+const { decrypt } = require('../utils/crypto');
 
 const router = express.Router();
 
-// --- @route   POST /api/chat/message ---
-router.post('/message', async (req, res) => {
-    // --- ADD THIS "TRUTH LOG" LINE ---
-    console.log('--- RAW REQUEST BODY RECEIVED ---', JSON.stringify(req.body, null, 2));
-    // --- END OF ADDED LINE ---
+function doesQuerySuggestRecall(query) {
+    const lowerCaseQuery = query.toLowerCase();
+    const recallKeywords = [
+        'my name', 'my profession', 'i am', 'i told you',
+        'remember', 'recall', 'remind me', 'go back to',
+        'previously', 'before', 'we discussed', 'we were talking about',
+        'earlier', 'yesterday', 'last session',
+        'what did i say', 'what was', 'what were', 'who am i',
+        'do you know', 'can you tell me again',
+        'continue with', 'let\'s continue', 'pick up where we left off',
+    ];
+    return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
+}
 
+router.post('/message', async (req, res) => {
     const {
-        query,
-        sessionId,
-        useWebSearch,
-        systemPrompt: clientProvidedSystemInstruction,
-        criticalThinkingEnabled,
-        documentContextName,
-        filter
+        query, sessionId, useWebSearch, useAcademicSearch,
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
     } = req.body;
     
     const userId = req.user._id;
@@ -39,7 +45,7 @@ router.post('/message', async (req, res) => {
     try {
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
-            User.findById(userId).select('preferredLlmProvider ollamaModel').lean()
+            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
         ]);
 
         const llmProvider = user?.preferredLlmProvider || 'gemini';
@@ -50,11 +56,17 @@ router.post('/message', async (req, res) => {
         
         const historyForLlm = [];
 
-        if (summaryFromDb) {
-            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT: Here is a summary of our conversation so far. Use it to inform your response but do not mention the summary itself in your answer:\n\n"""\n${summaryFromDb}\n"""` }] });
-            historyForLlm.push({ role: 'model', parts: [{ text: "Okay, I have reviewed the summary of our previous conversation. I will use this context for my next response. How can I help you now?" }] });
+        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
+            historyForLlm.push({ 
+                role: 'user', 
+                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
+            });
+            historyForLlm.push({ 
+                role: 'model', 
+                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
+            });
         }
-        
+
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
@@ -66,8 +78,16 @@ router.post('/message', async (req, res) => {
             filter,
             llmProvider,
             ollamaModel,
-            isWebSearchEnabled: !!useWebSearch
+            isWebSearchEnabled: !!useWebSearch,
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            userId: userId.toString(),
+            ollamaUrl: user.ollamaUrl
         };
+
+        if (llmProvider === 'gemini') {
+            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+            requestContext.apiKey = userApiKey;
+        }
 
         const agentResponse = await processAgenticRequest(
             query.trim(),
@@ -102,12 +122,9 @@ router.post('/message', async (req, res) => {
         
         const errorMessageForChat = {
             sender: 'bot', role: 'model',
-            parts: [{ text: `Error: ${clientMessage}` }],
-            text: `Error: ${clientMessage}`,
-            timestamp: new Date(),
-            thinking: `Agentic flow error: ${error.message}`,
-            references: [],
-            source_pipeline: 'error-agent-pipeline'
+            parts: [{ text: `Error: ${clientMessage}` }], text: `Error: ${clientMessage}`,
+            timestamp: new Date(), thinking: `Agentic flow error: ${error.message}`,
+            references: [], source_pipeline: 'error-agent-pipeline'
         };
         
         try {
@@ -123,8 +140,6 @@ router.post('/message', async (req, res) => {
     }
 });
 
-
-// --- Other Chat Routes (Unchanged) ---
 router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
@@ -132,23 +147,34 @@ router.post('/history', async (req, res) => {
     let summaryOfOldSession = "";
     if (previousSessionId) {
         try {
-            const oldSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
-            const user = await User.findById(userId).select('preferredLlmProvider ollamaModel').lean();
-            const llmProvider = user?.preferredLlmProvider || 'gemini';
-            const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+            const [oldSession, user] = await Promise.all([
+                ChatHistory.findOne({ sessionId: previousSessionId, userId: userId }),
+                User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean()
+            ]);
+
             if (oldSession && oldSession.messages?.length > 0) {
-                summaryOfOldSession = await createOrUpdateSummary(oldSession.messages, oldSession.summary, llmProvider, ollamaModel);
+                const llmProvider = user.preferredLlmProvider || 'gemini';
+                const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+                const userOllamaUrl = user.ollamaUrl || null;
+                let userApiKey = null;
+                if (llmProvider === 'gemini') {
+                    userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+                }
+                summaryOfOldSession = await createOrUpdateSummary(
+                    oldSession.messages, oldSession.summary, llmProvider, 
+                    ollamaModel, userApiKey, userOllamaUrl
+                );
             }
         } catch (summaryError) {
-            console.error(`!!! Could not summarize previous session ${previousSessionId}:`, summaryError);
+            console.error(`Could not summarize previous session ${previousSessionId}:`, summaryError);
         }
     }
+    
     try {
-        await ChatHistory.create({ userId: userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
-        res.status(200).json({ message: 'New session started.', newSessionId: newSessionId });
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
+        res.status(200).json({ message: 'New session started.', newSessionId });
     } catch (dbError) {
-        console.error(`!!! Failed to create new chat session ${newSessionId} in DB:`, dbError);
-        res.status(500).json({ message: 'Failed to create new session due to a server error.' });
+        res.status(500).json({ message: 'Failed to create new session.' });
     }
 });
 
@@ -163,7 +189,6 @@ router.get('/sessions', async (req, res) => {
         });
         res.status(200).json(sessionSummaries);
     } catch (error) {
-        console.error(`!!! Error fetching chat sessions for user ${req.user._id}:`, error);
         res.status(500).json({ message: 'Failed to retrieve chat sessions.' });
     }
 });
@@ -171,12 +196,25 @@ router.get('/sessions', async (req, res) => {
 router.get('/session/:sessionId', async (req, res) => {
     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
-        if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
+        if (!session) return res.status(404).json({ message: 'Chat session not found.' });
         const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
         res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
-        console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
-        res.status(500).json({ message: 'Failed to retrieve chat session details.' });
+        res.status(500).json({ message: 'Failed to retrieve chat session.' });
+    }
+});
+
+router.delete('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+    try {
+        const result = await ChatHistory.deleteOne({ sessionId: sessionId, userId: userId });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Chat session not found.' });
+        }
+        res.status(200).json({ message: 'Chat session deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error while deleting chat session.' });
     }
 });
 

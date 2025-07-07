@@ -1,5 +1,9 @@
 // server/config/promptTemplates.js
 
+// ==============================================================================
+// === DOCUMENT ANALYSIS PROMPTS (for FAQ, Topics, Mindmap) ===
+// ==============================================================================
+
 const ANALYSIS_THINKING_PREFIX_TEMPLATE = `**STEP 1: THINKING PROCESS (Recommended):**
 *   Before generating the analysis, outline your step-by-step plan in detail within \`<thinking>\` tags.
 *   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
@@ -33,17 +37,26 @@ const ANALYSIS_PROMPTS = {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
-**TASK:** Generate 5-7 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text.
+**TASK:** Generate a set of 10-15 Frequently Asked Questions (FAQs) with concise answers based ONLY on the provided text. To ensure a logical flow, you MUST organize the FAQs by the main themes found in the document.
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the first FAQ (after your detailed thinking process, if used). Do **NOT** include any preamble before the first 'Q:'.
-*   Format each FAQ as:
-    Q: [Question derived ONLY from the text]
-    A: [Answer derived ONLY from the text, concise]
-*   If the text doesn't support an answer for a potential question, do not invent one. Stick to what's explicitly stated or directly implied.
-*   Use Markdown for formatting within answers if appropriate (e.g., lists).
+1.  **Thematic Grouping:** Identify 5-6 major themes from the document. For each theme, create a Markdown H2 heading (e.g., \`## Core Concepts\`).
+2.  **Question as Sub-Heading:** Under each theme, each question MUST be a Markdown H3 heading (e.g., \`### 1. What is the primary subject?\`).
+3.  **Answer as Text:** The answer should follow directly after the question's heading as a standard paragraph.
+4.  **Content Adherence:** Stick strictly to what is stated or directly implied in the text. Do not invent information.
+5.  **Avoid Code Block Answer:** Strictly avoid the responses in a block of code. You need to give the Text with markdown which can be easily rendered on ui.
 
-**BEGIN OUTPUT (Start with 'Q:' or \`<thinking>\`):**
+**EXAMPLE OUTPUT STRUCTURE:**
+
+## Core Concepts
+
+### What is the primary subject of the document?
+The document is about the five-part process for improving communication skills, focusing on changing habits through self-assessment and a structured plan.
+
+### 1. What is the definition of a "transcription audit"?
+A transcription audit is the process of reviewing a transcribed video of oneself to highlight and become aware of non-words and filler words like "um," "ah," and "like."
+
+**BEGIN OUTPUT (Start with '##' for the first theme or \`<thinking>\`):**
 `;
             return baseTemplate;
         }
@@ -52,14 +65,22 @@ const ANALYSIS_PROMPTS = {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
             baseTemplate += `
-**TASK:** Identify the 5-8 most important topics discussed in the provided text. For each topic, provide a 1-2 sentence explanation based ONLY on the text.
+**TASK:** Identify the 5-7 most important topics or concepts from the provided text. For each topic, provide a clear explanation and include a specific example or key data point from the text to illustrate it.
 
 **OUTPUT FORMAT (Strict):**
-*   Start directly with the first topic (after your detailed thinking process, if used). Do **NOT** include any preamble before the first bullet point.
-*   Format as a Markdown bulleted list:
-    *   **Topic Name:** Brief explanation derived ONLY from the text content (1-2 sentences max).
+*   Use Markdown H3 (###) for each topic name for clear separation and structure.
+*   Avoid Code Block Answer: Strictly avoid the responses in a block of code. You need to give the Text with markdown which can be easily rendered on ui.
+*   Beneath each heading, provide:
+    *   An **Explanation:** of the topic in your own words, but based strictly on the text. Start this with the bolded label '**Explanation:**'.
+    *   A specific **Example from Text:**. Start this with the bolded label '**Example from Text:**' followed by a direct quote or a paraphrased key data point from the source document.
 
-**BEGIN OUTPUT (Start with '*   **' or \`<thinking>\`):**
+**EXAMPLE OUTPUT STRUCTURE:**
+
+### Topic 1: Name of the First Key Concept
+**Explanation:** A brief summary of what this concept is and why it's important, according to the document.
+**Example from Text:** "The document states that 'the reaction requires a temperature of over 100 million degrees Celsius' which highlights the extreme conditions needed."
+
+**BEGIN OUTPUT (Start with '###' for the first topic or \`<thinking>\`):**
 `;
             return baseTemplate;
         }
@@ -71,179 +92,235 @@ const ANALYSIS_PROMPTS = {
 **TASK:** Generate a mind map in Mermaid.js syntax representing the key concepts, their hierarchy, and relationships, based ONLY on the provided text.
 
 **CORE REQUIREMENTS FOR MERMAID SYNTAX:**
-1.  **Direction:** Use \`graph TD;\` (Top Down) or \`graph LR;\` (Left to Right).
-2.  **Nodes:**
-    *   Define unique, short, alphanumeric IDs for each node (e.g., \`A\`, \`B\`, \`C1\`).
-    *   **CRITICAL:** Node labels containing spaces, special characters, or long text MUST be enclosed in double quotes. Example: \`A["Main Idea from Text"]\`. Do NOT use single quotes or unquoted strings for multi-word labels.
-3.  **Edges (Connections):** Show relationships using \`-->\` (e.g., \`A --> B\`).
-4.  **Hierarchy:** The central theme should be the primary node. Sub-topics must branch from it.
-5.  **Content Focus:** The structure and content (node labels, relationships) must be **strictly** derived from the provided text. Do not invent concepts.
-6.  **Styling (Optional):** You can define and apply a simple style for the root node as shown in the example.
-7.  **No Extra Text:** The final output must be ONLY valid Mermaid code, starting with \`graph TD;\` or \`graph LR;\` after the thinking block.
+1.  **Direction:** Use \`graph TD;\` or \`mindmap\`.
+2.  **Nodes:** Define unique IDs and concise labels derived from the text.
+3.  **Edges:** Show relationships using \`-->\`.
+4.  **Hierarchy:** The central theme should be the root.
 
-**EXAMPLE OF THINKING & MERMAID OUTPUT (Follow this structure precisely):**
-<thinking>
-## Mermaid Mindmap Generation Plan
-1.  **Identify Central Theme:** The "Alpha Project". This is the root node.
-2.  **Identify Main Branches:** The project's two strategies: "Personalized Content" and "Interactive Features".
-3.  **Identify Sub-Branches:**
-    *   Under "Personalized Content": "Tailored Recommendations"
-    *   Under "Interactive Features": "Gamification", "Real-time Polls"
-4.  **Assign IDs & Labels:**
-    *   Root: \`A["Alpha Project"]\`
-    *   Branches: \`B["Personalized Content"]\`, \`C["Interactive Features"]\`
-    *   Sub-Branches: \`D["Tailored Recommendations"]\`, \`E["Gamification"]\`, \`F["Real-time Polls"]\`
-5.  **Define Connections:** \`A --> B\`, \`A --> C\`, \`B --> D\`, \`C --> E\`, \`C --> F\`.
-6.  **Construct Mermaid Code:** Assemble the parts into a valid block.
-</thinking>
+**OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):**
+*   Your response **MUST** start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`mindmap\`).
+*   **DO NOT** wrap your response in a Markdown code block like \`\`\`mermaid ... \`\`\`.
+*   **DO NOT** include any preamble, explanation, or any text before the first line of Mermaid code.
 
-graph TD;
-    classDef rootStyle fill:#DCEFFD,stroke:#3A77AB,stroke-width:2px,color:#333;
+**EXAMPLE OF A CORRECT OUTPUT:**
+mindmap
+  root((Main Idea))
+    Topic 1
+      Sub-Topic 1.1
+    Topic 2
 
-    A["Alpha Project"]:::rootStyle;
-    B["Personalized Content"];
-    C["Interactive Features"];
-    D["Tailored Recommendations"];
-    E["Gamification"];
-    F["Real-time Polls"];
-
-    A --> B;
-    A --> C;
-    B --> D;
-    C --> E;
-    C --> F;
-
-**BEGIN OUTPUT (Start with \`graph TD;\`, \`graph LR;\` or \`<thinking>\`):**
+**BEGIN OUTPUT (Start immediately with 'graph', 'mindmap', etc.):**
 `;
             return baseTemplate;
         }
     }
 };
 
-const KG_GENERATION_SYSTEM_PROMPT = `You are an expert academic in the field relevant to the provided text. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment.
-The output MUST be a valid JSON object with "nodes" and "edges" sections.
-
-... (rest of KG prompt is unchanged) ...
+const KG_GENERATION_SYSTEM_PROMPT = `You are an expert data architect. Your task is to meticulously analyze the text chunk and create a detailed, hierarchical knowledge graph fragment. The output MUST be a valid JSON object with "nodes" and "edges" sections. Do not add any text before or after the JSON.`;
+const KG_BATCH_USER_PROMPT_TEMPLATE = `For EACH text chunk below, create a JSON knowledge graph fragment. Return a single JSON array where each element is the graph for the corresponding chunk. The order must match.
+Here are the text chunks:
+{BATCHED_CHUNK_TEXTS_HERE}
 `;
 
-const KG_BATCH_USER_PROMPT_TEMPLATE = `
-You will be provided with a list of text chunks.
-... (rest of KG batch prompt is unchanged) ...
-`;
-
-const CHAT_MAIN_SYSTEM_PROMPT = `You are an expert AI assistant... (rest of main prompt is unchanged) ...`; 
-
-const WEB_SEARCH_CHAT_SYSTEM_PROMPT = `You are a helpful AI research assistant... (rest of web search prompt is unchanged) ...`;
-
+const CHAT_MAIN_SYSTEM_PROMPT = `You are an expert AI assistant. Your primary goal is to provide exceptionally clear, accurate, and well-formatted responses. Always prioritize provided context documents. You MUST remember personal details (like a user's name) if provided in the current conversation. Format responses with Markdown and KaTeX for math.`;
+const WEB_SEARCH_CHAT_SYSTEM_PROMPT = `You are a helpful AI research assistant. Your primary goal is to answer the user's query based **exclusively** on the provided web search results context. You MUST cite your sources at the end of each sentence that uses information, like so: "This is a fact [1]." and "This is another fact from two sources [2, 3]."`;
 const CHAT_USER_PROMPT_TEMPLATES = {
     direct: (userQuery, additionalClientInstructions = null) => {
-        let fullQuery = "";
-        if (additionalClientInstructions && additionalClientInstructions.trim() !== "") {
-            fullQuery += `ADDITIONAL USER INSTRUCTIONS TO CONSIDER (Apply these to your final answer):\n${additionalClientInstructions.trim()}\n\n---\nUSER QUERY:\n`;
-        } else {
-             fullQuery += `USER QUERY:\n`;
+        let fullQuery = `USER QUERY:\n${userQuery}`;
+        if (additionalClientInstructions) {
+            fullQuery = `ADDITIONAL INSTRUCTIONS:\n${additionalClientInstructions}\n\n---\n${fullQuery}`;
         }
-        fullQuery += userQuery;
         return fullQuery;
     },
     rag: (userQuery, ragContextString, additionalClientInstructions = null) => {
-        let fullQuery = "Carefully review and synthesize the information from the \"Context Documents\" provided below to answer the user's query. Your answer should be primarily based on these documents. Do NOT include any citation markers like [1], [2] etc. in your response text.\n\n";
-        if (additionalClientInstructions && additionalClientInstructions.trim() !== "") {
-            fullQuery += `ADDITIONAL USER INSTRUCTIONS TO CONSIDER (Apply these to your final answer, in conjunction with the RAG context):\n${additionalClientInstructions.trim()}\n\n---\n`;
+        let fullQuery = `Based on the provided "Context Documents", answer the user's query. Do not include citation markers like [1].\n\n--- Context Documents ---\n${ragContextString}\n--- End of Context ---\n\nUSER QUERY:\n${userQuery}`;
+        if (additionalClientInstructions) {
+            fullQuery = `ADDITIONAL INSTRUCTIONS:\n${additionalClientInstructions}\n\n---\n${fullQuery}`;
         }
-        fullQuery += "--- Context Documents ---\n";
-        fullQuery += ragContextString;
-        fullQuery += "\n--- End of Context ---\n\nUSER QUERY:\n" + userQuery;
         return fullQuery;
     }
 };
 
-// ==============================================================================
-// === AGENTIC FRAMEWORK PROMPTS - V3 (Hardened Logic) ===
-// ==============================================================================
-
 const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext) => {
-  const toolsFormatted = modelContext.available_tools.map(tool => 
-    `- Tool Name: "${tool.name}"\n  Description: ${tool.description}\n  Parameters: ${JSON.stringify(tool.parameters)}`
-  ).join('\n\n');
+  const userQueryForPrompt = requestContext.userQuery || "[User query not provided]";
+  
+  const requiredJsonFormat = (toolName) => `
+Your entire output MUST be a single, valid JSON object with a "tool_call" key.
+Do not provide any other text, explanation, or markdown formatting.
 
-  let contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- General Conversation Mode: No specific tool mode is active.
-`;
-
-  // --- REVISED LOGIC TO BE ABSOLUTELY EXPLICIT AND PRIORITIZED ---
-  // HIGHEST PRIORITY: If the user explicitly enables web search, this rule MUST be followed.
-  if (requestContext.isWebSearchEnabled) {
-      contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- **MODE ACTIVE: Web Search**
-- **UNBREAKABLE RULE #1:** The user has explicitly enabled "Web Search" mode. You **MUST** use the "web_search" tool to answer the query. Do not answer from your general knowledge.
-- **ACTION:** Use the "web_search" tool. The user's full query should be the 'query' parameter for the tool.
-`;
-  } 
-  // SECOND PRIORITY: If web search is not on, check if a document is selected.
-  else if (requestContext.documentContextName) {
-      contextualTriggersSection = `
---- CONTEXTUAL TRIGGERS ---
-- **MODE ACTIVE: Document RAG**
-- **CONTEXT:** A specific document is currently selected for discussion: "${requestContext.documentContextName}".
-- **UNBREAKABLE RULE #2:** Because a document is selected, you **MUST** use the "rag_search" tool to answer the user's query. This is mandatory for all questions, including "summarize this," "what is this about?", or any other general query.
-- **ACTION:** Use the "rag_search" tool. The user's full query should be the 'query' parameter for the tool.
-`;
+**JSON FORMAT:**
+\`\`\`json
+{
+  "tool_call": {
+    "tool_name": "${toolName}",
+    "parameters": {
+      "query": "${userQueryForPrompt}"
+    }
   }
-  // --- END REVISED LOGIC ---
+}
+\`\`\`
+  `;
+
+  if (requestContext.isAcademicSearchEnabled) {
+    return `
+You are a tool-routing agent. The user has **explicitly enabled the 'Academic Search' tool.**
+Your ONLY task is to output the JSON to call the \`academic_search\` tool with the user's query.
+This is not a suggestion. It is a mandatory instruction.
+
+**User's Query:** "${userQueryForPrompt}"
+
+${requiredJsonFormat('academic_search')}
+
+Provide the JSON to call the \`academic_search\` tool now.
+    `;
+  }
+  
+  if (requestContext.isWebSearchEnabled) {
+    return `
+You are a tool-routing agent. The user has **explicitly enabled the 'Web Search' tool.**
+Your ONLY task is to output the JSON to call the \`web_search\` tool with the user's query.
+This is not a suggestion. It is a mandatory instruction.
+
+**User's Query:** "${userQueryForPrompt}"
+
+${requiredJsonFormat('web_search')}
+
+Provide the JSON to call the \`web_search\` tool now.
+    `;
+  }
+
+  if (requestContext.documentContextName) {
+    return `
+You are a tool-routing agent. The user has selected a document named "${requestContext.documentContextName}".
+This means you **MUST** use the \`rag_search\` tool to answer questions about the document.
+Your ONLY task is to output the JSON to call the \`rag_search\` tool with the user's query.
+This is not optional.
+
+**User's Query:** "${userQueryForPrompt}"
+
+${requiredJsonFormat('rag_search')}
+
+Provide the JSON to call the \`rag_search\` tool now.
+    `;
+  }
 
   return `
-You are a master AI Tutor. Your defined role is: "${agenticContext.agent_role}".
-Your primary objectives are: ${agenticContext.agent_objectives.join(', ')}.
-Your base instructions are: "${agenticContext.base_instructions}"
+You are a "Router" agent. Your task is to analyze the user's query and decide which of two actions to take: 'web_search' or 'direct_answer'.
 
-${contextualTriggersSection}
+**CONTEXT FOR YOUR DECISION:**
+- **Current Mode:** Direct Chat. No specific tool has been pre-selected by the user.
+- **User's Query:** "${userQueryForPrompt}"
 
-You have access to the following tools to help you answer user queries:
---- AVAILABLE TOOLS ---
-${toolsFormatted}
---- END TOOLS ---
+**YOUR TASK:**
+Based on your analysis of the user's query, you MUST choose one action.
+- If the query asks for general knowledge, definitions, explanations, creative tasks, or concepts (like "what is X?", "explain Y"), your decision MUST be 'direct_answer'.
+- Only if the query explicitly asks for **very recent, real-time information** (e.g., "what is the weather today?", "latest news"), should you choose 'web_search'.
 
-Carefully analyze the user's query AND THE CONTEXTUAL TRIGGERS. Your decision MUST be based on the "UNBREAKABLE RULE" if one is present.
+Your entire output MUST be a single, valid JSON object with a "tool_call" key.
 
-**Decision Pathway:**
+- If your decision is 'web_search', format as:
+  \`\`\`json
+  { "tool_call": { "tool_name": "web_search", "parameters": { "query": "${userQueryForPrompt}" } } }
+  \`\`\`
+- If your decision is 'direct_answer', format as:
+  \`\`\`json
+  { "tool_call": null }
+  \`\`\`
 
-1.  **TOOL USE (Mandatory if Rule Exists):** If the CONTEXTUAL TRIGGERS section contains an "UNBREAKABLE RULE", you **MUST** follow it. Your *entire response* must be a single, valid JSON object with a 'tool_call' key. Do not add any other text.
+Provide your JSON decision now.
+  `;
+};
 
-    The required JSON format is:
-    {
-      "tool_call": {
-        "tool_name": "the_tool_name_from_the_rule",
-        "parameters": {
-          "query": "The user's original query text"
-        }
-      }
+const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
+    const formattingInstructions = `
+**Formatting Guidelines (MANDATORY):**
+- **Structure:** Use Markdown for headings, lists, bold text, and italics.
+- **Clarity:** Use the most appropriate combination of formatting elements to make your answer easy to read and understand.
+- **Tables:** If data is tabular, present it as a Markdown table.
+- **Code:** If the answer involves code, use fenced code blocks with language identifiers.
+`;
+
+    if (toolName === 'academic_search') {
+        return `
+You are an expert academic research assistant. Your ONLY task is to format the provided list of academic papers into a professional, easy-to-read, and highly useful briefing for a researcher.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Start with a TL;DR Summary:** Begin with a 1-2 sentence "Executive Summary" that synthesizes the main research trends or themes found across all the papers.
+2.  **Create Thematic Sections:** Group the papers by their core research theme (e.g., "Parameter-Efficient Fine-Tuning," "Model Compression," "AI Alignment"). Use a Markdown H2 heading (e.g., \`## Parameter-Efficient Fine-Tuning\`) for each theme.
+3.  **Format Each Paper as a Detailed Entry:** Under each theme, list the relevant papers. For each paper, you MUST include:
+    *   **Title:** The full title of the paper as a clickable Markdown link, in bold. Example: \`**[Mixout: Effective Regularization...](https://arxiv.org/abs/XXXX.XXXXX)**\`
+    *   **Authors:** A list of the primary authors.
+    *   **Source:** The name of the source (e.g., "ArXiv", "Semantic Scholar").
+    *   **Key Insight:** A concise, one-sentence summary of the paper's main finding or contribution, written in your own words.
+4.  **Handle No Results:** If the tool output indicates no papers were found, your entire response should be: "I was unable to find any relevant academic papers for your query."
+
+---
+**USER'S ORIGINAL QUERY:**
+${originalQuery}
+---
+**INFORMATION GATHERED BY TOOL (Raw list of paper data from 'academic_search'):**
+${toolOutput}
+---
+
+**YOUR FINAL, PROFESSIONAL RESEARCH BRIEFING:**
+`;
     }
 
-2.  **DIRECT ANSWER (Only if No Rule Exists):** If and only if there are no contextual triggers with an "UNBREAKABLE RULE", you may answer the user directly and conversationally.
+    if (toolName === 'web_search') {
+        return `
+You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
+Your final response MUST follow this two-part structure precisely:
+1.  A detailed, well-written answer to the user's query with inline citations [1].
+2.  **References Section:** A formatted list of the sources used.
 
-**Analyze the user's request now and decide your next step: either call a tool with the required JSON or answer directly.**
-`;
-};
+---
+**PART 1: MAIN ANSWER INSTRUCTIONS**
+-   Your answer **MUST** be based on the provided search results.
+-   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]."
+-   Be comprehensive and use rich Markdown formatting.
 
-const createSynthesizerPrompt = (originalQuery, toolOutput) => {
-  return `
-You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query.
-Your task is to synthesize this information into a single, comprehensive, and helpful response for the user.
-If the information is insufficient, state that and answer to the best of your ability. Do not mention that a tool was used. Just provide the final answer.
+---
+**PART 2: REFERENCES SECTION INSTRUCTIONS**
+-   After the main answer, add a horizontal rule (\`---\`) and a \`## References\` heading.
+-   Create a numbered list of all cited sources: \`[1] [Source Title](Source URL)\`.
 
---- USER'S ORIGINAL QUERY ---
+---
+**USER'S ORIGINAL QUERY:**
 ${originalQuery}
 
---- INFORMATION GATHERED BY TOOL ---
+**WEB SEARCH RESULTS:**
 ${toolOutput}
 
---- FINAL ANSWER ---
+**YOUR COMPLETE, FORMATTED RESPONSE:**
+`;
+    }
+
+    return `
+You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
+
+**Response Guidelines:**
+1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section.
+2.  **BE COMPREHENSIVE:** Do not just give a one-sentence answer. Elaborate on the information found.
+3.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used.
+4.  **DO NOT CITE:** Do not include citation markers like [1], [2] in your answer for this tool.
+
+${formattingInstructions}
+
+---
+**USER'S ORIGINAL QUERY:**
+${originalQuery}
+---
+**INFORMATION GATHERED BY TOOL (Output from '${toolName}'):**
+${toolOutput}
+---
+
+**FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
 `;
 };
 
+const DOCX_EXPANSION_PROMPT_TEMPLATE = `...`; // Unchanged
+const PPTX_EXPANSION_PROMPT_TEMPLATE = `...`; // Unchanged
+const PODCAST_SCRIPT_PROMPT_TEMPLATE = `...`; // Unchanged
 
 module.exports = {
     ANALYSIS_PROMPTS,
@@ -254,4 +331,7 @@ module.exports = {
     CHAT_USER_PROMPT_TEMPLATES,
     createAgenticSystemPrompt,
     createSynthesizerPrompt,
+    DOCX_EXPANSION_PROMPT_TEMPLATE,
+    PPTX_EXPANSION_PROMPT_TEMPLATE,
+    PODCAST_SCRIPT_PROMPT_TEMPLATE,
 };

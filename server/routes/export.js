@@ -4,12 +4,8 @@ const axios = require('axios');
 const router = express.Router();
 const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
+const { decrypt } = require('../utils/crypto');
 
-// Note: authMiddleware will be applied to this router in server.js
-
-// @route   POST /api/export/podcast
-// @desc    Generate a podcast from a document analysis
-// @access  Private
 router.post('/podcast', async (req, res) => {
     const { analysisContent, sourceDocumentName, podcastOptions } = req.body;
     const userId = req.user._id;
@@ -20,21 +16,32 @@ router.post('/podcast', async (req, res) => {
 
     try {
         let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+        
+        // Fetch the user to get their documents and encrypted API key
+        const user = await User.findById(userId).select('uploadedDocuments.filename uploadedDocuments.text +encryptedApiKey');
 
-        // Unified lookup for the document text
-        const user = await User.findById(userId).select('uploadedDocuments.filename uploadedDocuments.text');
+        // Check user's documents first
         const userDoc = user?.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-        if (userDoc && userDoc.text) {
+        if (userDoc?.text) {
             sourceDocumentText = userDoc.text;
+            if (user.encryptedApiKey) {
+                apiKeyForRequest = decrypt(user.encryptedApiKey);
+            }
         } else {
+            // Fallback to checking admin documents
             const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
-            if (adminDoc && adminDoc.text) {
+            if (adminDoc?.text) {
                 sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY; // Admin docs use server's key
             }
         }
         
         if (!sourceDocumentText) {
             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+        }
+        if (!apiKeyForRequest) {
+            return res.status(400).json({ message: "API Key for podcast generation is missing." });
         }
 
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
@@ -44,26 +51,33 @@ router.post('/podcast', async (req, res) => {
 
         const generationUrl = `${pythonServiceUrl}/export_podcast`;
         
-        console.log(`[Node Export] Forwarding podcast request to Python: ${generationUrl}`);
-        const fileResponse = await axios.post(generationUrl, {
+        console.log(`[Node Export] Forwarding HQ podcast request to Python with API Key.`);
+
+        const pythonPayload = {
             sourceDocumentText: sourceDocumentText,
-            outlineContent: analysisContent,
-            podcastOptions: podcastOptions
-        }, {
-            responseType: 'stream', // Crucial for handling file streams
-            timeout: 600000 // 10 minute timeout for script generation and TTS
+            analysisContent: analysisContent,
+            podcastOptions: podcastOptions,
+            api_key: apiKeyForRequest // <<< Pass the correct key
+        };
+        
+        const fileResponse = await axios.post(generationUrl, pythonPayload, {
+            responseType: 'stream',
+            timeout: 600000 // 10 minute timeout
         });
 
-        // Stream the audio file directly back to the client
-        const filename = `Study-Podcast-${sourceDocumentName.split('.')[0]}.mp3`;
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        const safeFilename = sourceDocumentName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_');
+        const finalFilename = `HQ_Podcast_${safeFilename}.mp3`;
+        
+        res.setHeader('Content-Disposition', `attachment; filename="${finalFilename}"`);
         res.setHeader('Content-Type', 'audio/mpeg');
         fileResponse.data.pipe(res);
 
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate podcast.";
         console.error(`[Node Export] Error proxying podcast generation: ${errorMsg}`);
-        res.status(500).json({ message: errorMsg });
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
     }
 });
 
