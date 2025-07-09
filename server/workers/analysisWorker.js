@@ -1,22 +1,18 @@
+
+
 // server/workers/analysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 const path = require('path');
 
-// Import models and services
 const User = require('../models/User');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService');
 const ollamaService = require('../services/ollamaService');
 const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
 
-// Load .env variables from the server's root directory for the worker
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-/**
- * Performs the actual analysis generation for FAQ, Topics, and Mindmap.
- * This function is designed to be called by the main 'run' function of the worker.
- */
 async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
     const logPrefix = `[Analysis Worker ${process.pid}, Doc: ${originalName}]`;
     console.log(`${logPrefix} Starting analysis. Using provider: ${llmProvider}`);
@@ -24,46 +20,30 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
-    // Validate credentials based on the selected provider
     if (llmProvider === 'gemini' && !apiKey) {
         const errorMessage = "Error: Analysis failed because no valid user Gemini API key was provided to the worker.";
         console.error(`${logPrefix} ${errorMessage}`);
-        // Return a failure object that can be stored in the DB
         return { 
             success: false, 
             results: { faq: errorMessage, topics: errorMessage, mindmap: errorMessage }
         };
     }
 
-    // Inner helper function to generate a single type of analysis
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
             console.log(`${logPrefix} Generating ${type} for '${originalName}'.`);
             const historyForLLM = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction provided." }] }];
             
-            let generatedText;
-            
-            // Prepare options object with user-specific credentials
             const llmOptions = { 
-                apiKey: apiKey,       // For Gemini
-                ollamaUrl: ollamaUrl  // For Ollama
+                apiKey,
+                ollamaUrl,
+                model: ollamaModel,
+                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT
             };
 
-            if (llmProvider === 'ollama') {
-                generatedText = await ollamaService.generateContentWithHistory(
-                    historyForLLM,
-                    promptContentForLLM,
-                    null,
-                    { ...llmOptions, model: ollamaModel, maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT }
-                );
-            } else { // Default to Gemini
-                generatedText = await geminiService.generateContentWithHistory(
-                    historyForLLM,
-                    promptContentForLLM,
-                    null,
-                    llmOptions
-                );
-            }
+            const generatedText = llmProvider === 'ollama'
+                ? await ollamaService.generateContentWithHistory(historyForLLM, promptContentForLLM, null, llmOptions)
+                : await geminiService.generateContentWithHistory(historyForLLM, promptContentForLLM, null, llmOptions);
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {
                 console.warn(`${logPrefix} LLM returned empty content for ${type}.`);
@@ -78,41 +58,24 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
         }
     }
 
-    // --- Generate FAQ, Topics, and Mindmap IN PARALLEL ---
     const analysisPromises = [
         generateSingleAnalysis('FAQ', ANALYSIS_PROMPTS.faq.getPrompt(textForAnalysis)),
         generateSingleAnalysis('Topics', ANALYSIS_PROMPTS.topics.getPrompt(textForAnalysis)),
         generateSingleAnalysis('Mindmap', ANALYSIS_PROMPTS.mindmap.getPrompt(textForAnalysis))
     ];
+    const outcomes = await Promise.allSettled(analysisPromises);
 
-    const [faqOutcome, topicsOutcome, mindmapOutcome] = await Promise.allSettled(analysisPromises);
-
-    // Process outcomes
-    if (faqOutcome.status === 'fulfilled') {
-        analysisResults.faq = faqOutcome.value.content;
-        if (!faqOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else {
-        analysisResults.faq = `Error generating FAQ: ${faqOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
-        allIndividualAnalysesSuccessful = false;
-    }
-
-    if (topicsOutcome.status === 'fulfilled') {
-        analysisResults.topics = topicsOutcome.value.content;
-        if (!topicsOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else {
-        analysisResults.topics = `Error generating Topics: ${topicsOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
-        allIndividualAnalysesSuccessful = false;
-    }
-
-    if (mindmapOutcome.status === 'fulfilled') {
-        analysisResults.mindmap = mindmapOutcome.value.content;
-        if (!mindmapOutcome.value.success) allIndividualAnalysesSuccessful = false;
-    } else {
-        analysisResults.mindmap = `Error generating Mindmap: ${mindmapOutcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
-        allIndividualAnalysesSuccessful = false;
-    }
+    outcomes.forEach((outcome, index) => {
+        const type = ['faq', 'topics', 'mindmap'][index];
+        if (outcome.status === 'fulfilled') {
+            analysisResults[type] = outcome.value.content;
+            if (!outcome.value.success) allIndividualAnalysesSuccessful = false;
+        } else {
+            analysisResults[type] = `Error generating ${type}: ${outcome.reason?.message?.substring(0,100) || 'Promise rejected'}`;
+            allIndividualAnalysesSuccessful = false;
+        }
+    });
     
-    // Update MongoDB with all results
     const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
     try {
         await User.updateOne(
@@ -128,16 +91,13 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
             }
         );
         console.log(`${logPrefix} Analysis results (Status: ${finalAnalysisStatus}) stored in DB.`);
-        return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with failures'}.`, results: analysisResults };
+        return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with some failures'}.` };
     } catch (dbError) {
         console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
-        return { success: false, message: `DB Error storing analysis: ${dbError.message}`, results: analysisResults };
+        return { success: false, message: `DB Error storing analysis: ${dbError.message}` };
     }
 }
 
-/**
- * Main worker function to orchestrate the entire process.
- */
 async function run() {
     const { userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
     let dbConnected = false;
@@ -145,22 +105,19 @@ async function run() {
     let finalMessageToParent = "Analysis worker encountered an issue.";
 
     try {
-        console.log(`[Analysis Worker ${process.pid}] Received task for: ${originalName}, User: ${userId}`);
-        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in worker environment.");
-        if (!userId || !originalName) throw new Error("Missing userId or originalName in workerData.");
+        if (!process.env.MONGO_URI || !userId || !originalName) {
+            throw new Error("Worker started with incomplete data (MONGO_URI, userId, or originalName missing).");
+        }
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
-        console.log(`[Analysis Worker ${process.pid}] DB Connected for ${originalName}.`);
 
         await User.updateOne(
             { _id: userId, "uploadedDocuments.filename": originalName },
             { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
         );
-        console.log(`[Analysis Worker ${process.pid}] Set analysisStatus to 'processing' for ${originalName}.`);
 
         if (!textForAnalysis || textForAnalysis.trim() === '') {
-            console.warn(`[Analysis Worker ${process.pid}] No text provided for analysis for ${originalName}. Marking as skipped.`);
             await User.updateOne(
                 { _id: userId, "uploadedDocuments.filename": originalName },
                 { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
@@ -168,11 +125,11 @@ async function run() {
             overallTaskSuccess = true;
             finalMessageToParent = "Analysis skipped: No text provided.";
         } else {
-            const analysisServiceResult = await performFullAnalysis(
+            const result = await performFullAnalysis(
                 userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
             );
-            overallTaskSuccess = analysisServiceResult.success;
-            finalMessageToParent = analysisServiceResult.message;
+            overallTaskSuccess = result.success;
+            finalMessageToParent = result.message;
         }
 
         if (parentPort) {
@@ -180,9 +137,8 @@ async function run() {
         }
 
     } catch (error) {
-        console.error(`[Analysis Worker ${process.pid}] Critical error processing '${originalName}':`, error);
-        finalMessageToParent = error.message || "Unknown critical error in Analysis worker.";
-        overallTaskSuccess = false;
+        console.error(`[Analysis Worker] Critical error for '${originalName}':`, error);
+        finalMessageToParent = error.message;
         if (dbConnected && userId && originalName) {
             try {
                 await User.updateOne(
@@ -190,7 +146,7 @@ async function run() {
                     { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
                 );
             } catch (dbUpdateError) {
-                console.error(`[Analysis Worker ${process.pid}] Failed to update status to 'failed_critical':`, dbUpdateError);
+                console.error(`[Analysis Worker] Failed to update status to 'failed_critical':`, dbUpdateError);
             }
         }
         if (parentPort) {
@@ -199,9 +155,8 @@ async function run() {
     } finally {
         if (dbConnected) {
             await mongoose.disconnect();
-            console.log(`[Analysis Worker ${process.pid}] DB Disconnected for ${originalName}.`);
         }
-        console.log(`[Analysis Worker ${process.pid}] Finished task for ${originalName}. Overall Success: ${overallTaskSuccess}`);
+        console.log(`[Analysis Worker] Finished task for ${originalName}. Success: ${overallTaskSuccess}`);
     }
 }
 

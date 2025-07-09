@@ -2,64 +2,60 @@
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 
+// --- Models and Services ---
 const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument'); // Import AdminDocument model
 const connectDB = require('../config/db');
 const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    const { chunksForKg: allInitialChunks, userId, originalName, llmProvider, ollamaModel } = workerData;
+    // --- Destructure all possible fields from workerData ---
+    const { chunksForKg, userId, originalName, llmProvider, ollamaModel, adminDocumentId } = workerData;
+    
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";
     const logPrefix = `[KG Worker ${process.pid}, Doc: ${originalName}]`;
 
     try {
-        console.log(`${logPrefix} Received task. User: ${userId}, Initial Chunks: ${allInitialChunks ? allInitialChunks.length : 0}`);
+        console.log(`${logPrefix} Received task. User/Context: '${userId}'. Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
         if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in KG worker environment.");
-        if (!userId || !originalName) throw new Error("Missing userId or originalName in KG workerData.");
+        if (!userId || !originalName) throw new Error("Missing userId or originalName in workerData.");
 
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
         console.log(`${logPrefix} DB Connected.`);
 
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
-            { $set: { "uploadedDocuments.$.kgStatus": "processing" } }
-        );
-        console.log(`${logPrefix} Status set to 'processing'.`);
+        // --- THIS IS THE CORE REFACTORING LOGIC ---
+        // Determine which model to update based on the presence of adminDocumentId
+        const isProcessingAdminDoc = !!adminDocumentId;
+        const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
+        const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
+        const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
 
-        if (!allInitialChunks || allInitialChunks.length === 0) {
-            console.log(`${logPrefix} No chunks provided for KG generation. Marking as skipped.`);
-            await User.updateOne(
-                { _id: userId, "uploadedDocuments.filename": originalName },
-                { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks", "uploadedDocuments.$.kgTimestamp": new Date() } }
-            );
+        await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "processing" } });
+        console.log(`${logPrefix} Status set to 'processing' for ${isProcessingAdminDoc ? 'admin document' : 'user document'}.`);
+
+        if (!chunksForKg || chunksForKg.length === 0) {
             finalMessage = "No chunks provided for KG generation.";
-            overallSuccess = true; // Not a failure of this worker's process
+            await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "skipped_no_chunks", kgTimestamp: new Date() } });
+            overallSuccess = true;
         } else {
-            const kgExtractionResult = await kgService.generateAndStoreKg(allInitialChunks, userId, originalName, llmProvider, ollamaModel);
+            const kgExtractionResult = await kgService.generateAndStoreKg(chunksForKg, userId, originalName, llmProvider, ollamaModel);
 
             if (kgExtractionResult && kgExtractionResult.success) {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: {
-                        "uploadedDocuments.$.kgStatus": "completed",
-                        "uploadedDocuments.$.kgNodesCount": kgExtractionResult.finalKgNodesCount,
-                        "uploadedDocuments.$.kgEdgesCount": kgExtractionResult.finalKgEdgesCount,
-                        "uploadedDocuments.$.kgTimestamp": new Date()
-                        }
-                    }
-                );
+                const updatePayload = {
+                    [isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus"]: "completed",
+                    [isProcessingAdminDoc ? "kgNodesCount" : "uploadedDocuments.$.kgNodesCount"]: kgExtractionResult.finalKgNodesCount,
+                    [isProcessingAdminDoc ? "kgEdgesCount" : "uploadedDocuments.$.kgEdgesCount"]: kgExtractionResult.finalKgEdgesCount,
+                    [isProcessingAdminDoc ? "kgTimestamp" : "uploadedDocuments.$.kgTimestamp"]: new Date()
+                };
+                await ModelToUpdate.updateOne(findQuery, { $set: updatePayload });
                 overallSuccess = true;
                 finalMessage = kgExtractionResult.message || "KG generation and storage completed successfully.";
-                console.log(`${logPrefix} SUCCESS: ${finalMessage}`);
             } else {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: { "uploadedDocuments.$.kgStatus": "failed_extraction" } }
-                );
-                finalMessage = (kgExtractionResult && kgExtractionResult.message) ? kgExtractionResult.message : "KG detailed extraction or storage failed.";
-                console.error(`${logPrefix} FAILED (Extraction/Store): ${finalMessage}`);
+                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_extraction" } });
+                finalMessage = kgExtractionResult?.message || "KG detailed extraction or storage failed.";
                 overallSuccess = false;
             }
         }
@@ -69,26 +65,23 @@ async function runKgGeneration() {
         }
 
     } catch (error) {
-        console.error(`${logPrefix} CRITICAL error:`, error.message, error.stack);
+        console.error(`${logPrefix} CRITICAL error:`, error);
         finalMessage = error.message || "Unknown critical error in KG worker.";
         overallSuccess = false;
-        if (dbConnected && userId && originalName) {
+        if (dbConnected && (userId || adminDocumentId)) {
             try {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: { "uploadedDocuments.$.kgStatus": "failed_critical" } }
-                );
+                const isProcessingAdminDoc = !!adminDocumentId;
+                const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
+                const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
+                const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
+                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_critical" } });
             } catch (dbUpdateError) {
                 console.error(`${logPrefix} DB update error on critical fail:`, dbUpdateError);
             }
         }
-        if (parentPort) {
-            parentPort.postMessage({ success: false, originalName, error: finalMessage });
-        }
     } finally {
         if (dbConnected) {
-            await mongoose.disconnect().catch(e => console.error(`${logPrefix} Error disconnecting DB:`, e));
-            console.log(`${logPrefix} DB Disconnected.`);
+            await mongoose.disconnect();
         }
         console.log(`${logPrefix} Finished task. Overall Success: ${overallSuccess}`);
     }
