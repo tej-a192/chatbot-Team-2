@@ -1,10 +1,5 @@
-<<<<<<< HEAD
-// frontend/src/components/layout/CenterPanel.jsx
-
-=======
 
 // frontend/src/components/layout/CenterPanel.jsx
->>>>>>> origin/skms
 import React, { useState, useEffect, useRef } from 'react';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
@@ -16,10 +11,7 @@ import toast from 'react-hot-toast';
 const THINKING_VARIANTS = ["🧠 Thinking...", "💭 Processing...", "🤔 Analyzing query..."];
 const RAG_ANALYSIS_VARIANTS = ["📚 Reviewing documents...", "🎯 Finding relevant info...", "🧩 Combining sources..."];
 const WEB_ANALYSIS_VARIANTS = ["🌐 Searching the web...", "🔎 Filtering results...", "📰 Reading latest info..."];
-<<<<<<< HEAD
-=======
 const ACADEMIC_ANALYSIS_VARIANTS = ["🎓 Searching academic papers...", "🔬 Reviewing studies...", "📚 Compiling research..."];
->>>>>>> origin/skms
 const GENERAL_ANALYSIS_VARIANTS = ["📊 Analyzing context...", "🔍 Searching knowledge base..."];
 const GENERATION_VARIANTS = ["✨ Generating response...", "🚀 Crafting answer...", "📝 Preparing explanation..."];
 
@@ -31,16 +23,10 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const { selectedLLM, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
 
     const [useWebSearch, setUseWebSearch] = useState(false);
-<<<<<<< HEAD
-    const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
-
-    const [botStatusPlaceholder, setBotStatusPlaceholder] = useState(null); // 🌟 Custom status bubble
-=======
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
 
     const [botStatusPlaceholder, setBotStatusPlaceholder] = useState(null);
->>>>>>> origin/skms
 
     const isMountedRef = useRef(true);
     const simulationControllerRef = useRef(new AbortController());
@@ -56,16 +42,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
 
     useEffect(() => {
         const documentContext = selectedSubject || selectedDocumentForAnalysis;
-<<<<<<< HEAD
-        if (documentContext && useWebSearch) {
-            setUseWebSearch(false);
-            toast("Web Search disabled automatically while a document is selected.", { icon: "ℹ️" });
-        }
-    }, [selectedDocumentForAnalysis, selectedSubject]);
-
-    const runStatusSimulation = async (isRagActive, isWebActive, signal) => {
-        let analysisVariants = isWebActive ? WEB_ANALYSIS_VARIANTS : (isRagActive ? RAG_ANALYSIS_VARIANTS : GENERAL_ANALYSIS_VARIANTS);
-=======
         if (documentContext && (useWebSearch || useAcademicSearch)) {
             setUseWebSearch(false);
             setUseAcademicSearch(false);
@@ -85,7 +61,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             analysisVariants = GENERAL_ANALYSIS_VARIANTS;
         }
 
->>>>>>> origin/skms
         const sequence = [
             { message: getRandomItem(THINKING_VARIANTS), duration: 1200 },
             { message: getRandomItem(analysisVariants), duration: 1500 },
@@ -122,11 +97,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         setMessages(prev => [...prev, userMessage]);
         setBotStatusPlaceholder("🧠 Thinking...");
 
-<<<<<<< HEAD
-        runStatusSimulation(isRagActive, useWebSearch, simulationControllerRef.current.signal);
-=======
         runStatusSimulation(isRagActive, useWebSearch, useAcademicSearch, simulationControllerRef.current.signal);
->>>>>>> origin/skms
 
         try {
             const response = await api.sendMessage({
@@ -137,10 +108,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 })),
                 sessionId: currentSessionId,
                 useWebSearch,
-<<<<<<< HEAD
-=======
                 useAcademicSearch,
->>>>>>> origin/skms
                 systemPrompt,
                 criticalThinkingEnabled,
                 documentContextName
@@ -148,11 +116,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
 
             if (response && response.reply) {
                 if (isMountedRef.current) {
-<<<<<<< HEAD
-                    setBotStatusPlaceholder(null); // Hide status
-=======
                     setBotStatusPlaceholder(null);
->>>>>>> origin/skms
                     setMessages(prev => [...prev, { ...response.reply, id: `bot-${Date.now()}` }]);
                 }
             } else {
@@ -210,11 +174,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 isLoading={isActuallySendingAPI}
                 useWebSearch={useWebSearch}
                 setUseWebSearch={setUseWebSearch}
-<<<<<<< HEAD
-=======
                 useAcademicSearch={useAcademicSearch} 
                 setUseAcademicSearch={setUseAcademicSearch}
->>>>>>> origin/skms
                 criticalThinkingEnabled={criticalThinkingEnabled}
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
             />
@@ -222,8 +183,4 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     );
 }
 
-<<<<<<< HEAD
 export default CenterPanel;
-=======
-export default CenterPanel;
->>>>>>> origin/skms

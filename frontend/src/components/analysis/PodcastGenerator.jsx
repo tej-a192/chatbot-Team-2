@@ -6,11 +6,7 @@ import { Headphones, ChevronDown, ChevronUp } from 'lucide-react';
 import Button from '../core/Button.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
-<<<<<<< HEAD
-function PodcastGenerator({ selectedDocumentFilename, isTargetAdminDoc }) {
-=======
 function PodcastGenerator({ selectedDocumentFilename }) {
->>>>>>> origin/skms
     const [isSectionOpen, setIsSectionOpen] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [podcastPurpose, setPodcastPurpose] = useState('review');
@@ -21,25 +17,6 @@ function PodcastGenerator({ selectedDocumentFilename }) {
             toast.error("Please select a document first.");
             return;
         }
-<<<<<<< HEAD
-
-        setIsLoading(true);
-        const toastId = toast.loading("Warming up the studio... Generating podcast script...");
-
-        try {
-            const { audioBlob, sourceDocumentName } = await api.generatePodcast({
-                // The analysisContent is a proxy for the 'study focus'. We'll pass the doc name.
-                analysisContent: `A detailed study session on the document: ${selectedDocumentFilename}`,
-                sourceDocumentName: selectedDocumentFilename,
-                podcastOptions: {
-                    studyPurpose: podcastPurpose,
-                    sessionLength: podcastLength,
-                }
-            });
-            
-            toast.loading("Synthesizing audio... this may take a moment.", { id: toastId });
-            
-=======
         setIsLoading(true);
         const toastId = toast.loading("Generating high-quality podcast script & audio. This may take a moment...");
         try {
@@ -51,26 +28,10 @@ function PodcastGenerator({ selectedDocumentFilename }) {
             
             toast.success("High-Quality Podcast is ready for download!", { id: toastId, duration: 5000 });
 
->>>>>>> origin/skms
             const url = window.URL.createObjectURL(audioBlob);
             const link = document.createElement('a');
             const safeFilename = sourceDocumentName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_');
             link.href = url;
-<<<<<<< HEAD
-            link.setAttribute('download', `Study_Podcast_${safeFilename}.mp3`);
-            document.body.appendChild(link);
-            
-            toast.success("Podcast ready for download!", { id: toastId, duration: 5000 });
-            link.click();
-            
-            link.parentNode.removeChild(link);
-            window.URL.revokeObjectURL(url);
-
-        } catch (err) {
-            const errorMessage = err.response?.data?.message || err.message || "Failed to generate podcast.";
-            toast.error(errorMessage, { id: toastId });
-            console.error("Podcast Generation Error:", err);
-=======
             link.setAttribute('download', `AI_Podcast_${safeFilename}.mp3`);
             document.body.appendChild(link);
             link.click();
@@ -79,7 +40,6 @@ function PodcastGenerator({ selectedDocumentFilename }) {
         } catch (err) {
             const errorMessage = err.response?.data?.message || err.message || "Failed to generate podcast.";
             toast.error(errorMessage, { id: toastId });
->>>>>>> origin/skms
         } finally {
             setIsLoading(false);
         }
@@ -87,41 +47,18 @@ function PodcastGenerator({ selectedDocumentFilename }) {
 
     return (
         <div className="card-base p-3">
-<<<<<<< HEAD
-            <div 
-                className="flex items-center justify-between cursor-pointer"
-                onClick={() => setIsSectionOpen(!isSectionOpen)}
-            >
-                <div className="flex items-center gap-2 text-sm font-medium text-text-light dark:text-text-dark">
-                    <Headphones size={16} className="text-accent" />
-                    <span className="flex-grow">Document Podcast Generator</span>
-=======
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setIsSectionOpen(!isSectionOpen)}>
                 <div className="flex items-center gap-2 text-sm font-medium text-text-light dark:text-text-dark">
                     <Headphones size={16} className="text-accent" />
                     <span className="flex-grow">HQ Podcast Generator</span>
->>>>>>> origin/skms
                 </div>
                 {isSectionOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
             </div>
             <AnimatePresence>
                 {isSectionOpen && (
-<<<<<<< HEAD
-                    <motion.div
-                        key="podcast-generator-content"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                        className="mt-2 pt-2 border-t border-border-light dark:border-border-dark overflow-hidden"
-                    >
-                        <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-3">
-                            Convert the entire selected document into a conversational audio study session.
-=======
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="mt-2 pt-2 border-t border-border-light dark:border-border-dark overflow-hidden">
                         <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-3">
                             Generate a high-quality, conversational audio study session from the selected document.
->>>>>>> origin/skms
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2 mb-3">
                             <div className="flex-1">
@@ -142,10 +79,6 @@ function PodcastGenerator({ selectedDocumentFilename }) {
                                 </select>
                             </div>
                         </div>
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/skms
                         <Button
                             onClick={handleGeneratePodcast}
                             variant="primary"
@@ -155,11 +88,7 @@ function PodcastGenerator({ selectedDocumentFilename }) {
                             disabled={!selectedDocumentFilename || isLoading}
                             title={!selectedDocumentFilename ? "Select a document first" : "Generate Podcast"}
                         >
-<<<<<<< HEAD
-                           {isLoading ? 'Generating...' : 'Generate Podcast'}
-=======
                            {isLoading ? 'Generating Audio...' : 'Generate High-Quality Podcast'}
->>>>>>> origin/skms
                         </Button>
                     </motion.div>
                 )}
@@ -168,9 +97,5 @@ function PodcastGenerator({ selectedDocumentFilename }) {
     );
 }
 
-<<<<<<< HEAD
-export default PodcastGenerator;
-=======
 export default PodcastGenerator;
 // This code defines a React component for generating podcasts from selected documents.
->>>>>>> origin/skms
