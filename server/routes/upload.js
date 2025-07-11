@@ -114,7 +114,6 @@ router.post('/', (req, res) => {
 
         const userId = req.user._id.toString();
         const { originalname: originalName, path: tempServerPath } = req.file;
-
         if (!tempServerPath) {
             return res.status(500).json({ message: "File upload failed, temporary path not created." });
         }

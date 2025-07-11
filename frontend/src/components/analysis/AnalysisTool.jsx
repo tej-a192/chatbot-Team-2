@@ -389,5 +389,4 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename, isT
     );
 }
 
-// FIX: Change the export name to match the old component's name
 export default AnalysisTool;
