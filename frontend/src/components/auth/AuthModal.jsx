@@ -4,10 +4,10 @@ import { useAuth } from '../../hooks/useAuth.jsx';
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import LLMSelection from './LLMSelection.jsx';
 import toast from 'react-hot-toast';
-import { LogIn, UserPlus, X, KeyRound, AtSign, AlertCircle, HardDrive } from 'lucide-react';
+import { LogIn, UserPlus, X, KeyRound, AtSign, AlertCircle, HardDrive, CheckSquare, Square } from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 function AuthModal({ isOpen, onClose }) {
     const { login, signup } = useAuth();
@@ -21,6 +21,7 @@ function AuthModal({ isOpen, onClose }) {
     const [ollamaUrl, setOllamaUrl] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [requestKeyFromAdmin, setRequestKeyFromAdmin] = useState(false); // New state for checkbox
     
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
 
@@ -31,6 +32,7 @@ function AuthModal({ isOpen, onClose }) {
             setPassword('');
             setApiKey('');
             setOllamaUrl('');
+            setRequestKeyFromAdmin(false); // Reset checkbox
             setLocalSelectedLLM(selectedLLM || 'gemini');
         } else {
             setIsLoginView(true);
@@ -47,8 +49,8 @@ function AuthModal({ isOpen, onClose }) {
         if (password.length < 6) {
             return setError("Password must be at least 6 characters long.");
         }
-        if (!isLoginView && localSelectedLLM === 'gemini' && !apiKey.trim()) {
-            return setError("Gemini API Key is required.");
+        if (!isLoginView && localSelectedLLM === 'gemini' && !apiKey.trim() && !requestKeyFromAdmin) {
+            return setError("Gemini API Key is required, or request one from the admin.");
         }
         if (!isLoginView && localSelectedLLM === 'ollama' && !ollamaUrl.trim()) {
             return setError("Ollama URL is required.");
@@ -75,8 +77,13 @@ function AuthModal({ isOpen, onClose }) {
                     email, password,
                     preferredLlmProvider: localSelectedLLM,
                 };
+
                 if (localSelectedLLM === 'gemini') {
-                    signupData.apiKey = apiKey;
+                    if (requestKeyFromAdmin) {
+                        signupData.requestAdminKey = true;
+                    } else {
+                        signupData.apiKey = apiKey;
+                    }
                 } else if (localSelectedLLM === 'ollama') {
                     signupData.ollamaUrl = ollamaUrl;
                 }
@@ -136,11 +143,34 @@ function AuthModal({ isOpen, onClose }) {
                             
                             <div style={{ display: localSelectedLLM === 'gemini' ? 'block' : 'none' }}>
                                 <motion.div key="gemini-input" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                                    <label htmlFor="api-key-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Gemini API Key <span className="text-red-500">*</span></label>
-                                    <div className={inputWrapperClass}>
-                                        <KeyRound className={inputIconClass} />
-                                        <input type="password" id="api-key-input" className={inputFieldStyledClass} placeholder="Enter your Gemini API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} required={localSelectedLLM === 'gemini'} disabled={loading} />
+                                    <div className="flex items-center mb-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRequestKeyFromAdmin(!requestKeyFromAdmin)}
+                                            className="flex items-center text-sm text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors"
+                                            disabled={loading}
+                                        >
+                                            {requestKeyFromAdmin ? <CheckSquare size={16} className="text-primary mr-2" /> : <Square size={16} className="mr-2" />}
+                                            Request API Key from Admin
+                                        </button>
                                     </div>
+                                    <AnimatePresence>
+                                        {!requestKeyFromAdmin && (
+                                            <motion.div
+                                                key="api-key-field"
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <label htmlFor="api-key-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Gemini API Key <span className="text-red-500">*</span></label>
+                                                <div className={inputWrapperClass}>
+                                                    <KeyRound className={inputIconClass} />
+                                                    <input type="password" id="api-key-input" className={inputFieldStyledClass} placeholder="Enter your Gemini API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} required={!requestKeyFromAdmin && localSelectedLLM === 'gemini'} disabled={loading} />
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </motion.div>
                             </div>
                         

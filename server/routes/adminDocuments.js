@@ -5,12 +5,87 @@ const path = require('path');
 const fs = require('fs');
 const fsPromises = fs.promises;
 const AdminDocument = require('../models/AdminDocument');
-const { fixedAdminAuthMiddleware } = require('../middleware/fixedAdminAuthMiddleware');
 const axios = require('axios');
+const User = require('../models/User');
+const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
 
-// --- Constants & Multer Config (unchanged) ---
+// --- API Key Management Routes ---
+
+// @route   GET /api/admin/key-requests
+// @desc    Get all users with a pending API key request
+router.get('/key-requests', async (req, res) => {
+    try {
+        const requests = await User.find({ apiKeyRequestStatus: 'pending' })
+            .select('email profile createdAt')
+            .sort({ createdAt: -1 });
+        res.json(requests);
+    } catch (error) {
+        console.error('Error fetching API key requests:', error);
+        res.status(500).json({ message: 'Server error while fetching requests.' });
+    }
+});
+
+// @route   POST /api/admin/key-requests/approve
+// @desc    Approve a user's API key request
+router.post('/key-requests/approve', async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+        return res.status(400).json({ message: 'User ID is required.' });
+    }
+
+    try {
+        const serverApiKey = process.env.GEMINI_API_KEY;
+        if (!serverApiKey) {
+            return res.status(500).json({ message: 'Server-side GEMINI_API_KEY is not configured.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+        
+        user.encryptedApiKey = serverApiKey; // pre-save hook handles encryption
+        user.apiKeyRequestStatus = 'approved';
+        user.preferredLlmProvider = 'gemini';
+        
+        await user.save();
+
+        res.json({ message: `API key request for ${user.email} has been approved.` });
+    } catch (error) {
+        console.error(`Error approving API key for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while approving request.' });
+    }
+});
+
+// @route   POST /api/admin/key-requests/reject
+// @desc    Reject a user's API key request
+router.post('/key-requests/reject', async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+        return res.status(400).json({ message: 'User ID is required.' });
+    }
+
+    try {
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        user.apiKeyRequestStatus = 'rejected';
+        await user.save();
+
+        res.json({ message: `API key request for ${user.email} has been rejected.` });
+    } catch (error) {
+        console.error(`Error rejecting API key for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while rejecting request.' });
+    }
+});
+
+
+// --- Document Management Routes ---
+
 const ADMIN_UPLOAD_DIR_BASE = path.join(__dirname, '..', 'assets', '_admin_uploads_');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const allowedAdminMimeTypes = {
@@ -39,7 +114,6 @@ const adminStorage = multer.diskStorage({
         cb(null, `${timestamp}-${sanitizedBaseName}${fileExt}`);
     }
 });
-
 const adminFileFilter = (req, file, cb) => {
     const fileExt = path.extname(file.originalname).toLowerCase();
     const mimeType = file.mimetype.toLowerCase();
@@ -51,9 +125,7 @@ const adminFileFilter = (req, file, cb) => {
         cb(error, false);
     }
 };
-
 const adminUpload = multer({ storage: adminStorage, fileFilter: adminFileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-
 async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
@@ -80,7 +152,6 @@ async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
         return { success: false, message: `Python RAG call failed: ${errorMsg}`, text: null, chunksForKg: [] };
     }
 }
-
 async function callPythonDeletionEndpoint(method, endpointPath, userId, originalName) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || 'http://localhost:5000';
     const deleteUrl = `${pythonServiceUrl.replace(/\/$/, '')}${endpointPath}`;
@@ -95,8 +166,8 @@ async function callPythonDeletionEndpoint(method, endpointPath, userId, original
     }
 }
 
-// --- MODIFIED TO TRIGGER KG WORKER CORRECTLY ---
-router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), async (req, res) => {
+// @route   POST /api/admin/documents/upload
+router.post('/documents/upload', adminUpload.single('file'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded or file type rejected.' });
     }
@@ -125,8 +196,6 @@ router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), asy
         });
 
         const { Worker } = require('worker_threads');
-
-        // Trigger Analysis Worker
         const analysisWorker = new Worker(path.resolve(__dirname, '..', 'workers', 'adminAnalysisWorker.js'), {
             workerData: {
                 adminDocumentId: adminDocRecord._id.toString(),
@@ -135,15 +204,14 @@ router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), asy
         });
         analysisWorker.on('error', (err) => console.error(`Admin Analysis Worker Error [Doc: ${originalName}]:`, err));
 
-        // --- CORRECTLY TRIGGER THE EXISTING KG WORKER ---
         if (ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
             const kgWorker = new Worker(path.resolve(__dirname, '..', 'workers', 'kgWorker.js'), {
                 workerData: {
-                    adminDocumentId: adminDocRecord._id.toString(), // Pass the specific ID for an admin doc
-                    userId: "admin", // The consistent ID for admin KG data
+                    adminDocumentId: adminDocRecord._id.toString(),
+                    userId: "admin",
                     originalName: originalName,
                     chunksForKg: ragResult.chunksForKg,
-                    llmProvider: 'gemini' // Admin tasks use the server's default provider
+                    llmProvider: 'gemini'
                 }
             });
             kgWorker.on('error', (err) => console.error(`Admin KG Worker Error [Doc: ${originalName}]:`, err));
@@ -154,15 +222,15 @@ router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), asy
 
     } catch (error) {
         console.error(`Admin Upload: Overall error for '${originalName || req.file?.originalname}':`, error);
-        if (tempServerPath) await fsPromises.unlink(tempServerPath).catch(() => {});
+        if (tempServerPath && fs.existsSync(tempServerPath)) await fsPromises.unlink(tempServerPath).catch(() => {});
         if (!res.headersSent) {
             res.status(500).json({ message: 'Server error during admin document upload.' });
         }
     }
 });
 
-// Other routes (GET, DELETE, etc.) remain the same...
-router.get('/', fixedAdminAuthMiddleware, async (req, res) => {
+// @route   GET /api/admin/documents
+router.get('/documents', async (req, res) => {
     try {
         const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
             .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap');
@@ -179,7 +247,8 @@ router.get('/', fixedAdminAuthMiddleware, async (req, res) => {
     }
 });
 
-router.delete('/:serverFilename', fixedAdminAuthMiddleware, async (req, res) => {
+// @route   DELETE /api/admin/documents/:serverFilename
+router.delete('/documents/:serverFilename', async (req, res) => {
     const { serverFilename } = req.params;
     if (!serverFilename) {
         return res.status(400).json({ message: 'Server filename is required.' });
@@ -197,13 +266,14 @@ router.delete('/:serverFilename', fixedAdminAuthMiddleware, async (req, res) => 
         await callPythonDeletionEndpoint('DELETE', `/kg/${userId}/${encodeURIComponent(originalName)}`, userId, originalName);
         await AdminDocument.deleteOne({ _id: docToDelete._id });
 
-        res.status(200).json({ message: `Admin document '${originalName}' deleted.` });
+        res.status(200).json({ message: `Admin document '${originalName}' and all associated data deleted.` });
     } catch (error) {
         res.status(500).json({ message: 'Server error during admin document deletion.' });
     }
 });
 
-router.get('/:serverFilename/analysis', fixedAdminAuthMiddleware, async (req, res) => {
+// @route   GET /api/admin/documents/:serverFilename/analysis
+router.get('/documents/:serverFilename/analysis', async (req, res) => {
     const { serverFilename } = req.params;
     if (!serverFilename) return res.status(400).json({ message: 'Server filename parameter is required.' });
     try {
@@ -219,7 +289,8 @@ router.get('/:serverFilename/analysis', fixedAdminAuthMiddleware, async (req, re
     }
 });
 
-router.get('/by-original-name/:originalName/analysis', fixedAdminAuthMiddleware, async (req, res) => {
+// @route   GET /api/admin/documents/by-original-name/:originalName/analysis
+router.get('/documents/by-original-name/:originalName/analysis', async (req, res) => {
     const { originalName } = req.params;
     if (!originalName) return res.status(400).json({ message: 'Original name parameter is required.' });
     try {
@@ -239,6 +310,5 @@ router.get('/by-original-name/:originalName/analysis', fixedAdminAuthMiddleware,
         res.status(500).json({ message: 'Server error while retrieving analysis by original name.' });
     }
 });
-
 
 module.exports = router;

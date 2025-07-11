@@ -31,6 +31,11 @@ const UserSchema = new mongoose.Schema({
     type: ProfileSchema,
     default: () => ({})
   },
+  apiKeyRequestStatus: {
+    type: String,
+    enum: ['none', 'pending', 'approved', 'rejected'],
+    default: 'none', // Default for users who provide their own key or haven't requested
+  },
   encryptedApiKey: { 
     type: String,
     select: false, 

@@ -11,8 +11,10 @@ const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
 // --- @route   POST /api/auth/signup ---
 router.post('/signup', async (req, res) => {
-  // 1. Destructure all possible fields from the request body
-  const { email, password, apiKey, ollamaUrl, preferredLlmProvider } = req.body;
+  // --- FIX START ---
+  // 1. Destructure the 'requestAdminKey' field from the request body.
+  const { email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey } = req.body;
+  // --- FIX END ---
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required.' });
@@ -24,10 +26,13 @@ router.post('/signup', async (req, res) => {
      return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
   }
 
-  // 2. Validate provider-specific fields
-  if (preferredLlmProvider === 'gemini' && (!apiKey || apiKey.trim() === '')) {
-    return res.status(400).json({ message: 'A Gemini API Key is required when Gemini is selected.' });
+  // --- FIX START ---
+  // 2. Adjust validation logic: An API key is only required if the user *doesn't* request one from the admin.
+  if (preferredLlmProvider === 'gemini' && !requestAdminKey && (!apiKey || apiKey.trim() === '')) {
+    return res.status(400).json({ message: 'A Gemini API Key is required when one is not being requested from the admin.' });
   }
+  // --- FIX END ---
+  
   if (preferredLlmProvider === 'ollama' && (!ollamaUrl || ollamaUrl.trim() === '')) {
     return res.status(400).json({ message: 'An Ollama URL is required when Ollama is selected.' });
   }
@@ -38,15 +43,17 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // 3. Create a new user with conditional logic for credentials
+    // --- FIX START ---
+    // 3. Create the new user, correctly setting the apiKeyRequestStatus and encryptedApiKey based on the flag.
     const newUser = new User({
       email,
-      password, // Password will be hashed by the pre-save hook
+      password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
-      // Only save the credential that matches the chosen provider
-      encryptedApiKey: (preferredLlmProvider === 'gemini') ? apiKey : null,
+      apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
+      encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
     });
+    // --- FIX END ---
     
     await newUser.save();
 

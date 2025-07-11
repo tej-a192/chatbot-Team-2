@@ -1,5 +1,3 @@
-
-
 // server/server.js
 const dotenv = require('dotenv');
 dotenv.config();
@@ -16,6 +14,7 @@ const connectDB = require('./config/db');
 const { getLocalIPs } = require('./utils/networkUtils');
 const { performAssetCleanup } = require('./utils/assetCleanup');
 const { authMiddleware } = require('./middleware/authMiddleware');
+const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware');
 
 // --- Route Imports ---
 const networkRoutes = require('./routes/network');
@@ -25,7 +24,7 @@ const chatRoutes = require('./routes/chat');
 const uploadRoutes = require('./routes/upload');
 const filesRoutes = require('./routes/files');
 const analysisRoutes = require('./routes/analysis');
-const adminDocsRoutes = require('./routes/adminDocuments');
+const adminApiRoutes = require('./routes/adminDocuments'); // Renamed for clarity
 const subjectsRoutes = require('./routes/subjects');
 const generationRoutes = require('./routes/generation');
 const exportRoutes = require('./routes/export');
@@ -55,9 +54,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.get('/', (req, res) => res.send('AI Tutor Backend API is running...'));
 app.use('/api/network', networkRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/admin/documents', adminDocsRoutes);
 
-// All subsequent routes are protected by the authMiddleware
+// --- Admin Routes ---
+// Apply the fixed admin auth middleware to the single admin router.
+app.use('/api/admin', fixedAdminAuthMiddleware, adminApiRoutes);
+
+// All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware); 
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
