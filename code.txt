@@ -1548,6 +1548,7 @@ function PodcastGenerator({ selectedDocumentFilename }) {
 
 export default PodcastGenerator;
 // This code defines a React component for generating podcasts from selected documents.
+
 ```
 
 `frontend/src/components/analysis/RightPanel.jsx`
@@ -2582,6 +2583,63 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 export default MessageBubble;
 ```
 
+`frontend/src/components/chat/ThinkingDropdown.jsx`
+
+```javascript
+// frontend/src/components/chat/ThinkingDropdown.jsx
+import React, { useState } from 'react';
+import { ChevronDown, BrainCircuit } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+function ThinkingDropdown({ children, isStreaming }) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+        <div className="text-xs border border-border-light dark:border-border-dark rounded-md bg-surface-light/50 dark:bg-surface-dark/50 shadow-sm mt-1.5 w-full">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between p-2 text-left text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors rounded-t-md"
+                aria-expanded={isOpen}
+            >
+                <div className="flex items-center gap-2 font-medium">
+                    <BrainCircuit size={14} />
+                    <span className="flex-grow">Thinking Process</span>
+                </div>
+                {/* Shimmer effect for when streaming is active */}
+                {isStreaming && (
+                    <div className="relative w-20 h-4 ml-auto mr-2 overflow-hidden rounded bg-gray-200 dark:bg-gray-600">
+                        <div className="shimmer-animation"></div>
+                    </div>
+                )}
+                <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+            <AnimatePresence initial={false}>
+                {isOpen && (
+                    <motion.div
+                        key="content"
+                        initial="collapsed"
+                        animate="open"
+                        exit="collapsed"
+                        variants={{
+                            open: { opacity: 1, height: 'auto' },
+                            collapsed: { opacity: 0, height: 0 }
+                        }}
+                        transition={{ duration: 0.3, ease: 'easeInOut' }}
+                        className="overflow-hidden"
+                    >
+                        <div className="p-2.5 border-t border-border-light dark:border-border-dark bg-white dark:bg-gray-800 rounded-b-md">
+                            {children}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+export default ThinkingDropdown;
+```
+
 `frontend/src/components/common/ThemeToggle.jsx`
 
 ```javascript
@@ -3510,6 +3568,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
 }
 
 export default CenterPanel;
+
 ```
 
 `frontend/src/components/layout/LeftCollapsedNav.jsx`
@@ -4857,6 +4916,53 @@ export const useTheme = () => {
         throw new Error('useTheme must be used within an AppStateProvider');
     }
     return { theme: context.theme, toggleTheme: context.toggleTheme };
+};
+```
+
+`frontend/src/hooks/useTypingEffect.js`
+
+```javascript
+// frontend/src/hooks/useTypingEffect.js
+import { useState, useEffect, useRef } from 'react';
+
+/**
+ * A custom hook to create a typing animation effect for text.
+ * @param {string} textToType The full string that should be typed out.
+ * @param {number} [speed=20] The delay in milliseconds between each character.
+ * @param {function} [onComplete] An optional callback to run when typing is finished.
+ * @returns {string} The currently displayed text (which grows over time).
+ */
+export const useTypingEffect = (textToType, speed = 20, onComplete) => {
+    const [displayedText, setDisplayedText] = useState('');
+    const index = useRef(0);
+    const onCompleteRef = useRef(onComplete);
+
+    // Keep the onComplete callback reference fresh
+    useEffect(() => {
+        onCompleteRef.current = onComplete;
+    }, [onComplete]);
+
+    useEffect(() => {
+        // Reset the typing effect when the text to type changes
+        setDisplayedText('');
+        index.current = 0;
+
+        const intervalId = setInterval(() => {
+            if (index.current < textToType.length) {
+                setDisplayedText(prev => prev + textToType.charAt(index.current));
+                index.current++;
+            } else {
+                clearInterval(intervalId);
+                if (onCompleteRef.current) {
+                    onCompleteRef.current(); // Call the onComplete callback
+                }
+            }
+        }, speed);
+
+        return () => clearInterval(intervalId);
+    }, [textToType, speed]);
+
+    return displayedText;
 };
 ```
 
@@ -14047,11 +14153,6 @@ const ANALYSIS_PROMPTS = {
 4.  **Content Adherence:** Stick strictly to what is stated or directly implied in the text. Do not invent information.
 5.  **Avoid Code Block Answer:** Strictly avoid the responses in a block of code. You need to give the Text with markdown which can be easily rendered on ui.
 
-**EXAMPLE OUTPUT STRUCTURE:**
-
-## Core Concepts
-
-### What is the primary subject of the document?
 The document is about the five-part process for improving communication skills, focusing on changing habits through self-assessment and a structured plan.
 
 ### 1. What is the definition of a "transcription audit"?
@@ -14081,18 +14182,6 @@ A transcription audit is the process of reviewing a transcribed video of oneself
 **Explanation:** A brief summary of what this concept is and why it's important, according to the document.
 **Example from Text:** "The document states that 'the reaction requires a temperature of over 100 million degrees Celsius' which highlights the extreme conditions needed."
 
-**BEGIN OUTPUT (Start with '###' for the first topic or \`<thinking>\`):**
-`;
-            return baseTemplate;
-        }
-    },
-    mindmap: {
-        getPrompt: (docTextForLlm) => {
-            let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
-            baseTemplate += `
-**TASK:** Generate a mind map in Mermaid.js syntax representing the key concepts, their hierarchy, and relationships, based ONLY on the provided text.
-
-**CORE REQUIREMENTS FOR MERMAID SYNTAX:**
 1.  **Direction:** Use \`graph TD;\` or \`mindmap\`.
 2.  **Nodes:** Define unique IDs and concise labels derived from the text.
 3.  **Edges:** Show relationships using \`-->\`.
@@ -15696,6 +15785,19 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 
 ```python
 # server/rag_service/app.py
+<<<<<<< HEAD
+
+import os
+import sys
+import traceback
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
+import logging
+import atexit
+import uuid
+
+from duckduckgo_search import DDGS
+from qdrant_client import models as qdrant_models # Import Qdrant models
+=======
 import os
 import sys
 import traceback
@@ -15708,6 +15810,7 @@ from flask import Flask, request, jsonify, current_app, send_from_directory, aft
 from pydub import AudioSegment
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
+>>>>>>> origin/skms
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15725,9 +15828,45 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
+<<<<<<< HEAD
+    import google.generativeai as genai
+
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+    else:
+        LLM_MODEL = None
+        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
+
+    def llm_wrapper(prompt):
+        if not LLM_MODEL:
+            raise ConnectionError("Gemini API Key is not configured in the Python service.")
+        for attempt in range(3):
+            try:
+                response = LLM_MODEL.generate_content(prompt)
+                if response.parts:
+                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+                elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+                else:
+                    logger.warning("LLM returned empty response without explicit block reason.")
+                    return ""
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                if attempt == 2: raise
+        return ""
+
+=======
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
+>>>>>>> origin/skms
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -15739,6 +15878,9 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
+<<<<<<< HEAD
+# Initialize services
+=======
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
     """Dynamically creates a GenerativeModel instance with the provided API key."""
@@ -15777,6 +15919,7 @@ def llm_wrapper(prompt: str, api_key: str):
     return ""
 
 # --- Initialize other services ---
+>>>>>>> origin/skms
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -15802,6 +15945,53 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
+<<<<<<< HEAD
+# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/query', methods=['POST'])
+def search_qdrant_documents():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    user_id = data.get('user_id') # user_id is mainly for logging here
+    
+    if not query_text or not user_id:
+        return create_error_response("Missing 'query' or 'user_id'", 400)
+
+    try:
+        k = data.get('k', 5)
+        document_context_name = data.get('documentContextName')
+        
+        must_conditions = []
+        if document_context_name:
+            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
+            must_conditions.append(qdrant_models.FieldCondition(
+                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                match=qdrant_models.MatchValue(value=document_context_name)
+            ))
+        
+        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
+        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
+        
+        retrieved_docs, snippet, docs_map = vector_service.search_documents(
+            query=query_text, k=k, filter_conditions=qdrant_filters
+        )
+        
+        response_payload = {
+            "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
+            "formatted_context_snippet": snippet,
+            "retrieved_documents_map": docs_map,
+        }
+        
+        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
+        return jsonify(response_payload), 200
+        
+    except Exception as e:
+        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
+        return create_error_response(f"Query failed: {str(e)}", 500)
+
+# All other endpoints remain unchanged and are included for completeness
+=======
 @app.route('/health', methods=['GET'])
 def health_check():
     status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
@@ -15866,6 +16056,7 @@ def academic_search_route():
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
 
+>>>>>>> origin/skms
 @app.route('/web_search', methods=['POST'])
 def web_search_route():
     data = request.get_json()
@@ -15878,6 +16069,26 @@ def web_search_route():
 
 @app.route('/export_podcast', methods=['POST'])
 def export_podcast_route():
+<<<<<<< HEAD
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    source_document_text, outline_content = data.get('sourceDocumentText'), data.get('outlineContent')
+    if not all([source_document_text, outline_content]): return create_error_response("Missing required fields", 400)
+    try:
+        script = podcast_generator.generate_podcast_script(source_document_text, outline_content, llm_wrapper)
+        dialogue = podcast_generator.parse_script_into_dialogue(script)
+        if not dialogue: raise ValueError("Failed to parse the generated script.")
+        filename = f"podcast_{uuid.uuid4()}.mp3"
+        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+        podcast_generator.synthesize_dual_speaker_audio(dialogue, output_path)
+        @after_this_request
+        def cleanup(response):
+            try: os.remove(output_path)
+            except OSError as e: logger.error(f"Error deleting temp podcast file {output_path}: {e}")
+            return response
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+    except Exception as e: return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
+=======
     current_app.logger.info("--- /export_podcast Request (gTTS + Speed-Up) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
@@ -15943,11 +16154,23 @@ def generate_kg_from_text_route():
     except Exception as e:
         logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
         return create_error_response(f"KG Generation failed: {str(e)}", 500)
+>>>>>>> origin/skms
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
+<<<<<<< HEAD
+    outline_content, doc_type, source_document_text = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText')
+    if not all([outline_content, doc_type, source_document_text]): return create_error_response("Missing required fields", 400)
+    try:
+        expanded_content = document_generator.expand_content_with_llm(outline_content, source_document_text, doc_type, llm_wrapper)
+        slides_data = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
+        filename = f"generated_doc_{uuid.uuid4()}.{doc_type}"
+        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+        if doc_type == 'pptx': document_generator.create_ppt(slides_data, output_path)
+        else: document_generator.create_doc(slides_data, output_path, "text_content")
+=======
     outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
     if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
     try:
@@ -15956,12 +16179,17 @@ def generate_document_route():
         filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
         if doc_type == 'pptx': document_generator.create_ppt(slides, path)
         else: document_generator.create_doc(slides, path, "text_content")
+>>>>>>> origin/skms
         return jsonify({"success": True, "filename": filename}), 201
     except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
+<<<<<<< HEAD
+    if '..' in filename or filename.startswith('/'): return create_error_response("Invalid filename.", 400)
+=======
     if '..' in filename: return create_error_response("Invalid filename.", 400)
+>>>>>>> origin/skms
     try:
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
         if not os.path.exists(file_path): return create_error_response("File not found.", 404)
@@ -15971,10 +16199,60 @@ def download_document_route(filename):
             except OSError as e: logger.error(f"Error deleting temp file {file_path}: {e}")
             return response
         return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+<<<<<<< HEAD
+    except Exception as e: return create_error_response("Could not process download request.", 500)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
+    http_status_code = 503
+    if not vector_service: status_details["qdrant_service"] = "failed_to_initialize"
+    else:
+        status_details["qdrant_service"] = "initialized"
+        try:
+            vector_service.client.get_collection(collection_name=vector_service.collection_name)
+            status_details["qdrant_collection_status"] = "exists_and_accessible"
+        except Exception as e: status_details["qdrant_collection_status"] = f"error: {str(e)}"
+    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
+    if neo4j_ok: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialized_via_handler", "connected"
+    else: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialization_failed_or_handler_error", neo4j_conn_status
+    if status_details["qdrant_service"] == "initialized" and status_details.get("qdrant_collection_status") == "exists_and_accessible" and neo4j_ok:
+        status_details["status"], http_status_code = "ok", 200
+    return jsonify(status_details), http_status_code
+
+@app.route('/add_document', methods=['POST'])
+def add_document_qdrant():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
+    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
+    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
+    try:
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
+        num_chunks_added, status = 0, "processed_no_content"
+        if processed_chunks:
+            num_chunks_added = app.vector_service.add_processed_chunks(processed_chunks)
+            if num_chunks_added > 0: status = "added_to_qdrant"
+        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_chunks_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
+    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
+
+@app.route('/query_kg', methods=['POST'])
+def query_kg_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    user_id, document_name, query_text = data.get('user_id'), data.get('document_name'), data.get('query')
+    if not all([user_id, document_name, query_text]): return create_error_response("Missing fields", 400)
+    try:
+        facts_summary = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
+        return jsonify({"success": True, "facts": facts_summary}), 200
+    except Exception as e: return create_error_response(f"Failed to query KG: {str(e)}", 500)
+
+=======
     except Exception as e:
         return create_error_response("Could not process download request.", 500)
 
 # KG & DB Management Routes
+>>>>>>> origin/skms
 @app.route('/delete_qdrant_document_data', methods=['DELETE'])
 def delete_qdrant_data_route():
     data = request.get_json()
@@ -16013,7 +16291,12 @@ def delete_kg_route(user_id, document_name):
 
 if __name__ == '__main__':
     logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
+<<<<<<< HEAD
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=True)
+=======
     app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
+>>>>>>> origin/skms
+
 ```
 
 `server/rag_service/config.py`
@@ -16821,6 +17104,20 @@ def search_knowledge_graph(user_id: str, document_name: str, query_text: str) ->
 `server/rag_service/podcast_generator.py`
 
 ```python
+<<<<<<< HEAD
+# server/rag_service/podcast_generator.py
+import logging
+import os
+import re
+import uuid
+import subprocess
+from gtts import gTTS
+import io
+
+logger = logging.getLogger(__name__)
+
+# --- UPDATED AND MORE DIRECT PROMPT ---
+=======
 
 # server/rag_service/podcast_generator.py
 import logging
@@ -16829,6 +17126,7 @@ from gtts import gTTS
 
 logger = logging.getLogger(__name__)
 
+>>>>>>> origin/skms
 PODCAST_SCRIPT_PROMPT_TEMPLATE = """
 You are an AI podcast script generator. Your SOLE task is to generate a realistic, two-speaker educational dialogue based on the provided text. The script should be substantial, aiming for a length of at least 600-800 words to ensure a meaningful discussion.
 
@@ -16836,6 +17134,52 @@ You are an AI podcast script generator. Your SOLE task is to generate a realisti
 
 ---
 ## Podcast Style Guide
+<<<<<<< HEAD
+
+- **Format**: Two-speaker conversational podcast.
+- **SPEAKER_A**: The "Curious Learner". Asks clarifying questions, follow-up questions, and represents the student's perspective. Their role is to drive the conversation deeper.
+- **SPEAKER_B**: The "Expert Teacher". Provides clear, detailed explanations and examples based on the document text.
+- **Dialogue Flow**: The conversation must be a natural back-and-forth. SPEAKER_A asks a question, SPEAKER_B gives a detailed answer, and SPEAKER_A should follow up with another question that logically flows from the answer. Create at least 5-7 such exchanges.
+
+---
+## Script Structure
+
+### 1. Opening
+The script must begin with a brief, engaging conversation to set the stage.
+`SPEAKER_A: Hey, I was just reading this document about {study_focus}, and I'm a bit stuck on a few things. Can we talk through it?`
+`SPEAKER_B: Absolutely! I'd be happy to. What's on your mind first?`
+
+### 2. Main Body
+The main part of the script should be a detailed question-and-answer dialogue driven by SPEAKER_A, covering the key points of the `STUDY FOCUS`. Use the `DOCUMENT TEXT` to formulate SPEAKER_B's expert answers. Ensure the conversation flows logically from one point to the next.
+
+### 3. Closing
+Conclude the podcast with a quick summary and an encouraging sign-off.
+`SPEAKER_A: This makes so much more sense now. Thanks for breaking that all down for me!`
+`SPEAKER_B: You're welcome! The key is to explore these topics step-by-step. Keep up the great work!`
+
+---
+## Source Material
+
+**STUDY FOCUS (The main topic for the podcast):**
+{study_focus}
+
+**DOCUMENT TEXT (Use this for all factual answers):**
+{document_content}
+
+---
+**FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_A:" and aim for a 600-800 word script):**
+"""
+
+
+def generate_podcast_script(source_document_text, outline_content, llm_function):
+    """
+    Generates a two-speaker podcast script using the LLM.
+    """
+    logger.info("Generating two-speaker podcast script with updated prompt...")
+    
+    prompt = PODCAST_SCRIPT_PROMPT_TEMPLATE.format(
+        document_content=source_document_text[:40000], # Limit context to avoid excessive token usage
+=======
 - **Format**: Two-speaker conversational podcast.
 - **SPEAKER_A**: The "Curious Learner". Asks clarifying questions and drives the conversation.
 - **SPEAKER_B**: The "Expert Teacher". Provides clear, detailed explanations based on the document.
@@ -16880,12 +17224,120 @@ def generate_podcast_script(source_document_text, outline_content, podcast_optio
         purpose_instruction=purpose_instruction,
         length_instruction=length_instruction,
         document_content=source_document_text[:60000],
+>>>>>>> origin/skms
         study_focus=outline_content,
     )
     
     script = llm_function(prompt)
     if not script or not script.strip():
         raise ValueError("LLM failed to generate a podcast script.")
+<<<<<<< HEAD
+    
+    logger.info(f"LLM generated two-speaker podcast script. Length: {len(script)}")
+    return script
+
+def parse_script_into_dialogue(script_text):
+    """Parses the script text into a list of (speaker, text) tuples."""
+    dialogue = []
+    lines = script_text.split('\n')
+    current_speaker = None
+    current_text = ""
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        match = re.match(r'^(SPEAKER_[AB]):(.*)', line, re.IGNORECASE)
+        if match:
+            if current_speaker and current_text:
+                dialogue.append((current_speaker, current_text.strip()))
+            
+            current_speaker = match.group(1).upper()
+            current_text = match.group(2).strip()
+        elif current_speaker:
+            current_text += " " + line
+            
+    if current_speaker and current_text:
+        dialogue.append((current_speaker, current_text.strip()))
+        
+    return dialogue
+
+def synthesize_dual_speaker_audio(dialogue, output_path):
+    """
+    Creates a two-speaker audio file using gTTS and FFmpeg subprocess.
+    """
+    logger.info(f"Synthesizing dual-speaker audio for {len(dialogue)} parts using FFmpeg.")
+    
+    temp_dir = os.path.dirname(output_path)
+    session_id = str(uuid.uuid4())
+    temp_files = []
+    ffmpeg_playlist_path = os.path.join(temp_dir, f"playlist_{session_id}.txt")
+
+    tts_voices = {
+        'SPEAKER_A': {'lang': 'en', 'tld': 'co.uk'},
+        'SPEAKER_B': {'lang': 'en', 'tld': 'com'}
+    }
+
+    try:
+        for i, (speaker, text) in enumerate(dialogue):
+            if not text:
+                continue
+            
+            try:
+                temp_filename = os.path.join(temp_dir, f"temp_{session_id}_{i:03d}.mp3")
+                voice_params = tts_voices.get(speaker, tts_voices['SPEAKER_A'])
+                clean_text = text.replace('*', '').replace('[PAUSE]', '...')
+
+                tts = gTTS(text=clean_text, lang=voice_params['lang'], tld=voice_params['tld'], slow=False)
+                tts.save(temp_filename)
+                
+                silence_filename = os.path.join(temp_dir, f"silence_{session_id}_{i:03d}.mp3")
+                subprocess.run(
+                    ['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '0.7', '-q:a', '9', '-acodec', 'libmp3lame', silence_filename],
+                    check=True, capture_output=True, text=True
+                )
+
+                temp_files.append(temp_filename)
+                temp_files.append(silence_filename)
+
+            except Exception as e:
+                logger.warning(f"Skipping dialogue part due to gTTS/ffmpeg silence error: {e}. Text: '{text[:50]}...'")
+
+        if not temp_files:
+            raise ValueError("No audio segments were successfully generated.")
+
+        with open(ffmpeg_playlist_path, 'w') as f:
+            for temp_file in temp_files:
+                escaped_path = temp_file.replace('\\', '/').replace("'", "'\\''")
+                f.write(f"file '{escaped_path}'\n")
+        
+        temp_files.append(ffmpeg_playlist_path)
+
+        logger.info(f"Concatenating {len(temp_files)-1} audio segments into final podcast file.")
+        ffmpeg_command = [
+            'ffmpeg', '-f', 'concat', '-safe', '0', '-i', ffmpeg_playlist_path, '-c', 'copy', output_path
+        ]
+        
+        subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+        
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg command failed with exit code {e.returncode}\nFFmpeg stderr: {e.stderr}")
+        raise IOError(f"FFmpeg failed during audio processing: {e.stderr}") from e
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during audio synthesis: {e}", exc_info=True)
+        raise
+    finally:
+        logger.info(f"Cleaning up {len(temp_files)} temporary files...")
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except OSError as e_remove:
+                logger.error(f"Error removing temporary file {temp_file}: {e_remove}")
+=======
     logger.info(f"LLM generated podcast script. Length: {len(script)}")
     return script
 
@@ -16904,11 +17356,51 @@ def synthesize_audio_with_gtts(text: str, output_path: str):
     except Exception as e:
         logger.error(f"gTTS failed during synthesis: {e}", exc_info=True)
         raise IOError("Text-to-Speech synthesis with gTTS failed.") from e
+>>>>>>> origin/skms
+
 ```
 
 `server/rag_service/requirements.txt`
 
 ```
+<<<<<<< HEAD
+# server/rag_service/requirements.txt
+flask
+requests
+faiss-cpu # or faiss-gpu
+langchain
+langchain-huggingface
+pypdf
+PyPDF2
+python-docx
+python-dotenv
+ollama # Keep if using Ollama embeddings
+python-pptx
+uuid
+langchain-community
+pdfplumber
+fitz # PyMuPDF for PDF parsing
+pytesseract
+nltk
+spacy-layout
+pandas
+numpy
+typing
+pytesseract # OCR
+pillow
+qdrant-client
+neo4j
+sentence_transformers
+spacy
+opencv-python
+duckduckgo-search
+python-pptx
+python-docx
+reportlab
+google-generativeai
+gTTS
+
+=======
 
 # server/rag_service/requirements.txt
 
@@ -16949,6 +17441,8 @@ soundfile
 
 # --- Final, Simple, and Free TTS ---
 gTTS
+>>>>>>> origin/skms
+
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -17375,6 +17869,8 @@ class VectorDBService:
 `server/routes/adminDocuments.js`
 
 ```javascript
+
+
 // server/routes/adminDocuments.js
 const express = require('express');
 const multer = require('multer');
@@ -17382,87 +17878,12 @@ const path = require('path');
 const fs = require('fs');
 const fsPromises = fs.promises;
 const AdminDocument = require('../models/AdminDocument');
+const { fixedAdminAuthMiddleware } = require('../middleware/fixedAdminAuthMiddleware');
 const axios = require('axios');
-const User = require('../models/User');
-const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
 
-// --- API Key Management Routes ---
-
-// @route   GET /api/admin/key-requests
-// @desc    Get all users with a pending API key request
-router.get('/key-requests', async (req, res) => {
-    try {
-        const requests = await User.find({ apiKeyRequestStatus: 'pending' })
-            .select('email profile createdAt')
-            .sort({ createdAt: -1 });
-        res.json(requests);
-    } catch (error) {
-        console.error('Error fetching API key requests:', error);
-        res.status(500).json({ message: 'Server error while fetching requests.' });
-    }
-});
-
-// @route   POST /api/admin/key-requests/approve
-// @desc    Approve a user's API key request
-router.post('/key-requests/approve', async (req, res) => {
-    const { userId } = req.body;
-    if (!userId) {
-        return res.status(400).json({ message: 'User ID is required.' });
-    }
-
-    try {
-        const serverApiKey = process.env.GEMINI_API_KEY;
-        if (!serverApiKey) {
-            return res.status(500).json({ message: 'Server-side GEMINI_API_KEY is not configured.' });
-        }
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: 'User not found.' });
-        }
-        
-        user.encryptedApiKey = serverApiKey; // pre-save hook handles encryption
-        user.apiKeyRequestStatus = 'approved';
-        user.preferredLlmProvider = 'gemini';
-        
-        await user.save();
-
-        res.json({ message: `API key request for ${user.email} has been approved.` });
-    } catch (error) {
-        console.error(`Error approving API key for user ${userId}:`, error);
-        res.status(500).json({ message: 'Server error while approving request.' });
-    }
-});
-
-// @route   POST /api/admin/key-requests/reject
-// @desc    Reject a user's API key request
-router.post('/key-requests/reject', async (req, res) => {
-    const { userId } = req.body;
-    if (!userId) {
-        return res.status(400).json({ message: 'User ID is required.' });
-    }
-
-    try {
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: 'User not found.' });
-        }
-
-        user.apiKeyRequestStatus = 'rejected';
-        await user.save();
-
-        res.json({ message: `API key request for ${user.email} has been rejected.` });
-    } catch (error) {
-        console.error(`Error rejecting API key for user ${userId}:`, error);
-        res.status(500).json({ message: 'Server error while rejecting request.' });
-    }
-});
-
-
-// --- Document Management Routes ---
-
+// --- Constants & Multer Config ---
 const ADMIN_UPLOAD_DIR_BASE = path.join(__dirname, '..', 'assets', '_admin_uploads_');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const allowedAdminMimeTypes = {
@@ -17503,7 +17924,7 @@ const adminFileFilter = (req, file, cb) => {
     }
 };
 const adminUpload = multer({ storage: adminStorage, fileFilter: adminFileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
+async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
         return { success: false, message: "Python service URL not configured.", text: null, chunksForKg: [] };
@@ -17882,7 +18303,6 @@ module.exports = router;
 `server/routes/chat.js`
 
 ```javascript
-
 // server/routes/chat.js
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
@@ -18799,7 +19219,6 @@ module.exports = router;
 `server/routes/kg.js`
 
 ```javascript
-
 // server/routes/kg.js
 const express = require('express');
 const router = express.Router();
@@ -19283,7 +19702,6 @@ router.post('/', (req, res) => {
 
         const userId = req.user._id.toString();
         const { originalname: originalName, path: tempServerPath } = req.file;
-
         if (!tempServerPath) {
             return res.status(500).json({ message: "File upload failed, temporary path not created." });
         }
@@ -19439,6 +19857,8 @@ module.exports = router;
 `server/server.js`
 
 ```javascript
+
+
 // server/server.js
 const dotenv = require('dotenv');
 dotenv.config();
@@ -19581,12 +20001,340 @@ async function checkRagService(url) {
 }
 
 startServer();
+
+```
+
+`server/services/adminDocuments.js`
+
+```javascript
+// server/routes/adminDocuments.js
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs'); // Using Node.js fs for directory creation and file ops
+const fsPromises = fs.promises; // For async file operations
+const AdminDocument = require('../models/AdminDocument');
+const { fixedAdminAuthMiddleware } = require('../middleware/fixedAdminAuthMiddleware');
+const axios = require('axios'); // For calling Python RAG service
+
+const router = express.Router();
+
+// --- Constants for Admin Uploads ---
+const ADMIN_UPLOAD_DIR_BASE = path.join(__dirname, '..', 'assets', '_admin_uploads_');
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
+// Allowed types for admin uploads
+const allowedAdminMimeTypes = {
+    'application/pdf': 'docs',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docs', // docx
+    'text/plain': 'docs', // txt
+    'text/markdown': 'docs', // md
+    // Add more as needed for admin
+};
+const allowedAdminExtensions = ['.pdf', '.docx', '.txt', '.md'];
+
+// --- Multer Config for Admin Uploads ---
+const adminStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const fileMimeType = file.mimetype.toLowerCase();
+        const fileTypeSubfolder = allowedAdminMimeTypes[fileMimeType] || 'others'; // Default to 'others'
+        const destinationPath = path.join(ADMIN_UPLOAD_DIR_BASE, fileTypeSubfolder);
+
+        fs.mkdir(destinationPath, { recursive: true }, (err) => {
+            if (err) {
+                console.error(`Admin Upload Multer: Error creating destination path ${destinationPath}:`, err);
+                return cb(err);
+            }
+            cb(null, destinationPath);
+        });
+    },
+    filename: (req, file, cb) => {
+        const timestamp = Date.now();
+        const fileExt = path.extname(file.originalname).toLowerCase();
+        const sanitizedBaseName = path.basename(file.originalname, fileExt)
+            .replace(/[^a-zA-Z0-9._-]/g, '_')
+            .substring(0, 100); // Limit base name length
+        const uniqueFilename = `${timestamp}-${sanitizedBaseName}${fileExt}`;
+        cb(null, uniqueFilename);
+    }
+});
+
+const adminFileFilter = (req, file, cb) => {
+    const fileExt = path.extname(file.originalname).toLowerCase();
+    const mimeType = file.mimetype.toLowerCase();
+
+    const isMimeTypeAllowed = !!allowedAdminMimeTypes[mimeType];
+    const isExtensionAllowed = allowedAdminExtensions.includes(fileExt);
+
+    if (isMimeTypeAllowed && isExtensionAllowed) {
+        cb(null, true);
+    } else {
+        console.warn(`Admin Upload Rejected (Filter): File='${file.originalname}', MIME='${mimeType}', Ext='${fileExt}'.`);
+        const error = new multer.MulterError('LIMIT_UNEXPECTED_FILE_TYPE_ADMIN');
+        error.message = `Invalid file type or extension for admin upload. Allowed: ${allowedAdminExtensions.join(', ')}`;
+        cb(error, false);
+    }
+};
+
+const adminUpload = multer({
+    storage: adminStorage,
+    fileFilter: adminFileFilter,
+    limits: { fileSize: MAX_FILE_SIZE }
+});
+
+// --- Helper to call Python RAG service for Admin Docs (Text Extraction Only) ---
+async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        console.error("ADMIN RAG: PYTHON_RAG_SERVICE_URL not set. Cannot extract text.");
+        return { success: false, message: "Python service URL not configured for text extraction.", text: null };
+    }
+    const addDocumentUrl = `${pythonServiceUrl}/add_document`;
+    console.log(`ADMIN RAG: Calling Python Service: ${addDocumentUrl} for text extraction of '${originalName}'`);
+
+    try {
+        // For admin docs, we pass a generic user_id or a specific marker.
+        // The Python service might try to add to Qdrant/Neo4j with this ID.
+        // If admin docs are NOT to be in the main Qdrant/Neo4j, the Python service
+        // would ideally have a flag to skip DB insertions for certain user_ids/contexts.
+        // For now, Node.js only cares about the returned text.
+        const response = await axios.post(addDocumentUrl, {
+            user_id: "fixed_admin_text_extraction_user", // A distinct ID for Python's logging/potential filtering
+            file_path: filePath,
+            original_name: originalName
+        }, { timeout: 300000 }); // 5 min timeout
+
+        const pythonData = response.data;
+        const text = pythonData?.raw_text_for_analysis || null;
+
+        if (text) {
+            console.log(`ADMIN RAG: Text extracted successfully for '${originalName}'. Length: ${text.length}`);
+            return { success: true, message: "Text extracted.", text: text };
+        } else {
+            console.warn(`ADMIN RAG: Python service returned no text for '${originalName}'. Status: ${pythonData?.status}, Message: ${pythonData?.message}`);
+            return { success: false, message: pythonData?.message || "Python service extracted no text.", text: null };
+        }
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || "Unknown error calling Python RAG for text extraction.";
+        console.error(`ADMIN RAG: Error calling Python service for '${originalName}': ${errorMsg}`);
+        return { success: false, message: `Python RAG call failed: ${errorMsg}`, text: null };
+    }
+}
+
+
+// --- Admin Document Routes ---
+
+// @route   POST /api/admin/documents/upload
+// @desc    Upload a document for the admin, extract text, and initiate analysis.
+// @access  Admin Only (via fixedAdminAuthMiddleware)
+router.post('/upload', fixedAdminAuthMiddleware, adminUpload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded or file type rejected.' });
+    }
+
+    const { filename: serverFilename, originalname: originalName, path: tempServerPath } = req.file;
+    let adminDocRecord;
+
+    try {
+        // 1. Check for existing document with the same originalName
+        const existingDoc = await AdminDocument.findOne({ originalName: originalName });
+        if (existingDoc) {
+            await fsPromises.unlink(tempServerPath).catch(e => console.error(`Admin Upload: Error deleting duplicate temp file ${tempServerPath}:`, e));
+            return res.status(409).json({ message: `Document with original name '${originalName}' already exists for admin.` });
+        }
+
+        // 2. Extract text using Python RAG service
+        console.log(`Admin Upload: Attempting text extraction for '${originalName}' from ${tempServerPath}`);
+        const textExtractionResult = await triggerPythonTextExtractionForAdmin(tempServerPath, originalName);
+
+        if (!textExtractionResult.success || !textExtractionResult.text || textExtractionResult.text.trim() === "") {
+            await fsPromises.unlink(tempServerPath).catch(e => console.error(`Admin Upload: Error deleting temp file ${tempServerPath} after failed text extraction:`, e));
+            return res.status(422).json({ // Unprocessable Entity
+                message: textExtractionResult.message || "Failed to extract usable text from the document.",
+                filename: serverFilename,
+                originalname: originalName
+            });
+        }
+        console.log(`Admin Upload: Text extracted for '${originalName}'. Proceeding to save and analyze.`);
+
+        // 3. Save initial AdminDocument record
+        adminDocRecord = new AdminDocument({
+            filename: serverFilename,
+            originalName: originalName,
+            text: textExtractionResult.text,
+            // serverPath and fileTypeSubfolder are not in the simplified model.
+            // If we decide to keep the file, we'd need to move it from tempServerPath
+            // to a final location and store that path. For now, assume tempServerPath is cleaned up.
+            analysis: { faq: "", topics: "", mindmap: "" }, // Initialize analysis
+            analysisUpdatedAt: null,
+        });
+        await adminDocRecord.save();
+        console.log(`Admin Upload: Initial DB record saved for '${originalName}' (Server: ${serverFilename}).`);
+
+        // 4. Delete the temporary file uploaded by multer as text is now in DB
+        // If you decide to keep the physical file, this step would be a move operation instead.
+        await fsPromises.unlink(tempServerPath).catch(e => console.error(`Admin Upload: Non-critical error deleting temp file ${tempServerPath} after DB save:`, e));
+
+
+        // 5. Respond to client (202 Accepted) & Trigger Background Analysis
+        res.status(202).json({
+            message: `Admin document '${originalName}' uploaded. Text extracted. Analysis initiated.`,
+            filename: serverFilename,
+            originalname: originalName,
+        });
+        console.log(`Admin Upload: Sent 202 Accepted for '${originalName}'. Offloading analysis.`);
+
+        // --- Trigger Background Analysis Worker ---
+        // This requires an 'adminAnalysisWorker.js'
+        const { Worker } = require('worker_threads');
+        const adminAnalysisWorkerPath = path.resolve(__dirname, '..', 'workers', 'adminAnalysisWorker.js');
+        
+        try {
+            if (fs.existsSync(adminAnalysisWorkerPath)) { // Check if worker file exists
+                const worker = new Worker(adminAnalysisWorkerPath, {
+                    workerData: {
+                        adminDocumentId: adminDocRecord._id.toString(), // Pass ID to update the specific doc
+                        originalName: originalName,
+                        textForAnalysis: textExtractionResult.text
+                    }
+                });
+                worker.on('message', (msg) => console.log(`Admin Analysis Worker [Doc: ${msg.originalName || originalName}]: ${msg.message || JSON.stringify(msg)}`));
+                worker.on('error', (err) => console.error(`Admin Analysis Worker Error [Doc: ${originalName}]:`, err));
+                worker.on('exit', (code) => console.log(`Admin Analysis Worker [Doc: ${originalName}] exited (code ${code}).`));
+            } else {
+                console.error(`Admin Upload: adminAnalysisWorker.js not found at ${adminAnalysisWorkerPath}. Analysis cannot be started.`);
+                // Optionally update the AdminDocument status to 'analysis_launch_failed'
+            }
+        } catch (workerError) {
+            console.error(`Admin Upload: Error launching Admin Analysis Worker for '${originalName}':`, workerError);
+        }
+
+    } catch (error) {
+        console.error(`Admin Upload: Overall error for '${originalName || (req.file && req.file.originalname)}':`, error);
+        if (tempServerPath) { // If path is known, try to clean up temp file
+            await fsPromises.unlink(tempServerPath).catch(e => console.error(`Admin Upload: Error cleaning up temp file ${tempServerPath} after overall error:`, e));
+        }
+        if (!res.headersSent) {
+            if (error.code === 11000) { // MongoDB duplicate key
+                 res.status(409).json({ message: 'Document processing conflict (e.g., duplicate server filename). Please try again.' });
+            } else {
+                 res.status(500).json({ message: 'Server error during admin document upload processing.' });
+            }
+        }
+    }
+});
+
+// @route   GET /api/admin/documents
+// @desc    Get list of documents uploaded by the admin
+// @access  Admin Only (via fixedAdminAuthMiddleware)
+router.get('/', fixedAdminAuthMiddleware, async (req, res) => {
+    try {
+        // Fetching fields relevant for listing and identifying documents.
+        // Exclude 'text' and full 'analysis' objects by default to keep payload small.
+        const adminDocs = await AdminDocument.find()
+            .sort({ uploadedAt: -1 })
+            .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap'); // Select specific fields
+
+        const documentsList = adminDocs.map(doc => ({
+            originalName: doc.originalName,
+            serverFilename: doc.filename, // Useful if frontend needs to make further requests (e.g., delete)
+            uploadedAt: doc.uploadedAt,
+            analysisUpdatedAt: doc.analysisUpdatedAt,
+            hasFaq: !!(doc.analysis && doc.analysis.faq && doc.analysis.faq.trim() !== ""),
+            hasTopics: !!(doc.analysis && doc.analysis.topics && doc.analysis.topics.trim() !== ""),
+            hasMindmap: !!(doc.analysis && doc.analysis.mindmap && doc.analysis.mindmap.trim() !== ""),
+        }));
+
+        // For frontend compatibility with existing DocumentList component,
+        // it might expect an array of strings (originalName).
+        // If so, change `res.json({ documents: documentsList });` to
+        // `res.json({ filenames: documentsList.map(d => d.originalName) });`
+        // However, sending more info like `documentsList` is generally more useful.
+        res.json({ documents: documentsList });
+
+    } catch (error) {
+        console.error('Admin List Documents Error:', error);
+        res.status(500).json({ message: 'Server error fetching admin documents.' });
+    }
+});
+
+// @route   DELETE /api/admin/documents/:serverFilename
+// @desc    Delete a document uploaded by the admin (DB record only for simplified model)
+// @access  Admin Only (via fixedAdminAuthMiddleware)
+router.delete('/:serverFilename', fixedAdminAuthMiddleware, async (req, res) => {
+    const { serverFilename } = req.params;
+
+    if (!serverFilename) {
+        return res.status(400).json({ message: 'Server filename parameter is required for deletion.' });
+    }
+
+    try {
+        const docToDelete = await AdminDocument.findOneAndDelete({ filename: serverFilename });
+
+        if (!docToDelete) {
+            return res.status(404).json({ message: `Admin document with server name '${serverFilename}' not found.` });
+        }
+
+        console.log(`Admin Delete: Document record '${docToDelete.originalName}' (Server: ${serverFilename}) deleted from MongoDB.`);
+        
+        // Since we are not storing serverPath in the simplified model and deleting temp files after text extraction,
+        // there's no physical file to delete from 'assets/_admin_uploads_' based on DB record alone at this stage.
+        // If, in the future, you decide to *keep* admin-uploaded files, you'd add file deletion logic here
+        // and would need to store `serverPath` in AdminDocument model.
+
+        // TODO (Future): If admin documents were processed by Qdrant/Neo4j,
+        // trigger deletion from those services here.
+
+        res.status(200).json({ message: `Admin document '${docToDelete.originalName}' record deleted successfully.` });
+
+    } catch (error) {
+        console.error(`Admin Delete Error for serverFilename '${serverFilename}':`, error);
+        res.status(500).json({ message: 'Server error during admin document deletion.' });
+    }
+});
+
+
+// @route   GET /api/admin/documents/:serverFilename/analysis
+// @desc    Get analysis data for a specific admin document
+// @access  Admin Only
+router.get('/:serverFilename/analysis', fixedAdminAuthMiddleware, async (req, res) => {
+    const { serverFilename } = req.params;
+    if (!serverFilename) {
+        return res.status(400).json({ message: 'Server filename parameter is required.' });
+    }
+
+    try {
+        const adminDoc = await AdminDocument.findOne({ filename: serverFilename }).select('originalName analysis analysisUpdatedAt');
+        if (!adminDoc) {
+            return res.status(404).json({ message: `Admin document '${serverFilename}' not found.` });
+        }
+        if (!adminDoc.analysis || 
+            (!adminDoc.analysis.faq && !adminDoc.analysis.topics && !adminDoc.analysis.mindmap)) {
+            return res.status(200).json({ 
+                originalName: adminDoc.originalName,
+                message: 'Analysis has not been generated or is empty for this document.',
+                analysis: { faq: "", topics: "", mindmap: "" }, // Return empty structure
+                analysisUpdatedAt: adminDoc.analysisUpdatedAt
+            });
+        }
+        res.status(200).json({
+            originalName: adminDoc.originalName,
+            analysis: adminDoc.analysis, // Contains faq, topics, mindmap strings
+            analysisUpdatedAt: adminDoc.analysisUpdatedAt
+        });
+    } catch (error) {
+        console.error(`Error fetching analysis for admin document '${serverFilename}':`, error);
+        res.status(500).json({ message: 'Server error while retrieving admin document analysis.' });
+    }
+});
+
+
+module.exports = router;
 ```
 
 `server/services/agentService.js`
 
 ```javascript
-
 // server/services/agentService.js
 const { createAgenticSystemPrompt, createSynthesizerPrompt } = require('../config/promptTemplates.js');
 const { availableTools } = require('./toolRegistry.js');
@@ -20465,6 +21213,185 @@ const availableTools = {
 
 module.exports = {
     availableTools,
+};
+```
+
+`server/services/totOrchestrator.js`
+
+```javascript
+// server/services/totOrchestrator.js
+
+const { processAgenticRequest } = require('./agentService'); // IMPORTANT: We now call the agent
+
+/**
+ * Helper function to write a Server-Sent Event (SSE) to the client.
+ * @param {object} res - The Express response object.
+ * @param {object} eventData - The data to send to the client.
+ */
+function streamEvent(res, eventData) {
+    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+}
+
+/**
+ * MOCKED Complexity Gate: Decides if a query needs the full ToT process.
+ * In a real implementation, this would be a fast LLM call.
+ * @param {string} query The user's query.
+ * @returns {Promise<boolean>} True if the query is complex.
+ */
+async function isQueryComplex(query) {
+    // Simple rule for testing: queries with multiple question marks or longer than 20 words are complex.
+    const isComplex = (query.match(/\?/g) || []).length > 1 || query.split(' ').length > 20;
+    console.log(`[ToT] Step 1: Complexity Gate. Query: "${query.substring(0, 30)}...". Decision: ${isComplex ? 'COMPLEX' : 'SIMPLE'}`);
+    return isComplex;
+}
+
+/**
+ * MOCKED Planner: Generates different high-level plans.
+ * @param {string} query The user's query.
+ * @returns {Promise<Array<Object>>} A list of plan objects.
+ */
+async function generatePlans(query) {
+    console.log('[ToT] Step 2: Planner. Generating plans...');
+    // In production, an LLM would generate these based on the query.
+    // Each plan is an array of sub-tasks for the agent.
+    const plans = [
+        {
+            name: "Structured Research Plan",
+            steps: [
+                "First, research the theoretical comparison between the two models using internal documents.",
+                "Second, perform a web search for recent, real-world information on the topic."
+            ]
+        },
+        {
+            name: "Naive Combined Plan",
+            steps: [
+                "Perform a single, combined search using all keywords from the user's query."
+            ]
+        }
+    ];
+    return plans;
+}
+
+/**
+ * MOCKED Evaluator: Selects the best plan.
+ * @param {Array<Object>} plans The list of plans.
+ * @returns {Promise<Object>} The winning plan object.
+ */
+async function evaluatePlans(plans) {
+    console.log('[ToT] Step 3: Evaluator. Evaluating plans...');
+    // In production, an LLM would rank these. We'll hardcode the choice for now.
+    const winningPlan = plans[0]; // Always choose the "Structured Research Plan"
+    console.log(`[ToT] Step 3: Evaluator. Winning plan selected: "${winningPlan.name}"`);
+    return winningPlan;
+}
+
+/**
+ * Executor: Executes the winning plan by calling the Agentic Router for each step.
+ * @param {Object} winningPlan - The plan object with a `steps` array.
+ * @param {string} originalQuery - The user's original full query.
+ * @param {object} requestContext - The full context object for the agent.
+ * @param {object} res - The Express response object for streaming thoughts.
+ * @returns {Promise<string>} A string containing all the collected context.
+ */
+async function executePlan(winningPlan, originalQuery, requestContext, res) {
+    console.log('[ToT] Step 4: Executor. Starting execution of plan...');
+    let collectedContexts = [];
+
+    for (let i = 0; i < winningPlan.steps.length; i++) {
+        const stepDescription = winningPlan.steps[i];
+        const thought = `Executing Step ${i + 1}/${winningPlan.steps.length}: ${stepDescription}`;
+        streamEvent(res, { type: 'thought', content: thought });
+        console.log(`[ToT] Executor: ${thought}`);
+        
+        // The Executor's job is to use the Agent for each sub-task.
+        // We pass the *original query* to give the agent full context, but the sub-task
+        // description could be used in a more advanced prompt to guide the agent.
+        // For now, we rely on the agent's own routing based on the requestContext.
+        const agentResponse = await processAgenticRequest(
+            originalQuery, // Use the original query to ensure context is not lost
+            [], // History is handled by the synthesizer later
+            `Fulfill this sub-task: "${stepDescription}"`,
+            requestContext
+        );
+
+        collectedContexts.push(`--- Context from Step ${i + 1} (${agentResponse.sourcePipeline}) ---\n${agentResponse.finalAnswer}`);
+    }
+
+    console.log('[ToT] Step 4: Executor. All steps executed.');
+    return collectedContexts.join('\n\n');
+}
+
+/**
+ * Synthesizer: Creates the final answer from all collected context.
+ * @param {string} originalQuery - The user's original full query.
+ * @param {string} finalContext - The combined context from all executor steps.
+ * @param {Array} chatHistory - The full conversational history.
+ * @param {object} requestContext - The context for the LLM call.
+ * @returns {Promise<string>} The final, polished answer.
+ */
+async function synthesizeFinalAnswer(originalQuery, finalContext, chatHistory, requestContext) {
+    console.log('[ToT] Step 5: Synthesizer. Creating final response...');
+    const { llmProvider, ...llmOptions } = requestContext;
+    const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
+
+    const synthesizerPrompt = `You are an expert AI Tutor. A multi-step reasoning process has been completed to gather comprehensive information. Your task is to synthesize all the provided context into a single, cohesive, and well-structured final answer for the user's original query.\n\n--- COLLECTED CONTEXT ---\n${finalContext}\n\n--- ORIGINAL USER QUERY ---\n${originalQuery}`;
+
+    const finalAnswer = await llmService.generateContentWithHistory(
+        chatHistory,
+        synthesizerPrompt,
+        requestContext.systemPrompt, // Use the user's selected system prompt
+        llmOptions
+    );
+    return finalAnswer;
+}
+
+
+/**
+ * Main orchestration logic for the Tree of Thoughts process with streaming.
+ * @param {string} query The user's query.
+ * @param {Array} chatHistory The conversational history.
+ * @param {object} requestContext The full context for the request.
+ * @param {object} res The Express response object for streaming.
+ * @returns {Promise<Object>} An object containing the final answer and all thoughts.
+ */
+async function processQueryWithToT_Streaming(query, chatHistory, requestContext, res) {
+    const allThoughts = [];
+
+    const streamAndStoreThought = (content) => {
+        streamEvent(res, { type: 'thought', content });
+        allThoughts.push(content);
+    };
+
+    const isComplex = await isQueryComplex(query);
+
+    if (!isComplex) {
+        streamAndStoreThought("Query is straightforward. Generating a direct response.");
+        const directResponse = await processAgenticRequest(query, chatHistory, requestContext.systemPrompt, requestContext);
+        streamEvent(res, { type: 'final_answer', content: directResponse.finalAnswer });
+        return { finalAnswer: directResponse.finalAnswer, thoughts: allThoughts, references: directResponse.references, sourcePipeline: directResponse.sourcePipeline };
+    }
+
+    // --- Full ToT Flow ---
+    streamAndStoreThought("Complex query detected. Initiating multi-step reasoning process...");
+    
+    const plans = await generatePlans(query);
+    streamAndStoreThought(`Generated ${plans.length} potential plans. Evaluating the best approach...`);
+    
+    const winningPlan = await evaluatePlans(plans);
+    streamAndStoreThought(`Best plan selected: "${winningPlan.name}". Beginning execution...`);
+
+    const finalContext = await executePlan(winningPlan, query, requestContext, res);
+    streamAndStoreThought("All information gathered. Synthesizing final answer...");
+
+    const finalAnswer = await synthesizeFinalAnswer(query, finalContext, chatHistory, requestContext);
+    streamEvent(res, { type: 'final_answer', content: finalAnswer });
+    
+    console.log('--- ToT Streaming Orchestration Finished ---');
+    return { finalAnswer, thoughts: allThoughts, references: [], sourcePipeline: `tot-${requestContext.llmProvider}` };
+}
+
+module.exports = {
+    processQueryWithToT_Streaming
 };
 ```
 

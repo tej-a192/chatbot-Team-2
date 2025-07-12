@@ -1,4 +1,3 @@
-
 // server/services/agentService.js
 const { createAgenticSystemPrompt, createSynthesizerPrompt } = require('../config/promptTemplates.js');
 const { availableTools } = require('./toolRegistry.js');
