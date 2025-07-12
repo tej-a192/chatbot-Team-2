@@ -126,7 +126,7 @@ const adminFileFilter = (req, file, cb) => {
     }
 };
 const adminUpload = multer({ storage: adminStorage, fileFilter: adminFileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
+async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
         return { success: false, message: "Python service URL not configured.", text: null, chunksForKg: [] };
