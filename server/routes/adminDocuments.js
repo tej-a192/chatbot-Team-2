@@ -143,54 +143,32 @@ const adminFileFilter = (req, file, cb) => {
     cb(error, false);
   }
 };
-const adminUpload = multer({
-  storage: adminStorage,
-  fileFilter: adminFileFilter,
-  limits: { fileSize: MAX_FILE_SIZE },
-});
-async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
-  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-  if (!pythonServiceUrl) {
-    return {
-      success: false,
-      message: "Python service URL not configured.",
-      text: null,
-      chunksForKg: [],
-    };
-  }
-  const addDocumentUrl = `${pythonServiceUrl}/add_document`;
-  try {
-    const response = await axios.post(
-      addDocumentUrl,
-      {
-        user_id: "admin",
-        file_path: filePath,
-        original_name: originalName,
-      },
-      { timeout: 300000 }
-    );
-
-    const text = response.data?.raw_text_for_analysis || null;
-    const chunksForKg = response.data?.chunks_with_metadata || [];
-    const isSuccess = !!(text && text.trim());
-    return {
-      success: isSuccess,
-      message: response.data?.message || "Python RAG service call completed.",
-      text: text,
-      chunksForKg: chunksForKg,
-    };
-  } catch (error) {
-    const errorMsg =
-      error.response?.data?.error ||
-      error.message ||
-      "Unknown error calling Python RAG.";
-    return {
-      success: false,
-      message: `Python RAG call failed: ${errorMsg}`,
-      text: null,
-      chunksForKg: [],
-    };
-  }
+const adminUpload = multer({ storage: adminStorage, fileFilter: adminFileFilter, limits: { fileSize: MAX_FILE_SIZE }});
+async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return { success: false, message: "Python service URL not configured.", text: null, chunksForKg: [] };
+    }
+    const addDocumentUrl = `${pythonServiceUrl}/add_document`;
+    try {
+        const response = await axios.post(addDocumentUrl, {
+            user_id: "admin",
+            file_path: filePath, original_name: originalName
+        }, { timeout: 300000 });
+        
+        const text = response.data?.raw_text_for_analysis || null;
+        const chunksForKg = response.data?.chunks_with_metadata || [];
+        const isSuccess = !!(text && text.trim());
+        return { 
+            success: isSuccess, 
+            message: response.data?.message || "Python RAG service call completed.", 
+            text: text,
+            chunksForKg: chunksForKg
+        };
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Unknown error calling Python RAG.";
+        return { success: false, message: `Python RAG call failed: ${errorMsg}`, text: null, chunksForKg: [] };
+    }
 }
 async function callPythonDeletionEndpoint(
   method,
