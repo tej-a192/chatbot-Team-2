@@ -4,8 +4,8 @@ const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@googl
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-1.5-flash";
 
-const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192;
-const DEFAULT_MAX_OUTPUT_TOKENS_KG = 65536;
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
+const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
 
 const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },

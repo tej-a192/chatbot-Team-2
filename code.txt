@@ -14379,9 +14379,6 @@ const CHAT_MAIN_SYSTEM_PROMPT = () => {
 };
 
 
-
-
-// ... (keep all other prompts and the module.exports block)
 const WEB_SEARCH_CHAT_SYSTEM_PROMPT = `You are a helpful AI research assistant. Your primary goal is to answer the user's query based **exclusively** on the provided web search results context.
 
 **Core Instructions:**
@@ -14418,44 +14415,33 @@ const CHAT_USER_PROMPT_TEMPLATES = {
 // === AGENTIC FRAMEWORK PROMPTS - V5 (Classification-Based Logic) ===
 // ==============================================================================
 const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext) => {
-  const toolsFormatted = modelContext.available_tools.map(tool => 
-    `{ "tool_name": "${tool.name}", "description": "${tool.description}" }`
-  ).join(',\n');
-
+  const userQueryForPrompt = requestContext.userQuery || "[User query not provided]";
   let activeModeInstructions;
 
-  // --- THIS IS THE NEW, SMARTER LOGIC ---
   if (requestContext.isWebSearchEnabled) {
       activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. Your decision MUST be 'web_search'. This is not optional.`;
-  } 
-  else if (requestContext.documentContextName) {
+  } else if (requestContext.isAcademicSearchEnabled) {
+      activeModeInstructions = `**CURRENT MODE: Academic Search.** The user has manually enabled academic search. Your decision MUST be 'academic_search'. This is not optional.`;
+  } else if (requestContext.documentContextName) {
       activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". Your decision MUST be 'rag_search'. This is not optional.`;
+  } else {
+      activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool has been selected. Analyze the user's query to decide. If it requires real-time information or external knowledge, choose 'web_search'. For academic papers or scholarly articles, choose 'academic_search'. For all other general queries, definitions, or explanations, your decision MUST be 'direct_answer'.`;
   }
-  else {
-      // This is the new, more intelligent instruction for Direct Chat mode.
-      activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool has been selected by the user. You must analyze the user's query to make a decision.
--   If the query asks for general knowledge, definitions, explanations, or concepts (like "what is X?", "explain Y", "how does Z work?"), your decision MUST be 'direct_answer'.
--   Only if the query explicitly asks for very recent, real-time information (e.g., "what is the weather today?", "latest news") should you consider 'web_search'.
--   For this query, 'direct_answer' is the most appropriate choice.`;
-  }
-  // --- END OF NEW LOGIC ---
-
-  const userQueryForPrompt = requestContext.userQuery || "[User query not provided]";
 
   return `
-You are a "Router" agent. Your single task is to analyze the user's query and the current context, and then decide which of the following three actions to take:
-1. 'web_search'
-2. 'rag_search'
-3. 'direct_answer'
+You are a "Router" agent. Your single task is to analyze the user's query and the current context, and then decide which of the available tools to use, or if you should answer directly.
+
+**AVAILABLE TOOLS:**
+${JSON.stringify(modelContext.available_tools, null, 2)}
 
 **CONTEXT FOR YOUR DECISION:**
 - ${activeModeInstructions}
 - User's Query: "${userQueryForPrompt}"
 
 **YOUR TASK:**
-Based on the CURRENT MODE and QUERY ANALYSIS, you MUST choose one action. Your entire output MUST be a single, valid JSON object with a "tool_call" key. Do not provide any other text or explanation.
+Based on the CURRENT MODE and the USER'S QUERY, choose one action. Your entire output MUST be a single, valid JSON object with a "tool_call" key. Do not provide any other text or explanation.
 
-- If your decision is 'web_search' or 'rag_search', format as:
+- If your decision is to use a tool, format as:
   \`\`\`json
   {
     "tool_call": {
@@ -14465,7 +14451,7 @@ Based on the CURRENT MODE and QUERY ANALYSIS, you MUST choose one action. Your e
   }
   \`\`\`
 
-- If your decision is 'direct_answer', format as:
+- If your decision is to answer directly without a tool, format as:
   \`\`\`json
   {
     "tool_call": null
@@ -14477,74 +14463,118 @@ Provide your JSON decision now.
 };
 
 
+// const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
+//     // Shared instruction block for all synthesizer prompts
+//     const formattingInstructions = `
+// **Formatting Guidelines (MANDATORY):**
+// - **Structure:** Use Markdown for headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>).
+// - **Clarity:** Use the most appropriate combination of formatting elements to make your answer easy to read and understand.
+// - **Tables:** If data is tabular, present it as a Markdown table.
+// - **Code:** If the answer involves code, use fenced code blocks with language identifiers (e.g., \`\`\`python ... \`\`\`).
+// `;
+
+//     // Default prompt for RAG and other tools (no change here)
+// let systemInstruction = `You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
+
+// **Response Guidelines:**
+// 1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
+// 2.  **BE COMPREHENSIVE:** Do not just give a one-sentence answer. Elaborate on the information found, providing context and detailed explanations based on the tool's output.
+// 3.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used.
+// 4.  **DO NOT CITE:** Do not include citation markers like [1], [2] in your answer. This will be handled separately.
+
+// ${formattingInstructions}
+
+// ---
+// **USER'S ORIGINAL QUERY:**
+// ${originalQuery}
+// ---
+// **INFORMATION GATHERED BY TOOL (Output from '${toolName}'):**
+// ${toolOutput}
+// ---
+
+// **FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
+// `;
+
+//     // --- **THIS IS THE MODIFIED SECTION FOR WEB SEARCH** ---
+//     if (toolName === 'web_search') {
+//         systemInstruction = `
+// You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
+
+// Your final response MUST follow this two-part structure precisely:
+// A detailed, well-written answer to the user's query.
+// **References Section:** A formatted list of the sources used.
+
+// ---
+// **PART 1: MAIN ANSWER INSTRUCTIONS**
+
+// -   Your answer **MUST** be based on the provided search results.
+// -   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]." If information comes from multiple sources, cite them all, like so: "[2, 3]".
+// -   Be comprehensive. Do not just give a one-sentence answer. Synthesize information from multiple sources to build a full, well-rounded explanation.
+// -   Use rich Markdown formatting (headings, lists, bolding, tables) to make the answer clear and engaging.
+
+// ---
+// **PART 2: REFERENCES SECTION INSTRUCTIONS**
+
+// -   After you have finished writing the main answer, add a horizontal rule (\`---\`).
+// -   After the line, add a heading: \`## References\`.
+// -   Below the heading, create a numbered list of all the sources you cited.
+// -   Format each reference like this: \`[1] [Source Title](Source URL)\`.
+
+// ---
+// **EXAMPLE OF COMPLETE OUTPUT:**
+
+// The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2]. While violet light is scattered even more than blue, our eyes are more sensitive to blue light, which is why we perceive the sky as blue [1, 3].
+
+// ---
+// ## References
+// [1] [Why Is the Sky Blue? - NASA SpacePlace](https://spaceplace.nasa.gov/blue-sky/en/)
+// [2] [Rayleigh scattering - Wikipedia](https://en.wikipedia.org/wiki/Rayleigh_scattering)
+// [3] [Optics: The Blue Sky - The Physics Classroom](https://www.physicsclassroom.com/class/light/Lesson-2/Blue-Skies)
+
+// ---
+// **Now, perform this task using the following information:**
+
+// **USER'S ORIGINAL QUERY:**
+// ${originalQuery}
+
+// **WEB SEARCH RESULTS:**
+// ${toolOutput}
+
+// **YOUR COMPLETE, FORMATTED RESPONSE:**
+// `;
+//     }
+
+//     return systemInstruction;
+// };
+
+
+
+// ==============================================================================
+// === CONTENT CREATION PROMPTS (PPTX, DOCX, PODCAST) ===
+// ==============================================================================
+
 const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
-    // Shared instruction block for all synthesizer prompts
-    const formattingInstructions = `
-**Formatting Guidelines (MANDATORY):**
-- **Structure:** Use Markdown for headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>).
-- **Clarity:** Use the most appropriate combination of formatting elements to make your answer easy to read and understand.
-- **Tables:** If data is tabular, present it as a Markdown table.
-- **Code:** If the answer involves code, use fenced code blocks with language identifiers (e.g., \`\`\`python ... \`\`\`).
-`;
+    let synthesizerUserMessage;
 
-    // Default prompt for RAG and other tools (no change here)
-    let systemInstruction = `
-You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
-
-**Response Guidelines:**
-1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
-2.  **BE COMPREHENSIVE:** Do not just give a one-sentence answer. Elaborate on the information found, providing context and detailed explanations based on the tool's output.
-3.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used.
-4.  **DO NOT CITE:** Do not include citation markers like [1], [2] in your answer. This will be handled separately.
-
-${formattingInstructions}
-
----
-**USER'S ORIGINAL QUERY:**
-${originalQuery}
----
-**INFORMATION GATHERED BY TOOL (Output from '${toolName}'):**
-${toolOutput}
----
-
-**FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
-`;
-
-    // --- **THIS IS THE MODIFIED SECTION FOR WEB SEARCH** ---
     if (toolName === 'web_search') {
-        systemInstruction = `
+        synthesizerUserMessage = `
 You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
 
 Your final response MUST follow this two-part structure precisely:
-A detailed, well-written answer to the user's query.
-**References Section:** A formatted list of the sources used.
+1.  A detailed, well-written answer to the user's query.
+2.  A "**References**" section with a formatted list of the sources used.
 
----
 **PART 1: MAIN ANSWER INSTRUCTIONS**
-
 -   Your answer **MUST** be based on the provided search results.
 -   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]." If information comes from multiple sources, cite them all, like so: "[2, 3]".
 -   Be comprehensive. Do not just give a one-sentence answer. Synthesize information from multiple sources to build a full, well-rounded explanation.
 -   Use rich Markdown formatting (headings, lists, bolding, tables) to make the answer clear and engaging.
 
----
 **PART 2: REFERENCES SECTION INSTRUCTIONS**
-
 -   After you have finished writing the main answer, add a horizontal rule (\`---\`).
 -   After the line, add a heading: \`## References\`.
 -   Below the heading, create a numbered list of all the sources you cited.
 -   Format each reference like this: \`[1] [Source Title](Source URL)\`.
-
----
-**EXAMPLE OF COMPLETE OUTPUT:**
-
-The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2]. While violet light is scattered even more than blue, our eyes are more sensitive to blue light, which is why we perceive the sky as blue [1, 3].
-
----
-## References
-[1] [Why Is the Sky Blue? - NASA SpacePlace](https://spaceplace.nasa.gov/blue-sky/en/)
-[2] [Rayleigh scattering - Wikipedia](https://en.wikipedia.org/wiki/Rayleigh_scattering)
-[3] [Optics: The Blue Sky - The Physics Classroom](https://www.physicsclassroom.com/class/light/Lesson-2/Blue-Skies)
 
 ---
 **Now, perform this task using the following information:**
@@ -14557,16 +14587,22 @@ ${toolOutput}
 
 **YOUR COMPLETE, FORMATTED RESPONSE:**
 `;
-    }
+    } else { // For RAG, KG, Academic, and other tools
+        synthesizerUserMessage = `
+**USER'S ORIGINAL QUERY:**
+"${originalQuery}"
 
-    return systemInstruction;
+---
+**INFORMATION GATHERED BY TOOL ('${toolName}'):**
+${toolOutput}
+---
+
+Based **only** on the information gathered by the tool above, please provide a comprehensive, well-formatted final answer to my original query. Adhere to all formatting rules from your core instructions. Do not mention that a tool was used and do not include citation markers like [1], [2].
+`;
+    }
+    return synthesizerUserMessage;
 };
 
-
-
-// ==============================================================================
-// === CONTENT CREATION PROMPTS (PPTX, DOCX, PODCAST) ===
-// ==============================================================================
 
 const DOCX_EXPANSION_PROMPT_TEMPLATE = `
 You are a professional content creator and subject matter expert. Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, multi-page document in Markdown format. You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge. The final output must be a single block of well-structured Markdown text.
@@ -14675,7 +14711,7 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
-};
+};  
 ```
 
 `server/middleware/authMiddleware.js`
@@ -16031,19 +16067,6 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 
 ```python
 # server/rag_service/app.py
-<<<<<<< HEAD
-
-import os
-import sys
-import traceback
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
-import logging
-import atexit
-import uuid
-
-from duckduckgo_search import DDGS
-from qdrant_client import models as qdrant_models # Import Qdrant models
-=======
 import os
 import sys
 import traceback
@@ -16056,7 +16079,6 @@ from flask import Flask, request, jsonify, current_app, send_from_directory, aft
 from pydub import AudioSegment
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
->>>>>>> origin/skms
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16074,45 +16096,9 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
-<<<<<<< HEAD
-    import google.generativeai as genai
-
-    if config.GEMINI_API_KEY:
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
-    else:
-        LLM_MODEL = None
-        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
-
-    def llm_wrapper(prompt):
-        if not LLM_MODEL:
-            raise ConnectionError("Gemini API Key is not configured in the Python service.")
-        for attempt in range(3):
-            try:
-                response = LLM_MODEL.generate_content(prompt)
-                if response.parts:
-                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
-                elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
-                else:
-                    logger.warning("LLM returned empty response without explicit block reason.")
-                    return ""
-            except Exception as e:
-                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
-                if attempt == 2: raise
-        return ""
-
-=======
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
->>>>>>> origin/skms
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -16124,9 +16110,6 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-<<<<<<< HEAD
-# Initialize services
-=======
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
     """Dynamically creates a GenerativeModel instance with the provided API key."""
@@ -16165,7 +16148,6 @@ def llm_wrapper(prompt: str, api_key: str):
     return ""
 
 # --- Initialize other services ---
->>>>>>> origin/skms
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -16191,54 +16173,6 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
-<<<<<<< HEAD
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
-@app.route('/query', methods=['POST'])
-def search_qdrant_documents():
-    current_app.logger.info("--- /query Request (RAG Search Only) ---")
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    
-    query_text = data.get('query')
-    user_id = data.get('user_id') # user_id is mainly for logging here
-    
-    if not query_text or not user_id:
-        return create_error_response("Missing 'query' or 'user_id'", 400)
-
-    try:
-        k = data.get('k', 5)
-        document_context_name = data.get('documentContextName')
-        
-        must_conditions = []
-        if document_context_name:
-            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
-            must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
-                match=qdrant_models.MatchValue(value=document_context_name)
-            ))
-        
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
-        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-        
-        retrieved_docs, snippet, docs_map = vector_service.search_documents(
-            query=query_text, k=k, filter_conditions=qdrant_filters
-        )
-        
-        response_payload = {
-            "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
-            "formatted_context_snippet": snippet,
-            "retrieved_documents_map": docs_map,
-        }
-        
-        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
-        return jsonify(response_payload), 200
-        
-    except Exception as e:
-        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
-        return create_error_response(f"Query failed: {str(e)}", 500)
-
-# All other endpoints remain unchanged and are included for completeness
-=======
 @app.route('/health', methods=['GET'])
 def health_check():
     status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
@@ -16303,7 +16237,6 @@ def academic_search_route():
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
 
->>>>>>> origin/skms
 @app.route('/web_search', methods=['POST'])
 def web_search_route():
     data = request.get_json()
@@ -16316,26 +16249,6 @@ def web_search_route():
 
 @app.route('/export_podcast', methods=['POST'])
 def export_podcast_route():
-<<<<<<< HEAD
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    source_document_text, outline_content = data.get('sourceDocumentText'), data.get('outlineContent')
-    if not all([source_document_text, outline_content]): return create_error_response("Missing required fields", 400)
-    try:
-        script = podcast_generator.generate_podcast_script(source_document_text, outline_content, llm_wrapper)
-        dialogue = podcast_generator.parse_script_into_dialogue(script)
-        if not dialogue: raise ValueError("Failed to parse the generated script.")
-        filename = f"podcast_{uuid.uuid4()}.mp3"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        podcast_generator.synthesize_dual_speaker_audio(dialogue, output_path)
-        @after_this_request
-        def cleanup(response):
-            try: os.remove(output_path)
-            except OSError as e: logger.error(f"Error deleting temp podcast file {output_path}: {e}")
-            return response
-        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-    except Exception as e: return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
-=======
     current_app.logger.info("--- /export_podcast Request (gTTS + Speed-Up) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
@@ -16401,23 +16314,11 @@ def generate_kg_from_text_route():
     except Exception as e:
         logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
         return create_error_response(f"KG Generation failed: {str(e)}", 500)
->>>>>>> origin/skms
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-<<<<<<< HEAD
-    outline_content, doc_type, source_document_text = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText')
-    if not all([outline_content, doc_type, source_document_text]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline_content, source_document_text, doc_type, llm_wrapper)
-        slides_data = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename = f"generated_doc_{uuid.uuid4()}.{doc_type}"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        if doc_type == 'pptx': document_generator.create_ppt(slides_data, output_path)
-        else: document_generator.create_doc(slides_data, output_path, "text_content")
-=======
     outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
     if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
     try:
@@ -16426,17 +16327,12 @@ def generate_document_route():
         filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
         if doc_type == 'pptx': document_generator.create_ppt(slides, path)
         else: document_generator.create_doc(slides, path, "text_content")
->>>>>>> origin/skms
         return jsonify({"success": True, "filename": filename}), 201
     except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
-<<<<<<< HEAD
-    if '..' in filename or filename.startswith('/'): return create_error_response("Invalid filename.", 400)
-=======
     if '..' in filename: return create_error_response("Invalid filename.", 400)
->>>>>>> origin/skms
     try:
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
         if not os.path.exists(file_path): return create_error_response("File not found.", 404)
@@ -16446,60 +16342,10 @@ def download_document_route(filename):
             except OSError as e: logger.error(f"Error deleting temp file {file_path}: {e}")
             return response
         return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-<<<<<<< HEAD
-    except Exception as e: return create_error_response("Could not process download request.", 500)
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
-    http_status_code = 503
-    if not vector_service: status_details["qdrant_service"] = "failed_to_initialize"
-    else:
-        status_details["qdrant_service"] = "initialized"
-        try:
-            vector_service.client.get_collection(collection_name=vector_service.collection_name)
-            status_details["qdrant_collection_status"] = "exists_and_accessible"
-        except Exception as e: status_details["qdrant_collection_status"] = f"error: {str(e)}"
-    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
-    if neo4j_ok: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialized_via_handler", "connected"
-    else: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialization_failed_or_handler_error", neo4j_conn_status
-    if status_details["qdrant_service"] == "initialized" and status_details.get("qdrant_collection_status") == "exists_and_accessible" and neo4j_ok:
-        status_details["status"], http_status_code = "ok", 200
-    return jsonify(status_details), http_status_code
-
-@app.route('/add_document', methods=['POST'])
-def add_document_qdrant():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_chunks_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_chunks_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_chunks_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_chunks_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
-
-@app.route('/query_kg', methods=['POST'])
-def query_kg_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, document_name, query_text = data.get('user_id'), data.get('document_name'), data.get('query')
-    if not all([user_id, document_name, query_text]): return create_error_response("Missing fields", 400)
-    try:
-        facts_summary = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
-        return jsonify({"success": True, "facts": facts_summary}), 200
-    except Exception as e: return create_error_response(f"Failed to query KG: {str(e)}", 500)
-
-=======
     except Exception as e:
         return create_error_response("Could not process download request.", 500)
 
 # KG & DB Management Routes
->>>>>>> origin/skms
 @app.route('/delete_qdrant_document_data', methods=['DELETE'])
 def delete_qdrant_data_route():
     data = request.get_json()
@@ -16538,11 +16384,7 @@ def delete_kg_route(user_id, document_name):
 
 if __name__ == '__main__':
     logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-<<<<<<< HEAD
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=True)
-=======
     app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
->>>>>>> origin/skms
 
 ```
 
@@ -17351,20 +17193,6 @@ def search_knowledge_graph(user_id: str, document_name: str, query_text: str) ->
 `server/rag_service/podcast_generator.py`
 
 ```python
-<<<<<<< HEAD
-# server/rag_service/podcast_generator.py
-import logging
-import os
-import re
-import uuid
-import subprocess
-from gtts import gTTS
-import io
-
-logger = logging.getLogger(__name__)
-
-# --- UPDATED AND MORE DIRECT PROMPT ---
-=======
 
 # server/rag_service/podcast_generator.py
 import logging
@@ -17373,7 +17201,6 @@ from gtts import gTTS
 
 logger = logging.getLogger(__name__)
 
->>>>>>> origin/skms
 PODCAST_SCRIPT_PROMPT_TEMPLATE = """
 You are an AI podcast script generator. Your SOLE task is to generate a realistic, two-speaker educational dialogue based on the provided text. The script should be substantial, aiming for a length of at least 600-800 words to ensure a meaningful discussion.
 
@@ -17381,52 +17208,6 @@ You are an AI podcast script generator. Your SOLE task is to generate a realisti
 
 ---
 ## Podcast Style Guide
-<<<<<<< HEAD
-
-- **Format**: Two-speaker conversational podcast.
-- **SPEAKER_A**: The "Curious Learner". Asks clarifying questions, follow-up questions, and represents the student's perspective. Their role is to drive the conversation deeper.
-- **SPEAKER_B**: The "Expert Teacher". Provides clear, detailed explanations and examples based on the document text.
-- **Dialogue Flow**: The conversation must be a natural back-and-forth. SPEAKER_A asks a question, SPEAKER_B gives a detailed answer, and SPEAKER_A should follow up with another question that logically flows from the answer. Create at least 5-7 such exchanges.
-
----
-## Script Structure
-
-### 1. Opening
-The script must begin with a brief, engaging conversation to set the stage.
-`SPEAKER_A: Hey, I was just reading this document about {study_focus}, and I'm a bit stuck on a few things. Can we talk through it?`
-`SPEAKER_B: Absolutely! I'd be happy to. What's on your mind first?`
-
-### 2. Main Body
-The main part of the script should be a detailed question-and-answer dialogue driven by SPEAKER_A, covering the key points of the `STUDY FOCUS`. Use the `DOCUMENT TEXT` to formulate SPEAKER_B's expert answers. Ensure the conversation flows logically from one point to the next.
-
-### 3. Closing
-Conclude the podcast with a quick summary and an encouraging sign-off.
-`SPEAKER_A: This makes so much more sense now. Thanks for breaking that all down for me!`
-`SPEAKER_B: You're welcome! The key is to explore these topics step-by-step. Keep up the great work!`
-
----
-## Source Material
-
-**STUDY FOCUS (The main topic for the podcast):**
-{study_focus}
-
-**DOCUMENT TEXT (Use this for all factual answers):**
-{document_content}
-
----
-**FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_A:" and aim for a 600-800 word script):**
-"""
-
-
-def generate_podcast_script(source_document_text, outline_content, llm_function):
-    """
-    Generates a two-speaker podcast script using the LLM.
-    """
-    logger.info("Generating two-speaker podcast script with updated prompt...")
-    
-    prompt = PODCAST_SCRIPT_PROMPT_TEMPLATE.format(
-        document_content=source_document_text[:40000], # Limit context to avoid excessive token usage
-=======
 - **Format**: Two-speaker conversational podcast.
 - **SPEAKER_A**: The "Curious Learner". Asks clarifying questions and drives the conversation.
 - **SPEAKER_B**: The "Expert Teacher". Provides clear, detailed explanations based on the document.
@@ -17471,120 +17252,12 @@ def generate_podcast_script(source_document_text, outline_content, podcast_optio
         purpose_instruction=purpose_instruction,
         length_instruction=length_instruction,
         document_content=source_document_text[:60000],
->>>>>>> origin/skms
         study_focus=outline_content,
     )
     
     script = llm_function(prompt)
     if not script or not script.strip():
         raise ValueError("LLM failed to generate a podcast script.")
-<<<<<<< HEAD
-    
-    logger.info(f"LLM generated two-speaker podcast script. Length: {len(script)}")
-    return script
-
-def parse_script_into_dialogue(script_text):
-    """Parses the script text into a list of (speaker, text) tuples."""
-    dialogue = []
-    lines = script_text.split('\n')
-    current_speaker = None
-    current_text = ""
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        
-        match = re.match(r'^(SPEAKER_[AB]):(.*)', line, re.IGNORECASE)
-        if match:
-            if current_speaker and current_text:
-                dialogue.append((current_speaker, current_text.strip()))
-            
-            current_speaker = match.group(1).upper()
-            current_text = match.group(2).strip()
-        elif current_speaker:
-            current_text += " " + line
-            
-    if current_speaker and current_text:
-        dialogue.append((current_speaker, current_text.strip()))
-        
-    return dialogue
-
-def synthesize_dual_speaker_audio(dialogue, output_path):
-    """
-    Creates a two-speaker audio file using gTTS and FFmpeg subprocess.
-    """
-    logger.info(f"Synthesizing dual-speaker audio for {len(dialogue)} parts using FFmpeg.")
-    
-    temp_dir = os.path.dirname(output_path)
-    session_id = str(uuid.uuid4())
-    temp_files = []
-    ffmpeg_playlist_path = os.path.join(temp_dir, f"playlist_{session_id}.txt")
-
-    tts_voices = {
-        'SPEAKER_A': {'lang': 'en', 'tld': 'co.uk'},
-        'SPEAKER_B': {'lang': 'en', 'tld': 'com'}
-    }
-
-    try:
-        for i, (speaker, text) in enumerate(dialogue):
-            if not text:
-                continue
-            
-            try:
-                temp_filename = os.path.join(temp_dir, f"temp_{session_id}_{i:03d}.mp3")
-                voice_params = tts_voices.get(speaker, tts_voices['SPEAKER_A'])
-                clean_text = text.replace('*', '').replace('[PAUSE]', '...')
-
-                tts = gTTS(text=clean_text, lang=voice_params['lang'], tld=voice_params['tld'], slow=False)
-                tts.save(temp_filename)
-                
-                silence_filename = os.path.join(temp_dir, f"silence_{session_id}_{i:03d}.mp3")
-                subprocess.run(
-                    ['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '0.7', '-q:a', '9', '-acodec', 'libmp3lame', silence_filename],
-                    check=True, capture_output=True, text=True
-                )
-
-                temp_files.append(temp_filename)
-                temp_files.append(silence_filename)
-
-            except Exception as e:
-                logger.warning(f"Skipping dialogue part due to gTTS/ffmpeg silence error: {e}. Text: '{text[:50]}...'")
-
-        if not temp_files:
-            raise ValueError("No audio segments were successfully generated.")
-
-        with open(ffmpeg_playlist_path, 'w') as f:
-            for temp_file in temp_files:
-                escaped_path = temp_file.replace('\\', '/').replace("'", "'\\''")
-                f.write(f"file '{escaped_path}'\n")
-        
-        temp_files.append(ffmpeg_playlist_path)
-
-        logger.info(f"Concatenating {len(temp_files)-1} audio segments into final podcast file.")
-        ffmpeg_command = [
-            'ffmpeg', '-f', 'concat', '-safe', '0', '-i', ffmpeg_playlist_path, '-c', 'copy', output_path
-        ]
-        
-        subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-        
-        return True
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg command failed with exit code {e.returncode}\nFFmpeg stderr: {e.stderr}")
-        raise IOError(f"FFmpeg failed during audio processing: {e.stderr}") from e
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during audio synthesis: {e}", exc_info=True)
-        raise
-    finally:
-        logger.info(f"Cleaning up {len(temp_files)} temporary files...")
-        for temp_file in temp_files:
-            try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except OSError as e_remove:
-                logger.error(f"Error removing temporary file {temp_file}: {e_remove}")
-=======
     logger.info(f"LLM generated podcast script. Length: {len(script)}")
     return script
 
@@ -17603,7 +17276,6 @@ def synthesize_audio_with_gtts(text: str, output_path: str):
     except Exception as e:
         logger.error(f"gTTS failed during synthesis: {e}", exc_info=True)
         raise IOError("Text-to-Speech synthesis with gTTS failed.") from e
->>>>>>> origin/skms
 
 ```
 
@@ -20557,7 +20229,7 @@ module.exports = router;
 
 ```javascript
 // server/services/agentService.js
-const { createAgenticSystemPrompt, createSynthesizerPrompt } = require('../config/promptTemplates.js');
+const { CHAT_MAIN_SYSTEM_PROMPT, createSynthesizerPrompt, createAgenticSystemPrompt } = require('../config/promptTemplates.js');
 const { availableTools } = require('./toolRegistry.js');
 const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
 const geminiService = require('./geminiService.js');
@@ -20566,64 +20238,48 @@ const User = require('../models/User');
 const { decrypt } = require('../utils/crypto');
 
 function parseToolCall(responseText) {
-    const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
-    const jsonString = jsonMatch ? jsonMatch[2] : responseText;
     try {
+        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+        const jsonString = jsonMatch ? jsonMatch[2] : responseText;
         const jsonResponse = JSON.parse(jsonString);
         if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
             return jsonResponse.tool_call;
         }
         return null;
     } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON from LLM response: ${e.message}. Response: ${responseText.substring(0, 200)}...`);
+        console.warn(`[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(0, 200)}...`);
         return null;
     }
 }
 
-async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled } = requestContext;
-
-    const user = await User.findById(userId).select('+encryptedApiKey');
-    if (!user) {
-        throw new Error("User not found during agent processing.");
-    }
-    const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-    if (user.encryptedApiKey && !userApiKey) {
-        console.warn(`[AgentService] Failed to decrypt API key for user ${userId}.`);
-    }
-
-    const modelContext = createModelContext({ availableTools });
-    const agenticContext = createAgenticContext({ systemPrompt });
+async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt, requestContext) {
+    const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled, documentContextName, criticalThinkingEnabled, filter, isWebSearchEnabled, apiKey } = requestContext;
     
-    const agenticSystemPrompt = createAgenticSystemPrompt(
-        modelContext, 
-        agenticContext, 
-        { ...requestContext, userQuery, isAcademicSearchEnabled }
-    );
-
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
     const llmOptions = {
         ...(llmProvider === 'ollama' && { model: ollamaModel }),
-        apiKey: userApiKey,
+        apiKey: apiKey,
         ollamaUrl: ollamaUrl
     };
 
-    console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
-    const routerResponseText = await llmService.generateContentWithHistory(
-        [], 
-        "Please analyze the provided context and user query and return your JSON decision.", 
-        agenticSystemPrompt,
-        llmOptions
-    );
+    const modelContext = createModelContext({ availableTools });
+    const agenticContext = createAgenticContext({ systemPrompt: clientSystemPrompt });
+    const routerSystemPrompt = createAgenticSystemPrompt(modelContext, agenticContext, { userQuery, ...requestContext });
 
+    console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
+    const routerResponseText = await llmService.generateContentWithHistory([], "Analyze the query and decide on an action.", routerSystemPrompt, llmOptions);
     const toolCall = parseToolCall(routerResponseText);
 
+    // --- DIRECT ANSWER PATH (MODIFIED) ---
     if (!toolCall || !toolCall.tool_name) {
-        console.log('[AgentService] Decision: Direct Answer.');
+        console.log('[AgentService] Decision: Direct Answer. Using main prompt engine.');
+        // Build the full, robust system prompt by combining the user's persona with core instructions.
+        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT(clientSystemPrompt);
+        
         const directAnswer = await llmService.generateContentWithHistory(
             chatHistory,
-            userQuery,
-            systemPrompt,
+            userQuery, // The user's query is the prompt for a direct answer.
+            finalSystemPrompt,
             llmOptions
         );
         return {
@@ -20633,6 +20289,7 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         };
     }
 
+    // --- TOOL-BASED ANSWER PATH ---
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
@@ -20640,15 +20297,11 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
     }
 
     try {
-        const toolExecutionPromises = [];
-        const executedToolNames = [];
-
-        toolExecutionPromises.push(mainTool.execute(toolCall.parameters, requestContext));
-        executedToolNames.push(toolCall.tool_name);
-        
+        const toolExecutionPromises = [mainTool.execute(toolCall.parameters, requestContext)];
+        const executedToolNames = [toolCall.tool_name];
         let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
 
-        if (toolCall.tool_name === 'rag_search' && requestContext.criticalThinkingEnabled) {
+        if (toolCall.tool_name === 'rag_search' && criticalThinkingEnabled) {
             console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
             const kgTool = availableTools['kg_search'];
             toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
@@ -20657,19 +20310,16 @@ async function processAgenticRequest(userQuery, chatHistory, systemPrompt, reque
         }
 
         const toolResults = await Promise.all(toolExecutionPromises);
-        
-        const combinedToolOutput = toolResults.map((result, index) => {
-            const toolName = executedToolNames[index];
-            return `--- TOOL OUTPUT: ${toolName.toUpperCase()} ---\n${result.toolOutput}`;
-        }).join('\n\n');
-        
+        const combinedToolOutput = toolResults.map((result, index) => `--- TOOL OUTPUT: ${executedToolNames[index].toUpperCase()} ---\n${result.toolOutput}`).join('\n\n');
         const combinedReferences = toolResults.flatMap(result => result.references || []);
 
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
-        const synthesizerPrompt = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
-        const finalAnswer = await llmService.generateContentWithHistory(
-            chatHistory, synthesizerPrompt, systemPrompt, llmOptions
-        );
+        
+        // Build the two main components for the final LLM call
+        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT(clientSystemPrompt);
+        const synthesizerUserQuery = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
+        
+        const finalAnswer = await llmService.generateContentWithHistory(chatHistory, synthesizerUserQuery, finalSystemPrompt, llmOptions);
         
         return {
             finalAnswer,
@@ -20696,8 +20346,8 @@ const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@googl
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-1.5-flash";
 
-const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192;
-const DEFAULT_MAX_OUTPUT_TOKENS_KG = 65536;
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
+const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
 
 const baseSafetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -20793,14 +20443,27 @@ async function generateContentWithHistory(
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
         let clientMessage = "Failed to get response from AI service.";
-        if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
-        else if (error.message?.includes("API key not found")) clientMessage = "AI Service Error: API Key not found or invalid.";
-        else if (error.message?.includes("billing account")) clientMessage = "AI Service Error: Billing account issue with the provided API Key.";
-        else if (error.message?.includes("blocked due to safety")) clientMessage = "AI response blocked due to safety settings.";
-        else if (error.message?.includes("Invalid JSON payload")) clientMessage = "AI Service Error: Invalid request format sent to AI.";
-        else if (error.message?.includes("User location is not supported")) clientMessage = "AI Service Error: User location is not supported for this model.";
-        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; 
-        
+        if (error.message?.includes("API key not valid")) {
+            clientMessage = "Invalid API Key.";
+        } else if (error.message?.includes("API key not found")) {
+            clientMessage = "API Key not found";
+        } else if (error.message?.includes("API_KEY_INVALID")) {
+            clientMessage = "API Key not invalid. Please Provide the Valid one.";
+        } else if (error.message?.includes("enabled this API recently")) {
+            clientMessage = "Looks like new API key. Need some time to fully activate."
+        } else if (error.message?.includes("billing account")) {
+            clientMessage = "Billing account issue with the provided API Key.";
+        } else if (error.message?.includes("blocked due to safety")) {
+            clientMessage = "AI response blocked due to safety settings.";
+        } else if (error.message?.includes("Invalid JSON payload")) {
+            clientMessage = "Invalid request format sent to AI.";
+        } else if (error.message?.includes("User location is not supported")) {
+            clientMessage = "User location is not supported for this model.";
+        } else if (error.message?.includes("model is overloaded")) {
+            clientMessage = "The AI model is currently overloaded. Please try again in a moment.";
+        } else if (error.status === 400) {
+            clientMessage = `${error.message}`; 
+        }
         const enhancedError = new Error(clientMessage);
         enhancedError.status = error.status || 500; 
         enhancedError.originalError = error; 
@@ -21085,14 +20748,16 @@ module.exports = { generateAndStoreKg };
 `server/services/ollamaService.js`
 
 ```javascript
+//ollama service
+
 // server/services/ollamaService.js
 const axios = require('axios');
 
 const SERVER_DEFAULT_OLLAMA_URL = process.env.OLLAMA_API_BASE_URL || 'https://angels-himself-fixtures-unknown.trycloudflare.com';
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5:14b-instruct';
 
-const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT = 4096;
-const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG = 8192;
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT = 29000;
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG = 29000;
 
 // This function formats history for the /api/chat endpoint
 function formatHistoryForOllamaChat(chatHistory) {

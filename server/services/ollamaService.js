@@ -6,8 +6,8 @@ const axios = require('axios');
 const SERVER_DEFAULT_OLLAMA_URL = process.env.OLLAMA_API_BASE_URL || 'https://angels-himself-fixtures-unknown.trycloudflare.com';
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5:14b-instruct';
 
-const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT = 4096;
-const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG = 8192;
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT = 29000;
+const DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG = 29000;
 
 // This function formats history for the /api/chat endpoint
 function formatHistoryForOllamaChat(chatHistory) {
