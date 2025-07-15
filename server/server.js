@@ -26,12 +26,13 @@ const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
 const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/adminDocuments"); // Renamed for clarity
+const adminApiRoutes = require("./routes/adminDocuments"); 
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generation");
 const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
+const toolsRoutes = require("./routes/tools");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -75,6 +76,7 @@ app.use("/api/generate", generationRoutes);
 app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
+app.use("/api/tools", toolsRoutes);
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {

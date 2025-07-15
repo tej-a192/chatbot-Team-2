@@ -8,6 +8,11 @@ import logging
 import atexit
 import uuid
 
+# --mk 
+import subprocess
+import tempfile
+import shutil
+# 
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models # Import Qdrant models
 
@@ -96,6 +101,87 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
+@app.route('/execute_code', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+
+    code = data.get('code')
+    language = data.get('language')
+    test_cases = data.get('testCases', [])
+
+    if not code or not language:
+        return create_error_response("Missing 'code' or 'language'", 400)
+    
+    if language.lower() != 'python':
+        return create_error_response(f"Language '{language}' is not supported.", 400)
+
+    results = []
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        script_path = os.path.join(temp_dir, 'main.py')
+        with open(script_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        for i, case in enumerate(test_cases):
+            case_input = case.get('input', '')
+            expected_output = str(case.get('expectedOutput', '')).strip()
+            
+            case_result = {
+                "input": case_input,
+                "expected": expected_output,
+                "output": "",
+                "error": None,
+                "status": "fail"
+            }
+
+            try:
+                # Execute the script using subprocess
+                process = subprocess.run(
+                    [sys.executable, script_path],
+                    input=case_input,
+                    capture_output=True,
+                    text=True,
+                    timeout=5, # 5-second timeout for execution
+                    encoding='utf-8'
+                )
+
+                stdout = process.stdout.strip()
+                stderr = process.stderr.strip()
+
+                case_result["output"] = stdout
+
+                if process.returncode != 0:
+                    case_result["status"] = "error"
+                    case_result["error"] = stderr or "Script failed with a non-zero exit code."
+                elif stderr:
+                     # Some warnings might go to stderr but not cause a failure
+                     case_result["error"] = f"Warning (stderr):\n{stderr}"
+
+                # Compare output if there was no runtime error
+                if case_result["status"] != "error":
+                    if stdout == expected_output:
+                        case_result["status"] = "pass"
+                    else:
+                        case_result["status"] = "fail"
+                
+            except subprocess.TimeoutExpired:
+                case_result["status"] = "error"
+                case_result["error"] = "Execution timed out after 5 seconds."
+            except Exception as exec_err:
+                case_result["status"] = "error"
+                case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
+
+            results.append(case_result)
+
+    finally:
+        # Securely remove the temporary directory and its contents
+        shutil.rmtree(temp_dir)
+
+    return jsonify({"results": results}), 200
 
 # --- THIS IS THE CORRECTED /query ENDPOINT ---
 @app.route('/query', methods=['POST'])
