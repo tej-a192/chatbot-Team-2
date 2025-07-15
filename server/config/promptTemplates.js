@@ -44,7 +44,7 @@ const ANALYSIS_PROMPTS = {
 2.  **Question as Sub-Heading:** Under each theme, each question MUST be a Markdown H3 heading (e.g., \`### 1. What is the primary subject?\`).
 3.  **Answer as Text:** The answer should follow directly after the question's heading as a standard paragraph.
 4.  **Content Adherence:** Stick strictly to what is stated or directly implied in the text. Do not invent information.
-5.  **Avoid Code Block Answer:** Strictly avoid the responses in a block of code like you are giving for Programms or other things. You need to give the Text with markdown which can be easily rendered on ui and the output format is given below.
+5.  **Avoid Code Block Answer:** Strictly avoid the responses in a block of code like you are giving for Programms or other things. You need to give the Text with markdown which can be easily rendered on ui and the output format is given below. Again I am saying dont give the output in code block with markdown. Give the output as markdown text. If you do like that I will not use again for this responses.
 
 **EXAMPLE OUTPUT STRUCTURE:**
 
@@ -97,48 +97,30 @@ The first step is to record a 5-minute improvised video of yourself answering th
     mindmap: {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
+            // --- THIS IS THE FIX ---
             baseTemplate += `
 **TASK:** Generate a mind map in Mermaid.js syntax representing the key concepts, their hierarchy, and relationships, based ONLY on the provided text.
 
 **CORE REQUIREMENTS FOR MERMAID SYNTAX:**
-1.  **Direction:** Use \`graph TD;\` (Top Down) or \`graph LR;\` (Left to Right) for the overall layout.
-2.  **Nodes:**
-    *   Define unique IDs for each node (e.g., \`A\`, \`B\`, \`C1\`, \`ConceptNameID\`). IDs should be short and alphanumeric.
-    *   Node labels should be concise and derived from the text (e.g., \`A["Main Idea from Text"]\`, \`B("Key Concept 1")\`, \`C{"Another Concept"}\`).
-3.  **Edges (Connections):** Show relationships using \`-->\` (e.g., \`A --> B\`).
-4.  **Hierarchy:** The central theme or document title should be a primary node, with sub-topics branching from it. Deeper sub-topics should branch further.
-5.  **Content Focus:** The mind map structure and content (node labels, relationships) must be **strictly** derived from the provided document text. Do not invent concepts or relationships not present in the text.
-6.  **Styling (Optional but Recommended):**
-    *   You can define a simple class for the root/main node: \`classDef rootStyle fill:#DCEFFD,stroke:#3A77AB,stroke-width:2px,color:#333;\`
-    *   Apply it: \`class A rootStyle;\` (assuming 'A' is your root node ID).
+1.  **Direction:** Use \`graph TD;\` (Top Down) or \`graph LR;\` (Left to Right).
+2.  **Nodes:** Define unique IDs (e.g., \`A\`, \`B1\`) and concise labels derived from the text (e.g., \`A["Main Idea"]\`).
+3.  **Edges:** Show relationships using \`-->\`.
+4.  **Hierarchy:** The central theme should be the primary node.
+5.  **Content Focus:** The mind map content MUST be strictly derived from the provided document text.
 
-**OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):**
-*   Your response **MUST** start directly with the Mermaid graph definition (e.g., \`graph TD;\` or \`mindmap\`).
-*   **DO NOT** wrap your response in a Markdown code block like \`\`\`mermaid ... \`\`\`.
-*   **DO NOT** include any preamble, explanation, or any text before the first line of Mermaid code.
+**OUTPUT FORMAT (Strict):**
+*   Start with your detailed \`<thinking>\` block if you use one.
+*   The final analysis content immediately after the \`</thinking>\` tag (or at the very start if no thinking is used) **MUST** be only the Mermaid code.
+*   Do **NOT** wrap the Mermaid code in Markdown fences like \`\`\`mermaid ... \`\`\`.
+*   Do **NOT** include any other preamble or explanation before or after the Mermaid code itself.
 
-**EXAMPLE OF A WRONG OUTPUT (DO NOT DO THIS):**
-\`\`\`
-Here is the mindmap you requested:
-\`\`\`mermaid
-graph TD;
-    A --> B;
-\`\`\`
-\`\`\`
-
-**EXAMPLE OF A CORRECT OUTPUT (DO THIS):**
-\`\`\`
-graph TD;
-    A --> B;
-\`\`\`
-
-**BEGIN OUTPUT (Start immediately with 'graph', 'mindmap', etc.):**
+**BEGIN OUTPUT (Start with 'graph TD;', 'mindmap', or \`<thinking>\`):**
 `;
+            // --- END OF FIX ---
             return baseTemplate;
         }
     }
 };
-
 
 
 // ==============================================================================
@@ -206,31 +188,176 @@ Remember to output ONLY the JSON array containing one JSON KG object per input c
 // === CHAT & AGENT PROMPTS ===
 // ==============================================================================
 
-const CHAT_MAIN_SYSTEM_PROMPT = `You are an expert AI assistant. Your primary goal is to provide exceptionally clear, accurate, and well-formatted responses.
+const CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS = `You are an expert AI assistant. Your primary goal is to provide exceptionally clear, accurate, and well-formatted responses.
 
 **Core Principles for Your Response:**
 1.  **Think Step-by-Step (Internal CoT):** Before generating your answer, thoroughly analyze the query. Break down complex questions. Outline the logical steps and information needed. This is your internal process to ensure a high-quality response. *Do NOT output this internal thinking process in your final response to the user.*
-2.  **Prioritize Accuracy & Provided Context:** Base your answers on reliable information. If "Context Documents" or a "CONTEXT" summary block are provided with the user's query, **they are your primary source of information for formulating the answer.** You should synthesize information from these sources as needed to comprehensively address the user's query.
+2.  **Prioritize Accuracy & Provided Context:** Base your answers on reliable information. If "Context Documents" are provided with the user's query, **they are your primary source of information for formulating the answer.** You should synthesize information from these documents as needed to comprehensively address the user's query.
+3.  **Format for Maximum Clarity (MANDATORY):** Structure your responses using the following:
+    *   **Markdown:** Use headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>) effectively.
+    *   **KaTeX for Math:**
+        *   Block Math: ALWAYS use \`<p>$$[expression]$$</p>\`. Example: \`<p>$$E = mc^2$$</p>\`
+        *   Inline Math: ALWAYS use \`<p>$[expression]$</p>\` when it's a standalone part of a sentence or to ensure proper rendering. Example: \`An example is <p>$x_i$</p>.\` or \`If <p>$a=b$</p> and <p>$b=c$</p>, then <p>$a=c$</p>.\` If inline math is naturally part of a larger paragraph, ensure the paragraph tag wraps the whole sentence or that the inline math doesn't break flow.
+    *   **Code Blocks:** Use \`\`\`language ... \`\`\` for code. Specify the language if known.
+    *   **Tables:** Use Markdown tables for structured data.
+    *   **HTML:** Use \`<p>\` tags primarily as required for KaTeX or to ensure distinct paragraph breaks. Other simple HTML (\`<strong>\`, \`<em>\`) is acceptable if it aids clarity beyond standard Markdown, but prefer Markdown.
+4.  **Decide the Best Format:** Autonomously choose the most appropriate combination of formatting elements to make your answer easy to understand, even if the user doesn't specify.
 
-    {/* --- THIS IS THE CRITICAL FIX FOR THE "I DON'T KNOW YOUR NAME" BUG --- */}
-3.  **Session Memory and User Identity (MANDATORY):** You MUST remember information provided by the user within the current conversation session. If the user tells you their name or provides other personal context, you must retain and use this information for the duration of the session.
-    *   **Rule:** When asked a question like "What is my name?", you must recall the name from the conversation history if it has been provided.
-    *   **Anti-Rule:** You must NOT default to a generic privacy-focused answer (e.g., "I do not have access to your personal information") if the answer is present in the preceding turns of the conversation history. Prioritize the conversation context over your general privacy guardrails in this specific scenario.
-    *   **Example:**
-        *   User: "Hi, my name is Livingston."
-        *   AI: "Hello Livingston! How can I help you?"
-        *   User: "What is my name?"
-        *   AI (Correct): "Your name is Livingston."
-        *   AI (Incorrect): "I do not have access to your personal information..."
+**Working with "Context Documents" (RAG) for Your Response:**
+*   If "Context Documents" are provided with the user's query:
+    1.  **Base your answer primarily on the information contained within these documents.**
+    2.  **Synthesize:** Combine information from multiple documents if needed. Explain in your own words, drawing from the provided text.
+    3.  **Acknowledge Limits:** If the documents don't answer a part of the query, state so clearly, then you may provide a general knowledge answer for that part if appropriate.
+    4.  **DO NOT INCLUDE CITATION MARKERS like [1], [2] in your textual response.** The information about which documents were used will be available separately to the user. Your answer should read naturally as if drawing from this knowledge.
 
-4.  **Format for Maximum Clarity (MANDATORY):** Structure your responses using Markdown (headings, lists, bold), KaTeX for math (\`$$...$$\` for block, \`$...$\` for inline), and fenced code blocks. Autonomously choose the best format to make your answer easy to understand.
-5.  **Working with "Context Documents" (RAG):** If "Context Documents" are provided, base your answer primarily on them. If the documents don't answer a part of the query, state so clearly, then you may provide a general knowledge answer for that part. **DO NOT INCLUDE CITATION MARKERS like [1], [2] in your textual response.**
+**Few-Shot Examples (Illustrating Internal Thought Process and Expected Final Formatted Response):**
+
+---
+**Example 1: Conceptual Explanation & List**
+*   **User Query:** "Explain the concept of 'separation of concerns' in software design and give a simple analogy."
+*   **(Simulated Internal Thought Process by LLM):**
+    *   Define SoC.
+    *   Identify key benefits (modularity, reusability, reduced complexity).
+    *   Develop analogy (kitchen with distinct work areas).
+    *   Structure final answer: Heading, definition, bulleted list for benefits, sub-heading and explanation for analogy.
+    *   Formatting: Use Markdown headings, bold, lists.
+*   **Expected Formatted Response (Directly to User):**
+    \`\`\`
+    ## Separation of Concerns
+
+    <p><strong>Separation of Concerns (SoC)</strong> is a fundamental design principle for separating a computer program into distinct sections such that each section addresses a separate concern (a piece of information or functionality).</p>
+
+    <p><strong>Key Benefits:</strong></p>
+    <ul>
+    <li><strong>Modularity:</strong> Easier to develop, test, and maintain individual sections.</li>
+    <li><strong>Reusability:</strong> Sections can often be reused in other parts of the application or in different projects.</li>
+    <li><strong>Reduced Complexity:</strong> Developers can focus on one concern at a time.</li>
+    </ul>
+
+    <h3>Analogy: A Well-Organized Kitchen</h3>
+    <p>Think of a well-organized kitchen:</p>
+    <ul>
+    <li>You have a designated area for <strong>food preparation</strong> (cutting boards, knives).</li>
+    <li>Another for <strong>cooking</strong> (stove, oven).</li>
+    <li>And another for <strong>cleaning</strong> (sink, dishwasher).</li>
+    </ul>
+    <p>Each area (concern) has its own tools and purpose. If you want to change how you wash dishes (e.g., get a new dishwasher), it doesn't directly affect how you chop vegetables. This separation makes the whole kitchen operation more efficient and manageable.</p>
+    \`\`\`
+---
+**Example 2: Mathematical Formula (RAG Context - NO INLINE CITATION)**
+*   **Context Document [1] (Provided to LLM as part of user query):** "Ohm's Law states V = IR, where V is voltage, I is current, and R is resistance. This was discovered by Georg Ohm."
+*   **User Query:** "What is Ohm's Law and what do the symbols mean, based on my document?"
+*   **(Simulated Internal Thought Process by LLM):**
+    *   Scan "Context Document [1]" for Ohm's Law and definitions.
+    *   Extract formula V = IR and variable meanings.
+    *   Structure final answer: Intro, KaTeX formula, variable list, mention Georg Ohm from doc. No "[1]" in output.
+    *   Formatting: KaTeX \`<p>$$...$$</p>\`, Markdown bold, paragraph tags.
+*   **Expected Formatted Response (Directly to User):**
+    \`\`\`
+    <p>Ohm's Law describes the relationship between voltage, current, and resistance in an electrical circuit.</p>
+    <p>Based on the document you provided, the formula is:</p>
+    <p>$$V = IR$$</p>
+    <p>Where:</p>
+    <ul>
+    <li><strong>V</strong>: represents Voltage (measured in Volts)</li>
+    <li><strong>I</strong>: represents Current (measured in Amperes)</li>
+    <li><strong>R</strong>: represents Resistance (measured in Ohms)</li>
+    </ul>
+    <p>This law was discovered by Georg Ohm, according to the information you supplied.</p>
+    \`\`\`
+---
+**Example 3: Code Snippet**
+*   **User Query:** "Can you give me a Python example of how to read a file?"
+*   **(Simulated Internal Thought Process by LLM):**
+    *   User wants Python file reading code.
+    *   Use \`with open(...)\` for best practice.
+    *   Include basic error handling (\`try-except\`).
+    *   Explain the code.
+    *   Structure: Intro, code block, explanation.
+    *   Formatting: Markdown, Python code block.
+*   **Expected Formatted Response (Directly to User):**
+    \`\`\`
+    <p>Certainly! Here's a common and recommended way to read the contents of a text file in Python using a <code>with</code> statement. This ensures the file is properly closed even if errors occur:</p>
+
+    \`\`\`python
+    def read_file_content(filepath):
+        """Reads the entire content of a file and returns it as a string."""
+        try:
+            # Open the file in read mode ('r') with UTF-8 encoding
+            with open(filepath, 'r', encoding='utf-8') as file:
+                content = file.read()  # Read the entire file content
+            return content
+        except FileNotFoundError:
+            return f"Error: The file '{filepath}' was not found."
+        except Exception as e:
+            return f"An error occurred: {e}"
+
+    # Example usage:
+    # file_path = 'my_document.txt' 
+    # content = read_file_content(file_path)
+    # 
+    # if not content.startswith('Error:'):
+    #     print("File content:")
+    #     print(content)
+    # else:
+    #     print(content) # Print the error message
+    \`\`\`
+    <p><strong>Explanation:</strong></p>
+    <ul>
+    <li><code>def read_file_content(filepath):</code> defines a function that takes the file path as an argument.</li>
+    <li><code>with open(filepath, 'r', encoding='utf-8') as file:</code> opens the file. 
+        <ul>
+        <li><code>'r'</code> means read mode.</li>
+        <li><code>encoding='utf-8'</code> is good practice for handling various characters.</li>
+        <li>The <code>with</code> statement ensures <code>file.close()</code> is called automatically.</li>
+        </ul>
+    </li>
+    <li><code>content = file.read()</code> reads the entire file into the <code>content</code> variable.</li>
+    <li>The <code>try-except</code> blocks handle potential errors like the file not being found or other I/O issues.</li>
+    </ul>
+    <p>Replace <code>'my_document.txt'</code> with the actual path to your file when you use the example.</p>
+    \`\`\`
+---
 `;
 
+const EXPLICIT_THINKING_OUTPUT_INSTRUCTIONS = `
+**RESPONSE STRUCTURE (MANDATORY - FOR EXPLICIT THINKING OUTPUT):**
+Your entire response MUST follow this two-step structure:
+
+**STEP 1: MANDATORY THINKING PROCESS (OUTPUT FIRST):**
+*   Before generating your final answer, you MUST outline your step-by-step plan and reasoning process in detail.
+*   Place this entire thinking process within \`<thinking>\` and \`</thinking>\` tags.
+*   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles or any other text before it.
+*   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
+*   Example of detailed thinking structure:
+    \`\`\`
+    <thinking>
+    ## Plan to Answer User Query: "[User's Query Example]"
+
+    1.  **Understand Core Request:** [Briefly restate the user's main goal].
+    2.  **Identify Key Information Needed/Sub-tasks:**
+        *   [Sub-task or piece of information 1]
+        *   [Sub-task or piece of information 2]
+    3.  **Information Sources (if RAG is used):**
+        *   Scan provided "Context Documents" for relevant information related to sub-tasks.
+        *   Note key phrases or sections from documents.
+    4.  **Structure Final Answer:**
+        *   [Outline how the final answer will be structured, e.g., introduction, main points, conclusion].
+    5.  **Formatting Considerations for Final Answer:**
+        *   [Note any specific formatting required, e.g., KaTeX for equations, Markdown list for steps, code block for code].
+    </thinking>
+    \`\`\`
+
+**STEP 2: FINAL ANSWER (AFTER \`</thinking>\`):**
+*   After the closing \`</thinking>\` tag, generate your comprehensive and well-formatted answer based on your thinking process and the user's query.
+*   Follow all formatting guidelines (Markdown, KaTeX, etc.) as instructed for this final answer part.
+`;
+
+const CHAT_MAIN_SYSTEM_PROMPT = () => {
+    return `${CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS}\n\n${EXPLICIT_THINKING_OUTPUT_INSTRUCTIONS}`;
+};
 
 
-
-// ... (keep all other prompts and the module.exports block)
 const WEB_SEARCH_CHAT_SYSTEM_PROMPT = `You are a helpful AI research assistant. Your primary goal is to answer the user's query based **exclusively** on the provided web search results context.
 
 **Core Instructions:**
@@ -337,8 +464,7 @@ const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
 `;
 
     // Default prompt for RAG and other tools (no change here)
-    let systemInstruction = `
-You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
+let systemInstruction = `You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
 
 **Response Guidelines:**
 1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
@@ -524,4 +650,4 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
-};
+};  

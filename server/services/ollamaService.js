@@ -1,3 +1,5 @@
+//ollama service
+
 // server/services/ollamaService.js
 const axios = require('axios');
 
@@ -76,6 +78,13 @@ async function generateContentWithHistory(
 
     console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}.`);
 
+    console.log("\n==================== START OLLAMA FINAL INPUT ====================");
+    console.log(`--- Endpoint: ${endpoint} ---`);
+    console.log("--- Request Payload Sent to Model ---");
+    console.log(JSON.stringify(requestPayload, null, 2));
+    console.log("==================== END OLLAMA FINAL INPUT ====================\n");
+
+    
     try {
         const response = await axios.post(endpoint, requestPayload, { 
             headers,

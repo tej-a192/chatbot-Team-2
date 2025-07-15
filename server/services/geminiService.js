@@ -61,6 +61,15 @@ async function generateContentWithHistory(
         console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. System Prompt: ${!!systemPromptText}. Max Tokens: ${generationConfig.maxOutputTokens}`);
         // console.log(`Current User Query to sendMessage (first 100): "${currentUserQuery.substring(0,100)}..."`); // Can be very long
 
+        console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        console.log("--- System Prompt Sent to Model ---");
+        console.log(systemPromptText || "N/A");
+        console.log("\n--- History Sent to Model ---");
+        console.log(JSON.stringify(historyForStartChat, null, 2));
+        console.log("\n--- Current User Query Sent to Model ---");
+        console.log(currentUserQuery);
+        console.log("==================== END GEMINI FINAL INPUT ====================\n");
+
         const result = await chat.sendMessage(currentUserQuery);
         const response = result.response;
         const candidate = response?.candidates?.[0];
@@ -92,14 +101,27 @@ async function generateContentWithHistory(
     } catch (error) {
         console.error("Gemini API Call Error:", error?.message || error);
         let clientMessage = "Failed to get response from AI service.";
-        if (error.message?.includes("API key not valid")) clientMessage = "AI Service Error: Invalid API Key.";
-        else if (error.message?.includes("API key not found")) clientMessage = "AI Service Error: API Key not found or invalid.";
-        else if (error.message?.includes("billing account")) clientMessage = "AI Service Error: Billing account issue with the provided API Key.";
-        else if (error.message?.includes("blocked due to safety")) clientMessage = "AI response blocked due to safety settings.";
-        else if (error.message?.includes("Invalid JSON payload")) clientMessage = "AI Service Error: Invalid request format sent to AI.";
-        else if (error.message?.includes("User location is not supported")) clientMessage = "AI Service Error: User location is not supported for this model.";
-        else if (error.status === 400) clientMessage = `AI Service Error: ${error.message}`; 
-        
+        if (error.message?.includes("API key not valid")) {
+            clientMessage = "Invalid API Key.";
+        } else if (error.message?.includes("API key not found")) {
+            clientMessage = "API Key not found";
+        } else if (error.message?.includes("API_KEY_INVALID")) {
+            clientMessage = "API Key not invalid. Please Provide the Valid one.";
+        } else if (error.message?.includes("enabled this API recently")) {
+            clientMessage = "Looks like new API key. Need some time to fully activate."
+        } else if (error.message?.includes("billing account")) {
+            clientMessage = "Billing account issue with the provided API Key.";
+        } else if (error.message?.includes("blocked due to safety")) {
+            clientMessage = "AI response blocked due to safety settings.";
+        } else if (error.message?.includes("Invalid JSON payload")) {
+            clientMessage = "Invalid request format sent to AI.";
+        } else if (error.message?.includes("User location is not supported")) {
+            clientMessage = "User location is not supported for this model.";
+        } else if (error.message?.includes("model is overloaded")) {
+            clientMessage = "The AI model is currently overloaded. Please try again in a moment.";
+        } else if (error.status === 400) {
+            clientMessage = `${error.message}`; 
+        }
         const enhancedError = new Error(clientMessage);
         enhancedError.status = error.status || 500; 
         enhancedError.originalError = error; 
