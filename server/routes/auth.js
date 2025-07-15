@@ -43,29 +43,32 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // --- FIX START ---
-    // 3. Create the new user, correctly setting the apiKeyRequestStatus and encryptedApiKey based on the flag.
-    const newUser = new User({
+     const newUser = new User({
       email,
+      username: email.split('@')[0],
       password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
       apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
       encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
     });
-    // --- FIX END ---
     
     await newUser.save();
 
-    const payload = { userId: newUser._id, email: newUser.email };
+    const payload = {
+      userId: newUser._id,
+      email: newUser.email,
+      username: newUser.username,
+    };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
     res.status(201).json({
       token,
       _id: newUser._id,
       email: newUser.email,
+      username: newUser.username,
       sessionId: uuidv4(),
-      message: 'User registered successfully',
+      message: "User registered successfully",
     });
   } catch (error) {
     console.error('Signup Error:', error);
@@ -112,8 +115,9 @@ router.post('/signin', async (req, res) => {
       token,
       _id: user._id,
       email: user.email,
+      username: user.username,
       sessionId: uuidv4(),
-      message: 'Login successful',
+      message: "Login successful",
     });
   } catch (error) {
     console.error('Signin Error:', error);
@@ -129,6 +133,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   res.status(200).json({
     _id: req.user._id,
     email: req.user.email,
+    username: req.user.username,
   });
 });
 
