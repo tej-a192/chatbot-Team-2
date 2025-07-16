@@ -14212,7 +14212,7 @@ Remember to output ONLY the JSON array containing one JSON KG object per input c
 const CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS = `You are an expert AI assistant. Your primary goal is to provide exceptionally clear, accurate, and well-formatted responses.
 
 **Core Principles for Your Response:**
-1.  **Think Step-by-Step (Internal CoT):** Before generating your answer, thoroughly analyze the query. Break down complex questions. Outline the logical steps and information needed. This is your internal process to ensure a high-quality response. *Do NOT output this internal thinking process in your final response to the user.*
+1.  **Think Step-by-Step (Internal CoT):** Before generating your answer, thoroughly analyze the query. Break down complex questions. Outline the logical steps and information needed. This is your internal process to ensure a high-quality response.
 2.  **Prioritize Accuracy & Provided Context:** Base your answers on reliable information. If "Context Documents" are provided with the user's query, **they are your primary source of information for formulating the answer.** You should synthesize information from these documents as needed to comprehensively address the user's query.
 3.  **Format for Maximum Clarity (MANDATORY):** Structure your responses using the following:
     *   **Markdown:** Use headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>) effectively.
@@ -14347,23 +14347,17 @@ Your entire response MUST follow this two-step structure:
 
 **STEP 1: MANDATORY THINKING PROCESS (OUTPUT FIRST):**
 *   Before generating your final answer, you MUST outline your step-by-step plan and reasoning process in detail.
+*   The thinking part should atleast and should more than 20000 tokens of length which should be in lines and moreover for simple queries like Hi, Hello and somemore which are simple, you need to give the thinking part for 1000 tokens   
 *   Place this entire thinking process within \`<thinking>\` and \`</thinking>\` tags.
 *   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles or any other text before it.
 *   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
 *   Example of detailed thinking structure:
     \`\`\`
     <thinking>
-    ## Plan to Answer User Query: "[User's Query Example]"
-
-    1.  **Understand Core Request:** [Briefly restate the user's main goal].
-    2.  **Identify Key Information Needed/Sub-tasks:**
-        *   [Sub-task or piece of information 1]
-        *   [Sub-task or piece of information 2]
-    3.  **Information Sources (if RAG is used):**
-        *   Scan provided "Context Documents" for relevant information related to sub-tasks.
-        *   Note key phrases or sections from documents.
-    4.  **Structure Final Answer:**
-        *   [Outline how the final answer will be structured, e.g., introduction, main points, conclusion].
+    1. Use your own knowledge and give the best **monologue** thinking process for the context given to you.
+    2. You need to think deeper for complex queries with chain of Thought and Tree of Thought and should give the effective response which is linked to the context given to it.
+    3. For Tool based context, you need to think with the context itselft. You should not think out of the box.
+    4. Use your own knowledge to analyse and think step by step to how can you give the best answer so that you can get the rewards from the user but should not mention that I am answering for rewards or something.
     5.  **Formatting Considerations for Final Answer:**
         *   [Note any specific formatting required, e.g., KaTeX for equations, Markdown list for steps, code block for code].
     </thinking>
@@ -14587,7 +14581,105 @@ ${toolOutput}
 
 **YOUR COMPLETE, FORMATTED RESPONSE:**
 `;
-    } else { // For RAG, KG, Academic, and other tools
+    } 
+    else if (toolName === 'academic_search') {
+        synthesizerUserMessage = `
+You are an expert AI Research Assistant. Your entire response MUST begin with your inner monologue in a \`<thinking>\` block, followed by a detailed, multi-part answer.
+
+**YOUR TASK:**
+Synthesize the provided "ACADEMIC PAPER ABSTRACTS" into a comprehensive response to the user's query. Your final output after the thinking block MUST follow the four-part structure shown in the examples below:
+1.  **Analysis of Retrieved Articles (H2 Heading):** An analysis of EACH paper.
+2.  **Synthesized Overview (H2 Heading):** A holistic summary connecting the papers.
+3.  **References (H2 Heading):** A formatted list of all sources with clickable links.
+
+---
+**EXAMPLE 1 OF COMPLETE OUTPUT:**
+
+**USER'S ORIGINAL QUERY:** "Give me an overview of how AI is used in the SDLC."
+**ACADEMIC PAPER ABSTRACTS:**
+[1] Title: A systematic literature review on the use of AI in the software development lifecycle
+Source: ArXiv
+URL: http://arxiv.org/abs/2304.08579v1
+Summary: This paper presents a systematic literature review of 122 primary studies on the use of Artificial Intelligence (AI) in the software development lifecycle (SDLC). The review confirms that AI is being applied across all phases of the SDLC, with a strong emphasis on the testing and maintenance phases. A significant research gap is identified in the application of AI to the early, less-structured phases, such as requirements engineering.
+
+[2] Title: A survey on software defect prediction using artificial intelligence
+Source: Semantic Scholar
+URL: https://www.semanticscholar.org/paper/a-very-long-id-string-for-the-paper
+Summary: This survey covers AI-based techniques for software defect prediction (SDP). It highlights the effectiveness of hybrid-ensemble models, such as the SMERKP-XGB model, in handling both balanced and imbalanced datasets. The novelty lies in combining sophisticated sampling techniques with powerful classifiers to improve prediction accuracy, thereby addressing the challenge of inefficient quality assurance efforts.
+
+**YOUR COMPLETE, STRUCTURED RESPONSE:**
+<thinking>
+Okay, the user wants an overview of how AI is used in the Software Development Life Cycle. This requires a structured, evidence-based response. I'll start by searching academic databases to get a credible view of the field.
+
+My search has yielded a couple of interesting papers. The first, a systematic literature review from ArXiv [1], looks perfect for establishing a broad framework. It analyzes 122 studies, which gives it a lot of authority. I'll use this to structure my main overview, highlighting its key finding: AI is used everywhere in the SDLC, but is most common in testing and maintenance. I'll also be sure to mention the research gap it identifies regarding the early SDLC phases.
+
+The second paper [2] is a survey on software defect prediction. This is a fantastic, concrete example of AI in the 'testing' phase mentioned by the first paper. I'll analyze its specific contribution—the SMERKP-XGB model—and explain *why* it's novel (its ability to handle imbalanced datasets).
+
+My final answer will be structured in three parts: first, I'll provide a detailed analysis of each paper individually. Then, I'll write a synthesized overview that combines the findings, using the first paper for the broad strokes and the second as a specific example. Finally, I will compile the references with clickable links. This structure will provide both detail and a clear, high-level summary.
+</thinking>
+
+## Analysis of Retrieved Articles
+
+### A Systematic Literature Review on AI in SDLC [1]
+This paper provides a broad overview by reviewing 122 studies on the topic. Its primary contribution is confirming that while AI is applied across the entire SDLC, its use is most mature and concentrated in the later phases like software testing and maintenance. The key research gap identified is the lack of robust AI applications for the earlier, more ambiguous phases such as requirements engineering.
+
+### AI-based Software Defect Prediction [2]
+This survey focuses on a specific application of AI within the testing phase. The novelty presented is the use of advanced hybrid-ensemble models (specifically SMERKP-XGB) to more accurately predict software defects. This approach is significant because it effectively handles imbalanced datasets, a common problem in quality assurance, thus helping to focus testing resources more efficiently.
+
+## Synthesized Overview
+
+The integration of Artificial Intelligence (AI) within the Software Development Life Cycle (SDLC) is a rapidly evolving field aimed at improving efficiency and quality. A comprehensive review of the literature shows that AI is being applied to all development phases, though its adoption is most prominent in testing and maintenance [1].
+
+A key example of AI's impact is seen in software defect prediction. Modern AI-based techniques, such as hybrid-ensemble models, have shown great success in identifying potential defects even in datasets where non-defective code vastly outnumbers defective code [2]. This allows development teams to allocate testing resources more effectively. While applications in later stages are well-established, a significant research gap remains in leveraging AI for the less-structured, early phases of the SDLC, like requirements gathering [1].
+
+---
+## References
+[1] [A systematic literature review on the use of AI in the software development lifecycle](http://arxiv.org/abs/2304.08579v1)
+[2] [A survey on software defect prediction using artificial intelligence](https://www.semanticscholar.org/paper/a-very-long-id-string-for-the-paper)
+---
+**EXAMPLE 2 OF COMPLETE OUTPUT:**
+
+**USER'S ORIGINAL QUERY:** "What are the latest applications of graphene in electronics?"
+**ACADEMIC PAPER ABSTRACTS:**
+[1] Title: Graphene-based transistors for high-frequency electronics
+Source: ArXiv
+URL: http://arxiv.org/abs/2201.01234
+Summary: This paper details the fabrication of graphene field-effect transistors (GFETs) that operate at terahertz frequencies. The novelty is a new substrate transfer technique that minimizes impurities, leading to exceptionally high electron mobility. This overcomes a key barrier for using graphene in next-generation communication systems.
+
+**YOUR COMPLETE, STRUCTURED RESPONSE:**
+<thinking>
+The user is asking a specific question about the latest applications of graphene in electronics. I will search for recent, high-impact research papers.
+
+My search has turned up a very relevant paper from ArXiv about graphene transistors operating at high frequencies [1]. This is a direct answer to the user's query about "applications". I will analyze the abstract to extract the key innovation. The paper mentions a "new substrate transfer technique" that leads to "exceptionally high electron mobility". This is the novelty. The impact is its potential use in "next-generation communication systems".
+
+Since I only have one primary source for this response, the structure will be straightforward. I will first provide an analysis of this single paper, highlighting its novelty and contribution. The "Synthesized Overview" will then concisely present this finding as a key advancement in the field. I'll finish with the formal reference section. This approach directly answers the user's question while providing the necessary academic context and sourcing.
+</thinking>
+
+## Analysis of Retrieved Articles
+
+### Graphene-based Transistors for High-Frequency Electronics [1]
+This research focuses on the development of graphene field-effect transistors (GFETs) capable of operating in the terahertz (THz) range. The main contribution and novelty of this work is a new substrate transfer method that significantly reduces impurities on the graphene sheet. This purification results in much higher electron mobility, which has been a major obstacle in creating practical high-frequency graphene electronics. The paper suggests this breakthrough could pave the way for next-generation communication systems. A potential research gap could be the scalability and cost-effectiveness of this new fabrication technique for mass production.
+
+## Synthesized Overview
+
+A significant recent application of graphene in electronics is the development of ultra-high-frequency transistors. Researchers have engineered graphene-based transistors that can operate at terahertz speeds, a critical step for next-generation wireless communication [1]. This was achieved by developing a novel fabrication process that enhances the material's electron mobility, overcoming a long-standing challenge in the field [1].
+
+---
+## References
+[1] [Graphene-based transistors for high-frequency electronics](http://arxiv.org/abs/2201.01234)
+---
+**Now, perform this task using the following information, following the structure from the examples above:**
+
+**USER'S ORIGINAL QUERY:**
+${originalQuery}
+
+**ACADEMIC PAPER ABSTRACTS:**
+${toolOutput}
+
+**YOUR COMPLETE, STRUCTURED RESPONSE:**
+`;
+    }
+    else { // For RAG, KG, Academic, and other tools
         synthesizerUserMessage = `
 **USER'S ORIGINAL QUERY:**
 "${originalQuery}"
@@ -14602,7 +14694,6 @@ Based **only** on the information gathered by the tool above, please provide a c
     }
     return synthesizerUserMessage;
 };
-
 
 const DOCX_EXPANSION_PROMPT_TEMPLATE = `
 You are a professional content creator and subject matter expert. Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, multi-page document in Markdown format. You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge. The final output must be a single block of well-structured Markdown text.
