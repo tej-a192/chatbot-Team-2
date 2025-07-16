@@ -16098,6 +16098,53 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
+<<<<<<< HEAD
+# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/query', methods=['POST'])
+def search_qdrant_documents():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    user_id = data.get('user_id') # user_id is mainly for logging here
+    
+    if not query_text or not user_id:
+        return create_error_response("Missing 'query' or 'user_id'", 400)
+
+    try:
+        k = data.get('k', 5)
+        document_context_name = data.get('documentContextName')
+        
+        must_conditions = []
+        if document_context_name:
+            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
+            must_conditions.append(qdrant_models.FieldCondition(
+                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                match=qdrant_models.MatchValue(value=document_context_name)
+            ))
+        
+        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
+        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
+        
+        retrieved_docs, snippet, docs_map = vector_service.search_documents(
+            query=query_text, k=k, filter_conditions=qdrant_filters
+        )
+        
+        response_payload = {
+            "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
+            "formatted_context_snippet": snippet,
+            "retrieved_documents_map": docs_map,
+        }
+        
+        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
+        return jsonify(response_payload), 200
+        
+    except Exception as e:
+        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
+        return create_error_response(f"Query failed: {str(e)}", 500)
+
+# All other endpoints remain unchanged and are included for completeness
+=======
 @app.route('/health', methods=['GET'])
 def health_check():
     status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
@@ -17841,7 +17888,7 @@ const adminFileFilter = (req, file, cb) => {
     }
 };
 const adminUpload = multer({ storage: adminStorage, fileFilter: adminFileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-async function triggerPythonTextExtractionForAdmin(filePath, originalName) {
+async function triggerPythonRagProcessingForAdmin(filePath, originalName) {
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
         return { success: false, message: "Python service URL not configured.", text: null, chunksForKg: [] };
