@@ -41,7 +41,6 @@ router.post('/message', async (req, res) => {
 
     const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
     console.log(`>>> POST /api/chat/message (AGENTIC): User=${userId}, Session=${sessionId}, Query: "${query.substring(0, 50)}..."`);
-
     try {
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
@@ -141,33 +140,43 @@ router.post('/message', async (req, res) => {
 });
 
 router.post('/history', async (req, res) => {
-    const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
     let summaryOfOldSession = "";
-    if (previousSessionId) {
-        try {
-            const [oldSession, user] = await Promise.all([
-                ChatHistory.findOne({ sessionId: previousSessionId, userId: userId }),
-                User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean()
-            ]);
 
-            if (oldSession && oldSession.messages?.length > 0) {
-                const llmProvider = user.preferredLlmProvider || 'gemini';
-                const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-                const userOllamaUrl = user.ollamaUrl || null;
-                let userApiKey = null;
-                if (llmProvider === 'gemini') {
-                    userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-                }
+    try {
+        const [lastSessions, user] = await Promise.all([
+            // Find up to 5 most recent sessions for the user.
+            ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean(),
+            User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean()
+        ]);
+
+        if (lastSessions && lastSessions.length > 0) {
+            const llmProvider = user.preferredLlmProvider || 'gemini';
+            const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+            const userOllamaUrl = user.ollamaUrl || null;
+            let userApiKey = null;
+            if (llmProvider === 'gemini') {
+                userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+            }
+
+            // Concatenate all messages from the fetched sessions.
+            const messagesForSummary = lastSessions.flatMap(session => session.messages);
+
+            if (messagesForSummary.length > 0) {
+                // We create a brand new summary from these messages, so existingSummary is null.
                 summaryOfOldSession = await createOrUpdateSummary(
-                    oldSession.messages, oldSession.summary, llmProvider, 
-                    ollamaModel, userApiKey, userOllamaUrl
+                    messagesForSummary,
+                    null, // Passing null to generate a fresh summary.
+                    llmProvider,
+                    ollamaModel,
+                    userApiKey,
+                    userOllamaUrl
                 );
             }
-        } catch (summaryError) {
-            console.error(`Could not summarize previous session ${previousSessionId}:`, summaryError);
         }
+    } catch (summaryError) {
+        console.error(`Could not create summary from last sessions:`, summaryError);
     }
     
     try {
