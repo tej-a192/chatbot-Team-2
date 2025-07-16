@@ -62,14 +62,19 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
             );
         } else {
             summary = await geminiService.generateContentWithHistory(
-                historyForLlm, SUMMARIZATION_SYSTEM_PROMPT, null, llmOptions
+                historyForLlm, userPrompt, SUMMARIZATION_SYSTEM_PROMPT, llmOptions
             );
         }
         console.log(`[SummarizationService] Summary generated successfully.`);
         return summary.trim();
     } catch (error) {
         console.error(`[SummarizationService] Error generating summary: ${error.message}`);
-        return existingSummary || "";
+        // --- THIS IS THE FIX ---
+        // Instead of returning an empty string, return a descriptive error.
+        // This will be saved in the DB and visible to the admin.
+        const errorMessage = `Summary generation failed: ${error.message}`;
+        return errorMessage;
+        // --- END OF FIX ---
     }
 }
 

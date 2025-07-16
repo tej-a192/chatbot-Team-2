@@ -140,47 +140,60 @@ router.post('/message', async (req, res) => {
 });
 
 router.post('/history', async (req, res) => {
+    const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
-    let summaryOfOldSession = "";
+    let contextSummaryForNewSession = "";
 
     try {
-        const [lastSessions, user] = await Promise.all([
-            // Find up to 5 most recent sessions for the user.
-            ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean(),
-            User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean()
-        ]);
+        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+        const userOllamaUrl = user?.ollamaUrl || null;
+        let userApiKey = null;
+        if (llmProvider === 'gemini') {
+            userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        }
 
-        if (lastSessions && lastSessions.length > 0) {
-            const llmProvider = user.preferredLlmProvider || 'gemini';
-            const ollamaModel = user.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-            const userOllamaUrl = user.ollamaUrl || null;
-            let userApiKey = null;
-            if (llmProvider === 'gemini') {
-                userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        // --- THIS IS THE FIX ---
+        // 1. If there was a previous session, summarize IT and save that summary.
+        if (previousSessionId) {
+            const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
+            if (previousSession && previousSession.messages?.length > 0) {
+                console.log(`[New Chat] Summarizing previous session ${previousSessionId} before creating new one.`);
+                const summaryForOldSession = await createOrUpdateSummary(
+                    previousSession.messages,
+                    previousSession.summary, // Pass its own summary in case it's a continuation
+                    llmProvider, ollamaModel, userApiKey, userOllamaUrl
+                );
+                
+                // Save the generated summary to the *old* session document.
+                previousSession.summary = summaryForOldSession;
+                await previousSession.save();
+                console.log(`[New Chat] Saved summary to previous session ${previousSessionId}.`);
             }
-
-            // Concatenate all messages from the fetched sessions.
-            const messagesForSummary = lastSessions.flatMap(session => session.messages);
-
-            if (messagesForSummary.length > 0) {
-                // We create a brand new summary from these messages, so existingSummary is null.
-                summaryOfOldSession = await createOrUpdateSummary(
-                    messagesForSummary,
-                    null, // Passing null to generate a fresh summary.
-                    llmProvider,
-                    ollamaModel,
-                    userApiKey,
-                    userOllamaUrl
+        }
+        
+        // 2. Now, create a new, broader summary for the NEW session's context.
+        // This gives the new session memory of the last 5 conversations.
+        const lastSessions = await ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean();
+        if (lastSessions && lastSessions.length > 0) {
+            const messagesForNewSummary = lastSessions.flatMap(session => session.messages);
+            if (messagesForNewSummary.length > 0) {
+                 console.log(`[New Chat] Creating context summary for new session from the last ${lastSessions.length} sessions.`);
+                contextSummaryForNewSession = await createOrUpdateSummary(
+                    messagesForNewSummary, null, llmProvider, ollamaModel, userApiKey, userOllamaUrl
                 );
             }
         }
+        // --- END OF FIX ---
+
     } catch (summaryError) {
         console.error(`Could not create summary from last sessions:`, summaryError);
     }
     
     try {
-        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: summaryOfOldSession });
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: contextSummaryForNewSession });
         res.status(200).json({ message: 'New session started.', newSessionId });
     } catch (dbError) {
         res.status(500).json({ message: 'Failed to create new session.' });

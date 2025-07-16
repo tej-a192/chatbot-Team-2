@@ -1,4 +1,4 @@
-// server/routes/adminDocuments.js
+// server/routes/admin.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -7,6 +7,7 @@ const fsPromises = fs.promises;
 const AdminDocument = require('../models/AdminDocument');
 const axios = require('axios');
 const User = require('../models/User');
+const ChatHistory = require('../models/ChatHistory'); // <-- Import ChatHistory
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
@@ -310,5 +311,52 @@ router.get('/documents/by-original-name/:originalName/analysis', async (req, res
         res.status(500).json({ message: 'Server error while retrieving analysis by original name.' });
     }
 });
+
+// --- User & Chat Management Routes ---
+
+// @route   GET /api/admin/users-with-chats
+// @desc    Get all users and their chat session summaries
+router.get('/users-with-chats', async (req, res) => {
+    try {
+        const allHistories = await ChatHistory.find({})
+            .populate('userId', 'email profile.name')
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        const usersMap = new Map();
+
+        for (const session of allHistories) {
+            if (!session.userId) continue;
+
+            const userId = session.userId._id.toString();
+
+            if (!usersMap.has(userId)) {
+                usersMap.set(userId, {
+                    user: {
+                        _id: userId,
+                        email: session.userId.email,
+                        name: session.userId.profile?.name || 'N/A'
+                    },
+                    sessions: []
+                });
+            }
+
+            const userEntry = usersMap.get(userId);
+            userEntry.sessions.push({
+                sessionId: session.sessionId,
+                updatedAt: session.updatedAt,
+                summary: session.summary || 'No summary available.',
+                messageCount: session.messages?.length || 0
+            });
+        }
+
+        res.json(Array.from(usersMap.values()));
+
+    } catch (error) {
+        console.error('Error fetching users with chat summaries:', error);
+        res.status(500).json({ message: 'Server error while fetching user chat data.' });
+    }
+});
+
 
 module.exports = router;

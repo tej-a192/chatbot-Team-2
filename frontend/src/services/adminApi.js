@@ -1,114 +1,71 @@
-    // frontend/src/services/adminApi.js
-    import axios from 'axios';
+// frontend/src/services/adminApi.js
+import axios from 'axios';
 
-    // Get base URL for admin document endpoints
-    const ADMIN_DOCS_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin/documents`;
+const ADMIN_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin`;
 
-    // Get fixed admin credentials from .env (prefixed with VITE_ for frontend access)
-    const ADMIN_USERNAME_FRONTEND = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
-    const ADMIN_PASSWORD_FRONTEND = import.meta.env.VITE_ADMIN_PASSWORD || 'admin123';
+const ADMIN_USERNAME_FRONTEND = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD_FRONTEND = import.meta.env.VITE_ADMIN_PASSWORD || 'admin123';
 
-    const adminApiClient = axios.create({
-        baseURL: ADMIN_DOCS_API_BASE_URL,
-    });
+const adminApiClient = axios.create({
+    baseURL: ADMIN_API_BASE_URL,
+});
 
-    export const getFixedAdminAuthHeaders = () => {
-        if (!ADMIN_USERNAME_FRONTEND || !ADMIN_PASSWORD_FRONTEND) {
-            console.error("Admin credentials not found in VITE_ADMIN_USERNAME or VITE_ADMIN_PASSWORD .env variables for frontend.");
-            return {};
+export const getFixedAdminAuthHeaders = () => {
+    if (!ADMIN_USERNAME_FRONTEND || !ADMIN_PASSWORD_FRONTEND) {
+        console.error("Admin credentials not found in VITE_ADMIN_USERNAME or VITE_ADMIN_PASSWORD .env variables for frontend.");
+        return {};
+    }
+    const basicAuthToken = btoa(`${ADMIN_USERNAME_FRONTEND}:${ADMIN_PASSWORD_FRONTEND}`);
+    return { 'Authorization': `Basic ${basicAuthToken}` };
+};
+
+const makeAdminApiRequest = async (method, endpoint, data = null, authHeaders = {}) => {
+    if (!authHeaders.Authorization) {
+        const errorMsg = "Admin authentication headers are missing. Cannot make admin API request.";
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+    }
+    try {
+        const config = {
+            method,
+            url: endpoint,
+            headers: {
+                ...authHeaders,
+                'Content-Type': data instanceof FormData ? 'multipart/form-data' : 'application/json',
+            },
+        };
+        if (data) {
+            config.data = data;
         }
-        const basicAuthToken = btoa(`${ADMIN_USERNAME_FRONTEND}:${ADMIN_PASSWORD_FRONTEND}`);
-        return { 'Authorization': `Basic ${basicAuthToken}` };
-    };
-
-    const makeAdminApiRequest = async (method, endpoint, data = null, authHeaders = {}) => {
-        if (!authHeaders.Authorization) {
-            const errorMsg = "Admin authentication headers are missing. Cannot make admin API request.";
-            console.error(errorMsg);
-            throw new Error(errorMsg);
+        const response = await adminApiClient(config);
+        return response.data;
+    } catch (error) {
+        let errorMessage = 'Admin API request failed.';
+        if (error.response) {
+            errorMessage = error.response.data?.message || error.response.statusText || `Server error: ${error.response.status}`;
+            console.error(`Admin API Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}): Status ${error.response.status}`, error.response.data);
+        } else if (error.request) {
+            errorMessage = 'No response from admin API server. Check network or server status.';
+            console.error(`Admin API Network Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}):`, error.request);
+        } else {
+            errorMessage = error.message || 'Error setting up admin API request.';
+            console.error(`Admin API Setup Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}):`, error.message);
         }
-        try {
-            const config = {
-                method,
-                url: endpoint,
-                headers: {
-                    ...authHeaders,
-                    'Content-Type': data instanceof FormData ? 'multipart/form-data' : 'application/json',
-                },
-            };
-            if (data) {
-                config.data = data;
-            }
-            const response = await adminApiClient(config);
-            return response.data;
-        } catch (error) {
-            let errorMessage = 'Admin API request failed.';
-            if (error.response) {
-                errorMessage = error.response.data?.message || error.response.statusText || `Server error: ${error.response.status}`;
-                console.error(`Admin API Error (${method.toUpperCase()} ${ADMIN_DOCS_API_BASE_URL}${endpoint}): Status ${error.response.status}`, error.response.data);
-            } else if (error.request) {
-                errorMessage = 'No response from admin API server. Check network or server status.';
-                console.error(`Admin API Network Error (${method.toUpperCase()} ${ADMIN_DOCS_API_BASE_URL}${endpoint}):`, error.request);
-            } else {
-                errorMessage = error.message || 'Error setting up admin API request.';
-                console.error(`Admin API Setup Error (${method.toUpperCase()} ${ADMIN_DOCS_API_BASE_URL}${endpoint}):`, error.message);
-            }
-            throw new Error(errorMessage);
-        }
-    };
+        throw new Error(errorMessage);
+    }
+};
 
-    export const uploadAdminDocument = async (formData, adminAuthHeaders) => {
-        return makeAdminApiRequest('post', '/upload', formData, adminAuthHeaders);
-    };
+// Document-related admin functions
+export const uploadAdminDocument = (formData, adminAuthHeaders) => makeAdminApiRequest('post', '/documents/upload', formData, adminAuthHeaders);
+export const getAdminDocuments = (adminAuthHeaders) => makeAdminApiRequest('get', '/documents', null, adminAuthHeaders);
+export const deleteAdminDocument = (serverFilename, adminAuthHeaders) => makeAdminApiRequest('delete', `/documents/${serverFilename}`, null, adminAuthHeaders);
+export const getAdminDocumentAnalysis = (serverFilename, adminAuthHeaders) => makeAdminApiRequest('get', `/documents/${serverFilename}/analysis`, null, adminAuthHeaders);
+export const getAdminDocumentAnalysisByOriginalName = (originalName, adminAuthHeaders) => makeAdminApiRequest('get', `/documents/by-original-name/${encodeURIComponent(originalName)}/analysis`, null, adminAuthHeaders);
 
-    export const getAdminDocuments = async (adminAuthHeaders) => {
-        return makeAdminApiRequest('get', '/', null, adminAuthHeaders);
-    };
+// API Key request functions
+export const getApiKeyRequests = (adminAuthHeaders) => makeAdminApiRequest('get', '/key-requests', null, adminAuthHeaders);
+export const approveApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/approve', { userId }, adminAuthHeaders);
+export const rejectApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/reject', { userId }, adminAuthHeaders);
 
-    export const deleteAdminDocument = async (serverFilename, adminAuthHeaders) => {
-        return makeAdminApiRequest('delete', `/${serverFilename}`, null, adminAuthHeaders);
-    };
-
-    export const getAdminDocumentAnalysis = async (serverFilename, adminAuthHeaders) => {
-        return makeAdminApiRequest('get', `/${serverFilename}/analysis`, null, adminAuthHeaders);
-    };
-
-    // --- NEW FUNCTION FOR STEP 2 ---
-    export const getAdminDocumentAnalysisByOriginalName = async (originalName, adminAuthHeaders) => {
-        // This function fetches the analysis object for an admin document using its originalName.
-        // The backend route will be '/by-original-name/:originalName/analysis' relative to ADMIN_DOCS_API_BASE_URL.
-        // It expects a response like:
-        // { originalName, serverFilename, analysis: {faq, topics, mindmap}, analysisUpdatedAt }
-        return makeAdminApiRequest('get', `/by-original-name/${encodeURIComponent(originalName)}/analysis`, null, adminAuthHeaders);
-    };
-
-    export const getApiKeyRequests = async (adminAuthHeaders) => {
-        // Note: This endpoint is on /api/admin, not /api/admin/documents
-        const ADMIN_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin`;
-        try {
-            const response = await axios.get(`${ADMIN_API_BASE_URL}/key-requests`, { headers: adminAuthHeaders });
-            return response.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || 'Failed to fetch API key requests.');
-        }
-    };
-
-    export const approveApiKeyRequest = async (userId, adminAuthHeaders) => {
-        const ADMIN_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin`;
-        try {
-            const response = await axios.post(`${ADMIN_API_BASE_URL}/key-requests/approve`, { userId }, { headers: adminAuthHeaders });
-            return response.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || 'Failed to approve request.');
-        }
-    };
-
-    export const rejectApiKeyRequest = async (userId, adminAuthHeaders) => {
-        const ADMIN_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin`;
-        try {
-            const response = await axios.post(`${ADMIN_API_BASE_URL}/key-requests/reject`, { userId }, { headers: adminAuthHeaders });
-            return response.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || 'Failed to reject request.');
-        }
-    };  
+// --- NEW FUNCTION ---
+export const getUsersAndChats = (adminAuthHeaders) => makeAdminApiRequest('get', '/users-with-chats', null, adminAuthHeaders);
