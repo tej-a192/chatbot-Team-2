@@ -3,26 +3,18 @@ import React, { useState } from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-function ThinkingDropdown({ children, isStreaming }) {
+function ThinkingDropdown({ children }) {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
-        <div className="text-xs border border-border-light dark:border-border-dark rounded-md bg-surface-light/50 dark:bg-surface-dark/50 shadow-sm mt-1.5 w-full">
+        <div className="w-full">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between p-2 text-left text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors rounded-t-md"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors py-1"
                 aria-expanded={isOpen}
             >
-                <div className="flex items-center gap-2 font-medium">
-                    <BrainCircuit size={14} />
-                    <span className="flex-grow">Thinking Process</span>
-                </div>
-                {/* Shimmer effect for when streaming is active */}
-                {isStreaming && (
-                    <div className="relative w-20 h-4 ml-auto mr-2 overflow-hidden rounded bg-gray-200 dark:bg-gray-600">
-                        <div className="shimmer-animation"></div>
-                    </div>
-                )}
+                <BrainCircuit size={14} />
+                <span>Thinking Process</span>
                 <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
             <AnimatePresence initial={false}>
@@ -33,13 +25,14 @@ function ThinkingDropdown({ children, isStreaming }) {
                         animate="open"
                         exit="collapsed"
                         variants={{
-                            open: { opacity: 1, height: 'auto' },
-                            collapsed: { opacity: 0, height: 0 }
+                            open: { opacity: 1, height: 'auto', marginTop: '0.25rem' },
+                            collapsed: { opacity: 0, height: 0, marginTop: '0' }
                         }}
                         transition={{ duration: 0.3, ease: 'easeInOut' }}
                         className="overflow-hidden"
                     >
-                        <div className="p-2.5 border-t border-border-light dark:border-border-dark bg-white dark:bg-gray-800 rounded-b-md">
+                        {/* The vertical line and padding for the content */}
+                        <div className="pl-4 border-l-2 border-gray-300 dark:border-gray-600">
                             {children}
                         </div>
                     </motion.div>
