@@ -1,7 +1,7 @@
 // frontend/src/components/admin/UserChatManager.jsx
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { User, MessageSquare, Clock, ChevronDown, AlertTriangle } from 'lucide-react';
+import { User, MessageSquare, Clock, ChevronDown, AlertTriangle, Search } from 'lucide-react';
 
 const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -14,18 +14,44 @@ const formatDate = (dateString) => {
 };
 
 function UserChatManager({ usersWithChats }) {
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const filteredUsers = useMemo(() => {
+        if (!searchTerm.trim()) {
+            return usersWithChats;
+        }
+        const lowercasedFilter = searchTerm.toLowerCase();
+        return usersWithChats.filter(({ user }) => 
+            (user.name && user.name.toLowerCase().includes(lowercasedFilter)) ||
+            (user.email && user.email.toLowerCase().includes(lowercasedFilter))
+        );
+    }, [usersWithChats, searchTerm]);
+
     return (
         <div className="card-base p-0 sm:p-4">
-            <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark px-4 sm:px-0 pt-4 sm:pt-0">
-                User Chat Sessions
-            </h2>
-            {usersWithChats.length === 0 ? (
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 px-4 sm:px-0 pt-4 sm:pt-0 gap-3">
+                <h2 className="text-lg font-semibold text-text-light dark:text-text-dark flex-shrink-0">
+                    User Chat Sessions
+                </h2>
+                <div className="relative w-full sm:w-auto sm:max-w-xs">
+                    <input
+                        type="text"
+                        placeholder="Search by name or email..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="input-field !py-2 !pl-9 !pr-3 text-sm w-full"
+                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted-light dark:text-text-muted-dark" />
+                </div>
+            </div>
+
+            {filteredUsers.length === 0 ? (
                 <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6 px-4 sm:px-0">
-                    No user chat data available.
+                    {searchTerm ? `No users found matching "${searchTerm}".` : "No user chat data available."}
                 </p>
             ) : (
                 <div className="space-y-3">
-                    {usersWithChats.map(({ user, sessions }) => {
+                    {filteredUsers.map(({ user, sessions }) => {
                         // Don't filter here anymore, we want to show all sessions
                         // const sessionsWithSummary = sessions.filter(s => s.summary && s.summary.trim() !== '' && s.summary !== 'No summary available.');
                         

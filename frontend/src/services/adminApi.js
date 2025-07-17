@@ -55,6 +55,9 @@ const makeAdminApiRequest = async (method, endpoint, data = null, authHeaders = 
     }
 };
 
+// --- NEW FUNCTION for Dashboard Stats ---
+export const getDashboardStats = (adminAuthHeaders) => makeAdminApiRequest('get', '/dashboard-stats', null, adminAuthHeaders);
+
 // Document-related admin functions
 export const uploadAdminDocument = (formData, adminAuthHeaders) => makeAdminApiRequest('post', '/documents/upload', formData, adminAuthHeaders);
 export const getAdminDocuments = (adminAuthHeaders) => makeAdminApiRequest('get', '/documents', null, adminAuthHeaders);
@@ -67,5 +70,5 @@ export const getApiKeyRequests = (adminAuthHeaders) => makeAdminApiRequest('get'
 export const approveApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/approve', { userId }, adminAuthHeaders);
 export const rejectApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/reject', { userId }, adminAuthHeaders);
 
-// --- NEW FUNCTION ---
+// User and Chat Management
 export const getUsersAndChats = (adminAuthHeaders) => makeAdminApiRequest('get', '/users-with-chats', null, adminAuthHeaders);

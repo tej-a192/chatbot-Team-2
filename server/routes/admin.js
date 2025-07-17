@@ -7,10 +7,35 @@ const fsPromises = fs.promises;
 const AdminDocument = require('../models/AdminDocument');
 const axios = require('axios');
 const User = require('../models/User');
-const ChatHistory = require('../models/ChatHistory'); // <-- Import ChatHistory
+const ChatHistory = require('../models/ChatHistory');
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
+
+// --- NEW Dashboard Stats Route ---
+// @route   GET /api/admin/dashboard-stats
+// @desc    Get key statistics for the admin dashboard
+router.get('/dashboard-stats', async (req, res) => {
+    try {
+        const [totalUsers, totalAdminDocs, totalSessions, pendingApiKeys] = await Promise.all([
+            User.countDocuments(),
+            AdminDocument.countDocuments(),
+            ChatHistory.countDocuments(),
+            User.countDocuments({ apiKeyRequestStatus: 'pending' })
+        ]);
+
+        res.json({
+            totalUsers,
+            totalAdminDocs,
+            totalSessions,
+            pendingApiKeys
+        });
+    } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+        res.status(500).json({ message: 'Server error while fetching dashboard stats.' });
+    }
+});
+
 
 // --- API Key Management Routes ---
 
