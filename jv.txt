@@ -1,0 +1,32 @@
+
+
+Arrays
+
+
+The memory of the instance of arrays is extended as we are storing the values in the array.
+
+
+Methods available in Arrays
+
+1. Arrays.sort(arr)
+2. Arrays.toString(arr)
+3. Arrays.copyOf(arr, size)
+4. Arrays.copyOfRange(arr, from, to)
+5. Arrays.equals(arr1, arr2)
+6. Arrays.fill(arr, value)
+7. Arrays.binarySearch(arr, key)
+8. Arrays.deepToString(arr)
+9. Arrays.setAll(arr, i -> i*i)
+
+
+
+Jagged Arrays
+--------------
+
+** It is an array of arrays where each row can have different lengths
+
+int[][] jagged = new int[3][];
+
+jagged[1] = new int[4]
+jagged[2] = new int[3]
+

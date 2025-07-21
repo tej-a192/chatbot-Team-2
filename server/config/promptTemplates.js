@@ -326,19 +326,16 @@ Your entire response MUST follow this two-step structure:
 
 **STEP 1: MANDATORY THINKING PROCESS (OUTPUT FIRST):**
 *   Before generating your final answer, you MUST outline your step-by-step plan and reasoning process in detail.
-*   The thinking part should atleast and should more than 20000 tokens of length which should be in lines and moreover for simple queries like Hi, Hello and somemore which are simple, you need to give the thinking part for 1000 tokens   
 *   Place this entire thinking process within \`<thinking>\` and \`</thinking>\` tags.
 *   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles or any other text before it.
 *   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
+*   Your thinking process should be appropriate for the complexity of the query. For simple greetings, a brief plan is sufficient. For complex questions, provide a more detailed breakdown.
 *   Example of detailed thinking structure:
     \`\`\`
     <thinking>
-    1. Use your own knowledge and give the best **monologue** thinking process for the context given to you.
-    2. You need to think deeper for complex queries with chain of Thought and Tree of Thought and should give the effective response which is linked to the context given to it.
-    3. For Tool based context, you need to think with the context itselft. You should not think out of the box.
-    4. Use your own knowledge to analyse and think step by step to how can you give the best answer so that you can get the rewards from the user but should not mention that I am answering for rewards or something.
-    5.  **Formatting Considerations for Final Answer:**
-        *   [Note any specific formatting required, e.g., KaTeX for equations, Markdown list for steps, code block for code].
+    1.  **Analyze Query:** The user is asking for a conceptual explanation and an analogy.
+    2.  **Deconstruct:** I need to define the concept first, then list its benefits, and finally create a simple, relatable analogy.
+    3.  **Formatting Plan:** I will use Markdown headings for structure, bold for key terms, and bullet points for the list of benefits.
     </thinking>
     \`\`\`
 
@@ -383,6 +380,68 @@ const CHAT_USER_PROMPT_TEMPLATES = {
         return fullQuery;
     }
 };
+
+// ==============================================================================
+// === ToT Orchestrator  ===
+// ==============================================================================
+const PLANNER_PROMPT_TEMPLATE = `
+You are a meticulous AI planning agent. Your task is to analyze the user's query and generate 2-3 distinct, logical, step-by-step plans to answer it.
+
+**User Query:** "{userQuery}"
+
+**Instructions:**
+1.  Create 2-3 unique plans. Each plan should have a descriptive "name".
+2.  Each plan must contain a list of "steps". Each step should be a clear, single-sentence instruction for a research agent (e.g., "Search the web for recent reviews of product X," "Analyze the provided document for mentions of 'cost analysis'").
+3.  Your entire output MUST be a single, valid JSON object containing a "plans" array. Do not provide any other text or explanation.
+
+**Example JSON Output Format:**
+\`\`\`json
+{
+  "plans": [
+    {
+      "name": "Comprehensive Research Plan",
+      "steps": [
+        "First, search internal documents for foundational concepts related to the query.",
+        "Second, perform a web search for the latest real-world applications.",
+        "Finally, synthesize the findings from both internal and external sources."
+      ]
+    },
+    {
+      "name": "Quick Answer Plan",
+      "steps": [
+        "Perform a direct web search for the user's query to find an immediate answer."
+      ]
+    }
+  ]
+}
+\`\`\`
+
+Provide your JSON response now.
+`;
+
+const EVALUATOR_PROMPT_TEMPLATE = `
+You are an expert AI plan evaluator. Your task is to analyze a user's query and a list of proposed plans, and select the single best plan to execute. The best plan is the one that is most logical, efficient, and likely to produce a comprehensive and accurate answer.
+
+**User Query:** "{userQuery}"
+
+**Proposed Plans:**
+{plansJsonString}
+
+**Instructions:**
+1.  Review the query and each plan carefully.
+2.  Choose the plan with the most logical and effective sequence of steps.
+3.  Your entire output MUST be a single, valid JSON object with a single key "best_plan_name" whose value is the exact name of the plan you have chosen. Do not provide any other text or explanation.
+
+**Example JSON Output Format:**
+\`\`\`json
+{
+  "best_plan_name": "Comprehensive Research Plan"
+}
+\`\`\`
+
+Provide your JSON decision now.
+`;
+
 
 // ==============================================================================
 // === AGENTIC FRAMEWORK PROMPTS - V5 (Classification-Based Logic) ===
@@ -774,6 +833,9 @@ module.exports = {
     CHAT_MAIN_SYSTEM_PROMPT,
     WEB_SEARCH_CHAT_SYSTEM_PROMPT,
     CHAT_USER_PROMPT_TEMPLATES,
+    // ToT
+    PLANNER_PROMPT_TEMPLATE,
+    EVALUATOR_PROMPT_TEMPLATE,
     // Agentic Framework
     createAgenticSystemPrompt,
     createSynthesizerPrompt,

@@ -4,8 +4,6 @@ const { availableTools } = require('./toolRegistry.js');
 const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
 const geminiService = require('./geminiService.js');
 const ollamaService = require('./ollamaService.js');
-const User = require('../models/User');
-const { decrypt } = require('../utils/crypto');
 
 function parseToolCall(responseText) {
     try {
@@ -23,7 +21,7 @@ function parseToolCall(responseText) {
 }
 
 async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled, documentContextName, criticalThinkingEnabled, filter, isWebSearchEnabled, apiKey } = requestContext;
+    const { llmProvider, ollamaModel, userId, ollamaUrl, documentContextName, apiKey } = requestContext;
     
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
     const llmOptions = {
@@ -40,26 +38,34 @@ async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt,
     const routerResponseText = await llmService.generateContentWithHistory([], "Analyze the query and decide on an action.", routerSystemPrompt, llmOptions);
     const toolCall = parseToolCall(routerResponseText);
 
-    // --- DIRECT ANSWER PATH (MODIFIED) ---
+    // --- DIRECT ANSWER PATH (Corrected Logic) ---
     if (!toolCall || !toolCall.tool_name) {
         console.log('[AgentService] Decision: Direct Answer. Using main prompt engine.');
-        // Build the full, robust system prompt by combining the user's persona with core instructions.
-        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT(clientSystemPrompt);
+        // This now correctly combines your base instructions with the user's selected persona.
+        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
+        const fullUserQuery = `${clientSystemPrompt}\n\nUSER QUERY:\n${userQuery}`;
         
         const directAnswer = await llmService.generateContentWithHistory(
             chatHistory,
-            userQuery, // The user's query is the prompt for a direct answer.
+            fullUserQuery,
             finalSystemPrompt,
             llmOptions
         );
+
+        // Extract thinking if present
+        const thinkingMatch = directAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+        const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+        const mainContent = thinking ? directAnswer.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : directAnswer;
+
         return {
-            finalAnswer: directAnswer,
+            finalAnswer: mainContent,
+            thinking: thinking,
             references: [],
             sourcePipeline: `${llmProvider}-agent-direct`,
         };
     }
 
-    // --- TOOL-BASED ANSWER PATH ---
+    // --- TOOL-BASED ANSWER PATH (With KG Enhancement) ---
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
     const mainTool = availableTools[toolCall.tool_name];
     if (!mainTool) {
@@ -71,8 +77,9 @@ async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt,
         const executedToolNames = [toolCall.tool_name];
         let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
 
-        if (toolCall.tool_name === 'rag_search' && criticalThinkingEnabled) {
-            console.log('[AgentService] Critical Thinking enabled. Adding KG search to tool execution.');
+        // If the main tool is RAG and a document is selected, automatically add KG search.
+        if (toolCall.tool_name === 'rag_search' && documentContextName) {
+            console.log('[AgentService] RAG search triggered. Automatically adding KG search to execution plan.');
             const kgTool = availableTools['kg_search'];
             toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
             executedToolNames.push('kg_search');
@@ -80,25 +87,33 @@ async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt,
         }
 
         const toolResults = await Promise.all(toolExecutionPromises);
-        const combinedToolOutput = toolResults.map((result, index) => `--- TOOL OUTPUT: ${executedToolNames[index].toUpperCase()} ---\n${result.toolOutput}`).join('\n\n');
+        
+        const combinedToolOutput = toolResults.map((result, index) => 
+            `--- CONTEXT FROM: ${executedToolNames[index].toUpperCase()} ---\n${result.toolOutput}`
+        ).join('\n\n');
         const combinedReferences = toolResults.flatMap(result => result.references || []);
 
         console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
         
-        // Build the two main components for the final LLM call
-        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT(clientSystemPrompt);
+        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
         const synthesizerUserQuery = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
         
-        const finalAnswer = await llmService.generateContentWithHistory(chatHistory, synthesizerUserQuery, finalSystemPrompt, llmOptions);
+        const finalAnswerWithThinking = await llmService.generateContentWithHistory(chatHistory, synthesizerUserQuery, finalSystemPrompt, llmOptions);
         
+        // Extract thinking from synthesizer response
+        const thinkingMatch = finalAnswerWithThinking.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+        const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+        const finalAnswer = thinking ? finalAnswerWithThinking.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : finalAnswerWithThinking;
+
         return {
             finalAnswer,
+            thinking,
             references: combinedReferences,
             sourcePipeline: pipeline,
         };
     } catch (error) {
         console.error(`[AgentService] Error executing tool '${toolCall.tool_name}':`, error);
-        return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], sourcePipeline: `agent-error-tool-failed` };
+        return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], thinking: null, sourcePipeline: `agent-error-tool-failed` };
     }
 }
 
