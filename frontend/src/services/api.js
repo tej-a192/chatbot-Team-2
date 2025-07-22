@@ -206,6 +206,17 @@ const api = {
     const response = await apiClient.post("/tools/execute", payload);
     return response.data; // The data should be { results: [...] }
   },
+  analyzeCode: async (payload) => {
+    const response = await apiClient.post("/tools/analyze-code", payload);
+    return response.data; // Should be { analysis: "..." }
+  },
+  generateTestCases: async (payload) => {
+    const response = await apiClient.post(
+      "/tools/generate-test-cases",
+      payload
+    );
+    return response.data; // Should be { testCases: [...] }
+  },
 };
 
 export default api;

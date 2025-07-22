@@ -169,6 +169,7 @@ import RightCollapsedNav from './components/layout/RightCollapsedNav.jsx';
 import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
+import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -314,7 +315,7 @@ function App() {
             setShowAuthModal(false);
             if (location.pathname.startsWith('/admin')) {
                 navigate('/', { replace: true });
-            } else if (!currentSessionId) {
+            } else if (!currentSessionId && !location.pathname.startsWith('/tools')) { 
                 api.startNewSession(null).then(data => {
                     if (data && data.newSessionId) {
                         setGlobalSessionId(data.newSessionId);
@@ -354,6 +355,9 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
+                    <CodeExecutorPage /> : <Navigate to="/" />} 
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
             </Routes>
@@ -4562,10 +4566,11 @@ import { useAppState } from '../../contexts/AppStateContext';
 import ThemeToggle from '../common/ThemeToggle.jsx';
 import LLMSelectionModal from './LLMSelectionModal.jsx';
 import ProfileSettingsModal from '../profile/ProfileSettingsModal.jsx';
+import { Link } from 'react-router-dom';
 import { 
-    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server 
+    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench 
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+
 
 function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestratorStatus, isChatProcessing  }) {
     const { selectedLLM, switchLLM } = useAppState();
@@ -4627,6 +4632,19 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                         >
                             <HistoryIcon size={14} /> <span className="hidden sm:inline">History</span>
                         </button>
+
+                         {/* --- NEW TOOLS BUTTON --- */}
+                        <Link
+                            to="/tools/code-executor"
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 text-amber-700 dark:text-amber-400 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            aria-disabled={isChatProcessing}
+                            onClick={(e) => isChatProcessing && e.preventDefault()}
+                            title="Open Tools"
+                        >
+                            <Wrench size={14} /> <span className="hidden sm:inline">Tools</span>
+                        </Link>
+                        {/* --- END NEW TOOLS BUTTON --- */}
+
                         <button
                             onClick={() => setIsLLMModalOpen(true)}
                             className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -4857,6 +4875,426 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
 export default ProfileSettingsModal;
 ```
 
+`frontend/src/components/tools/AIAssistantPanel.jsx`
+
+```javascript
+// frontend/src/components/tools/AIAssistantPanel.jsx
+import React, { useState, useEffect, useRef } from 'react';
+import { Bot, Loader2, AlertTriangle } from 'lucide-react';
+import Button from '../core/Button.jsx';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import Prism from 'prismjs';
+
+const createMarkup = (markdownText) => {
+    if (!markdownText) return { __html: '' };
+    const rawHtml = marked.parse(markdownText);
+    const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+    return { __html: cleanHtml };
+};
+
+const AIAssistantPanel = ({ code, language }) => {
+    const [analysis, setAnalysis] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+    const contentRef = useRef(null);
+
+    useEffect(() => {
+        if (analysis && contentRef.current) {
+            const timer = setTimeout(() => {
+                Prism.highlightAllUnder(contentRef.current);
+            }, 50);
+            return () => clearTimeout(timer);
+        }
+    }, [analysis]);
+
+    const handleAnalyze = async () => {
+        if (!code.trim()) {
+            toast.error("There is no code to analyze.");
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        setAnalysis('');
+        const toastId = toast.loading("AI is analyzing your code...");
+
+        try {
+            const response = await api.analyzeCode({ code, language });
+            setAnalysis(response.analysis);
+            toast.success("Code analysis complete!", { id: toastId });
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || "Failed to get AI analysis.";
+            setError(errorMessage);
+            toast.error(errorMessage, { id: toastId });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="p-4 h-full flex flex-col bg-surface-light dark:bg-surface-dark">
+            <h3 className="text-lg font-semibold mb-2 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                    <Bot className="text-primary"/> AI Assistant
+                </span>
+                <Button onClick={handleAnalyze} size="sm" variant="outline" isLoading={isLoading} disabled={!code.trim()}>
+                    Analyze Code
+                </Button>
+            </h3>
+            <div className="flex-grow bg-gray-50 dark:bg-gray-800/50 rounded-md p-1 border border-border-light dark:border-border-dark overflow-y-auto custom-scrollbar">
+                {isLoading && (
+                    <div className="flex justify-center items-center h-full text-text-muted-light dark:text-text-muted-dark">
+                        <Loader2 size={24} className="animate-spin mr-2" /> Analyzing...
+                    </div>
+                )}
+                {error && !isLoading && (
+                    <div className="p-3 text-red-400 text-sm">
+                        <AlertTriangle className="inline mr-2" /> {error}
+                    </div>
+                )}
+                {!isLoading && !error && !analysis && (
+                     <div className="flex justify-center items-center h-full text-center text-sm text-text-muted-light dark:text-text-muted-dark p-4">
+                        Click "Analyze Code" to get an AI-powered review of your code.
+                    </div>
+                )}
+                {analysis && !isLoading && (
+                    <div 
+                        ref={contentRef}
+                        className="prose prose-sm dark:prose-invert max-w-none p-3 text-text-light dark:text-text-dark"
+                        dangerouslySetInnerHTML={createMarkup(analysis)}
+                    />
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default AIAssistantPanel;
+```
+
+`frontend/src/components/tools/CodeEditor.jsx`
+
+```javascript
+// frontend/src/components/tools/CodeEditor.jsx
+import React from 'react';
+import Editor from '@monaco-editor/react';
+import { useTheme } from '../../hooks/useTheme';
+import { Loader2 } from 'lucide-react';
+
+const CodeEditor = ({ code, setCode, language }) => {
+    const { theme } = useTheme();
+
+    const handleEditorChange = (value) => {
+        setCode(value || '');
+    };
+
+    return (
+        <div className="h-full w-full border border-border-light dark:border-border-dark rounded-lg overflow-hidden shadow-inner">
+            <Editor
+                height="100%"
+                language={language}
+                value={code}
+                onChange={handleEditorChange}
+                theme={theme === 'dark' ? 'vs-dark' : 'light'}
+                loading={<Loader2 className="animate-spin text-primary" />}
+                options={{
+                    fontSize: 14,
+                    minimap: { enabled: true },
+                    contextmenu: true,
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                }}
+            />
+        </div>
+    );
+};
+
+export default CodeEditor;
+```
+
+`frontend/src/components/tools/CodeExecutorPage.jsx`
+
+```javascript
+// frontend/src/components/tools/CodeExecutorPage.jsx
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Home } from 'lucide-react';
+import CodeEditor from './CodeEditor';
+import TestCaseManager from './TestCaseManager';
+import OutputDisplay from './OutputDisplay';
+import AIAssistantPanel from './AIAssistantPanel';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+
+const CodeExecutorPage = () => {
+    const [language, setLanguage] = useState('python');
+    const [code, setCode] = useState('# Welcome to the Code Executor!\n# Write your Python code here.\n\ndef main():\n    # Example: Read two numbers and print their sum\n    try:\n        a = int(input())\n        b = int(input())\n        print(a + b)\n    except (ValueError, EOFError):\n        print("Invalid input. Please provide two integers on separate lines.")\n\nif __name__ == "__main__":\n    main()\n');
+    const [testCases, setTestCases] = useState([
+        { input: '5\n10', expectedOutput: '15' },
+        { input: '1\n-1', expectedOutput: '0' }
+    ]);
+    const [results, setResults] = useState([]);
+    const [compilationError, setCompilationError] = useState(null);
+    const [isExecuting, setIsExecuting] = useState(false);
+
+    const handleExecute = async () => {
+        setIsExecuting(true);
+        setResults([]);
+        setCompilationError(null);
+        const toastId = toast.loading('Executing code...');
+
+        try {
+            const response = await api.executeCode({
+                language,
+                code,
+                testCases
+            });
+            
+            setResults(response.results);
+            const failures = response.results.filter(r => r.status !== 'pass').length;
+            if (failures > 0) {
+                 toast.error(`${failures} test case(s) failed or had errors.`, { id: toastId });
+            } else {
+                 toast.success('All test cases passed!', { id: toastId });
+            }
+
+        } catch (error) {
+            const errorMessage = error.response?.data?.message || "An unknown error occurred.";
+            setCompilationError(errorMessage);
+            toast.error(errorMessage, { id: toastId });
+        } finally {
+            setIsExecuting(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6">
+                <h1 className="text-xl font-bold">Secure Code Executor</h1>
+                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
+                    <Home size={16}/>
+                    Back to Main App
+                </Link>
+            </header>
+            <div className="flex flex-1 overflow-hidden">
+                <main className="flex-1 flex flex-col overflow-hidden">
+                    <div className="flex-grow p-4 h-1/2">
+                       <CodeEditor code={code} setCode={setCode} language={language} />
+                    </div>
+                    <div className="flex-shrink-0 border-t border-border-light dark:border-border-dark h-1/2 overflow-y-auto">
+                        <OutputDisplay results={results} compilationError={compilationError} />
+                    </div>
+                </main>
+                <aside className="w-[500px] flex-shrink-0 flex flex-col border-l border-border-light dark:border-border-dark overflow-y-auto">
+                     <div className="flex-shrink-0 h-2/3">
+                        <TestCaseManager 
+                            testCases={testCases} 
+                            setTestCases={setTestCases}
+                            onExecute={handleExecute}
+                            isExecuting={isExecuting}
+                            code={code}
+                            language={language}
+                        />
+                     </div>
+                     <div className="flex-grow h-1/3">
+                        <AIAssistantPanel 
+                            code={code}
+                            language={language}
+                        />
+                     </div>
+                </aside>
+            </div>
+        </div>
+    );
+};
+
+export default CodeExecutorPage;
+```
+
+`frontend/src/components/tools/OutputDisplay.jsx`
+
+```javascript
+// frontend/src/components/tools/OutputDisplay.jsx
+import React from 'react';
+import { CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react';
+
+const OutputDisplay = ({ results, compilationError }) => {
+    if (compilationError) {
+        return (
+            <div className="p-4 bg-red-900/10 text-red-400 border-t border-red-500/30">
+                <h3 className="text-lg font-semibold mb-2 flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
+                <pre className="bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono">{compilationError}</pre>
+            </div>
+        );
+    }
+    
+    if (!results || results.length === 0) {
+        return (
+            <div className="p-4 text-center text-text-muted-light dark:text-text-muted-dark border-t border-border-light dark:border-border-dark">
+                <p>Run the code to see the output and test case results here.</p>
+            </div>
+        );
+    }
+
+    const getStatusIcon = (status) => {
+        if (status === 'pass') return <CheckCircle className="text-green-500" />;
+        if (status === 'fail') return <XCircle className="text-yellow-500" />;
+        return <AlertTriangle className="text-red-500" />; // error
+    };
+
+    return (
+        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark">
+            <h3 className="text-lg font-semibold mb-3">Execution Results</h3>
+            <div className="space-y-4 max-h-80 overflow-y-auto custom-scrollbar pr-2">
+                {results.map((res, index) => (
+                    <div key={index} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
+                        <div className="flex justify-between items-center mb-2">
+                            <h4 className="font-semibold flex items-center gap-2">
+                                {getStatusIcon(res.status)}
+                                Test Case #{index + 1}: <span className="uppercase">{res.status}</span>
+                            </h4>
+                            {res.duration && <span className="text-xs text-text-muted-light dark:text-text-muted-dark flex items-center gap-1"><Clock size={12}/>{res.duration}ms</span>}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div>
+                                <strong className="block mb-1 text-text-light dark:text-text-dark">Input:</strong>
+                                <pre className="bg-gray-200 dark:bg-gray-900 p-2 rounded whitespace-pre-wrap font-mono">{res.input || '(empty)'}</pre>
+                            </div>
+                            <div>
+                                <strong className="block mb-1 text-text-light dark:text-text-dark">Expected Output:</strong>
+                                <pre className="bg-gray-200 dark:bg-gray-900 p-2 rounded whitespace-pre-wrap font-mono">{res.expected || '(empty)'}</pre>
+                            </div>
+                            <div className="md:col-span-2">
+                                <strong className="block mb-1 text-text-light dark:text-text-dark">Actual Output:</strong>
+                                <pre className={`p-2 rounded whitespace-pre-wrap font-mono ${res.status === 'pass' ? 'bg-green-900/20' : 'bg-yellow-900/20'}`}>{res.output || '(empty)'}</pre>
+                            </div>
+                            {res.error && (
+                                <div className="md:col-span-2">
+                                    <strong className="block mb-1 text-red-500 dark:text-red-400">Error:</strong>
+                                    <pre className="bg-red-900/20 p-2 rounded text-red-400 whitespace-pre-wrap font-mono">{res.error}</pre>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export default OutputDisplay;
+```
+
+`frontend/src/components/tools/TestCaseManager.jsx`
+
+```javascript
+// frontend/src/components/tools/TestCaseManager.jsx
+import React, { useState } from 'react';
+import { Plus, Trash2, Sparkles } from 'lucide-react';
+import Button from '../core/Button.jsx';
+import IconButton from '../core/IconButton.jsx';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+
+const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code, language }) => {
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    const addTestCase = () => {
+        setTestCases([...testCases, { input: '', expectedOutput: '' }]);
+    };
+
+    const removeTestCase = (index) => {
+        const newTestCases = testCases.filter((_, i) => i !== index);
+        setTestCases(newTestCases);
+    };
+
+    const updateTestCase = (index, field, value) => {
+        const newTestCases = [...testCases];
+        newTestCases[index][field] = value;
+        setTestCases(newTestCases);
+    };
+
+    const handleGenerateCases = async () => {
+        if (!code.trim()) {
+            toast.error("There is no code to generate test cases for.");
+            return;
+        }
+        setIsGenerating(true);
+        const toastId = toast.loading("AI is generating test cases...");
+        try {
+            const response = await api.generateTestCases({ code, language });
+            if (response.testCases && Array.isArray(response.testCases) && response.testCases.length > 0) {
+                const existingCases = new Set(testCases.map(tc => `${tc.input}|${tc.expectedOutput}`));
+                const newCases = response.testCases.filter(newTc => !existingCases.has(`${newTc.input}|${newTc.expectedOutput}`));
+                
+                setTestCases(prev => [...prev, ...newCases]);
+                toast.success(`${newCases.length} new test case(s) added!`, { id: toastId });
+            } else {
+                toast.error("The AI could not generate valid test cases.", { id: toastId });
+            }
+        } catch (err) {
+             const errorMessage = err.response?.data?.message || "Failed to generate test cases.";
+             toast.error(errorMessage, { id: toastId });
+        } finally {
+            setIsGenerating(false);
+        }
+    };
+
+    return (
+        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark">
+            <h3 className="text-lg font-semibold mb-3">Test Cases</h3>
+            <div className="space-y-4 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                {testCases.map((tc, index) => (
+                    <div key={index} className="flex flex-col md:flex-row gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Input (stdin)</label>
+                            <textarea
+                                value={tc.input}
+                                onChange={(e) => updateTestCase(index, 'input', e.target.value)}
+                                className="input-field mt-1 !text-xs font-mono"
+                                rows="2"
+                                placeholder="Enter input, separate lines with \n"
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Expected Output (stdout)</label>
+                            <textarea
+                                value={tc.expectedOutput}
+                                onChange={(e) => updateTestCase(index, 'expectedOutput', e.target.value)}
+                                className="input-field mt-1 !text-xs font-mono"
+                                rows="2"
+                                placeholder="Enter expected exact output"
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <IconButton icon={Trash2} variant="danger" size="sm" onClick={() => removeTestCase(index)} title="Remove Test Case" />
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <div className="flex items-center justify-between mt-4">
+                <div className="space-x-2">
+                    <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
+                        Add Test Case
+                    </Button>
+                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
+                        AI Generate Cases
+                    </Button>
+                </div>
+                <Button onClick={onExecute} size="md" isLoading={isExecuting} disabled={isGenerating}>
+                    Run Code & Evaluate
+                </Button>
+            </div>
+        </div>
+    );
+};
+
+export default TestCaseManager;
+```
+
 `frontend/src/contexts/AppStateContext.jsx`
 
 ```javascript
@@ -5035,8 +5473,8 @@ export const AuthProvider = ({ children }) => {
     const processAuthData = useCallback((authApiResponse) => {
         if (authApiResponse && authApiResponse.token && authApiResponse._id && authApiResponse.email) {
             setToken(authApiResponse.token);
-            setUser({ id: authApiResponse._id, email: authApiResponse.email });
-            console.log("AuthContext: User and Token set.", { email: authApiResponse.email });
+            setUser({ id: authApiResponse._id, email: authApiResponse.email, username: authApiResponse.username });
+             console.log("AuthContext: User and Token set.", { email: authApiResponse.email, username: authApiResponse.username });
             return authApiResponse; 
         } else {
             setToken(null);
@@ -5054,7 +5492,7 @@ export const AuthProvider = ({ children }) => {
                 try {
                     const userDataFromMe = await api.getMe();
                     if (userDataFromMe && userDataFromMe._id && userDataFromMe.email) {
-                        setUser({ id: userDataFromMe._id, email: userDataFromMe.email });
+                        setUser({ id: userDataFromMe._id, email: userDataFromMe.email, username: userDataFromMe.username });
                     } else {
                         setToken(null);
                         setUser(null);
@@ -5073,15 +5511,10 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         try {
             const data = await api.login(credentials);
-            // --- THIS IS THE FIX ---
-            // If the response is a special case for admin login,
-            // bypass the standard token processing and return it directly.
             if (data && data.isAdminLogin) {
                 return data;
             }
-            // Otherwise, process it as a regular user with a JWT token.
             return processAuthData(data);
-            // --- END OF FIX ---
         } catch (error) {
             setToken(null); 
             setUser(null);
@@ -5095,7 +5528,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         try {
             const data = await api.signup(signupData);
-            return processAuthData(data); // Signup always returns a regular user
+            return processAuthData(data); 
         } catch (error) {
             setToken(null);
             setUser(null);
@@ -5883,7 +6316,9 @@ const api = {
     return response.data;
   },
   startNewSession: async (previousSessionId) => {
-    const response = await apiClient.post("/chat/history", { previousSessionId });
+    const response = await apiClient.post("/chat/history", {
+      previousSessionId,
+    });
     return response.data;
   },
   deleteChatSession: async (sessionId) => {
@@ -5913,7 +6348,10 @@ const api = {
   getOrchestratorStatus: async () => {
     try {
       const response = await apiClient.get("/network/ip");
-      return { status: "ok", message: `Backend Online at ${response.data.ips[0]}` };
+      return {
+        status: "ok",
+        message: `Backend Online at ${response.data.ips[0]}`,
+      };
     } catch (e) {
       return { status: "error", message: "Backend Unreachable" };
     }
@@ -5935,52 +6373,95 @@ const api = {
     if (!filename || !analysis_type) {
       throw new Error("Filename and analysis type are required.");
     }
-    const toastId = toast.loading(`Generating ${analysis_type} for "${filename}"...`);
+    const toastId = toast.loading(
+      `Generating ${analysis_type} for "${filename}"...`
+    );
     try {
-      const response = await apiClient.get(`/analysis/${encodeURIComponent(filename)}`);
+      const response = await apiClient.get(
+        `/analysis/${encodeURIComponent(filename)}`
+      );
       const fullAnalysisObject = response.data;
       const rawOutput = fullAnalysisObject[analysis_type];
-      if (!rawOutput || typeof rawOutput !== 'string' || rawOutput.trim() === "") {
-         toast.success(`No stored ${analysis_type} found for "${filename}".`, { id: toastId });
-         return {
-            content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-            thinking: "No analysis data found in the database for this type."
-         };
+      if (
+        !rawOutput ||
+        typeof rawOutput !== "string" ||
+        rawOutput.trim() === ""
+      ) {
+        toast.success(`No stored ${analysis_type} found for "${filename}".`, {
+          id: toastId,
+        });
+        return {
+          content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
+          thinking: "No analysis data found in the database for this type.",
+        };
       }
       const { content, thinking } = parseAnalysisOutput(rawOutput);
-      toast.success(`Successfully generated ${analysis_type} for "${filename}".`, { id: toastId });
+      toast.success(
+        `Successfully generated ${analysis_type} for "${filename}".`,
+        { id: toastId }
+      );
       return { content, thinking };
     } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
-      toast.error(`Error generating ${analysis_type}: ${errorMessage}`, { id: toastId });
+      const errorMessage =
+        error.response?.data?.message || error.message || "Unknown error";
+      toast.error(`Error generating ${analysis_type}: ${errorMessage}`, {
+        id: toastId,
+      });
       throw error;
     }
   },
-  generateDocument: async ({ markdownContent, docType, sourceDocumentName }) => {
-    const response = await apiClient.post('/generate/document', 
+  generateDocument: async ({
+    markdownContent,
+    docType,
+    sourceDocumentName,
+  }) => {
+    const response = await apiClient.post(
+      "/generate/document",
       { markdownContent, docType, sourceDocumentName },
-      { responseType: 'blob' }
+      { responseType: "blob" }
     );
-    const contentDisposition = response.headers['content-disposition'];
+    const contentDisposition = response.headers["content-disposition"];
     let filename = `generated-document.${docType}`;
     if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (filenameMatch && filenameMatch.length > 1) {
-            filename = filenameMatch[1];
-        }
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = filenameMatch[1];
+      }
     }
     return { fileBlob: response.data, filename: filename };
   },
-  generatePodcast: async ({ analysisContent, sourceDocumentName, podcastOptions }) => {
-    const response = await apiClient.post('/export/podcast', 
+  generatePodcast: async ({
+    analysisContent,
+    sourceDocumentName,
+    podcastOptions,
+  }) => {
+    const response = await apiClient.post(
+      "/export/podcast",
       { analysisContent, sourceDocumentName, podcastOptions },
-      { responseType: 'blob' }
+      { responseType: "blob" }
     );
     return { audioBlob: response.data, sourceDocumentName };
   },
   getKnowledgeGraph: async (documentName) => {
-    const response = await apiClient.get(`/kg/visualize/${encodeURIComponent(documentName)}`);
+    const response = await apiClient.get(
+      `/kg/visualize/${encodeURIComponent(documentName)}`
+    );
     return response.data;
+  },
+  executeCode: async (payload) => {
+    const response = await apiClient.post("/tools/execute", payload);
+    return response.data; // The data should be { results: [...] }
+  },
+  analyzeCode: async (payload) => {
+    const response = await apiClient.post("/tools/analyze-code", payload);
+    return response.data; // Should be { analysis: "..." }
+  },
+  generateTestCases: async (payload) => {
+    const response = await apiClient.post(
+      "/tools/generate-test-cases",
+      payload
+    );
+    return response.data; // Should be { testCases: [...] }
   },
 };
 
@@ -6212,7 +6693,7 @@ PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 # OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
-ENCRYPTION_SECRET = "MuraliKrishna@143"
+ENCRYPTION_SECRET = "MuraliKrishna@143MuraliKrishna@143MuraliKrishna@143"
 
 
 ```
@@ -6765,23 +7246,91 @@ Conclude the podcast with a quick summary and an encouraging sign-off.
 **FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_A:")**
 `;
 
+
+// ==============================================================================
+// --- CODE ASSISTANT PROMPTS (for Code Executor Tool) ---
+// ==============================================================================
+
+const CODE_ANALYSIS_PROMPT_TEMPLATE = `
+You are an expert software engineer and code reviewer. Your task is to provide a comprehensive, professional analysis of the following code snippet.
+
+**Analysis Sections (Use Markdown headings for each):**
+1.  **Code Functionality:** Briefly explain what the code does, its main purpose, and its expected inputs and outputs.
+2.  **Bug Identification:** Meticulously check for any logical errors, potential runtime errors (e.g., division by zero, index out of bounds), or security vulnerabilities. If you find any, explain the bug clearly. If not, state that no obvious bugs were found.
+3.  **Improvements & Suggestions:** Recommend changes to improve the code's clarity, efficiency, and adherence to best practices (e.g., better variable names, more efficient algorithms, error handling).
+
+**Formatting:**
+- Use clear Markdown for structure.
+- For code suggestions, use fenced code blocks with the correct language identifier.
+
+---
+**LANGUAGE:**
+{language}
+---
+**CODE TO ANALYZE:**
+\`\`\`{language}
+{code}
+\`\`\`
+---
+
+**ANALYSIS REPORT:**
+`;
+
+const TEST_CASE_GENERATION_PROMPT_TEMPLATE = `
+You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a comprehensive set of test cases for the given code.
+
+**Instructions:**
+1.  Analyze the code to understand its logic, inputs, and outputs.
+2.  Create a diverse set of test cases that cover:
+    -   **Standard Cases:** Common, expected inputs.
+    -   **Edge Cases:** Boundary values, empty inputs, zeros, negative numbers, etc.
+    -   **Error Cases:** Invalid inputs that should cause the program to handle an error gracefully (if applicable).
+3.  Your entire output **MUST** be a single, valid JSON array of objects.
+4.  Each object in the array must have two keys: \`input\` (a string) and \`expectedOutput\` (a string).
+5.  For inputs that require multiple lines, use the newline character \`\\n\`.
+
+**Example Output Format:**
+[
+  { "input": "5\\n10", "expectedOutput": "15" },
+  { "input": "0\\n0", "expectedOutput": "0" },
+  { "input": "-5\\n5", "expectedOutput": "0" }
+]
+
+---
+**LANGUAGE:**
+{language}
+---
+**CODE TO ANALYZE:**
+\`\`\`{language}
+{code}
+\`\`\`
+---
+
+**FINAL JSON TEST CASE ARRAY:**
+`;
+
+
+
 module.exports = {
-    // Analysis
-    ANALYSIS_PROMPTS,
-    // KG
-    KG_GENERATION_SYSTEM_PROMPT,
-    KG_BATCH_USER_PROMPT_TEMPLATE,
-    // Chat
-    CHAT_MAIN_SYSTEM_PROMPT,
-    WEB_SEARCH_CHAT_SYSTEM_PROMPT,
-    CHAT_USER_PROMPT_TEMPLATES,
-    // Agentic Framework
-    createAgenticSystemPrompt,
-    createSynthesizerPrompt,
-    // Content Generation
-    DOCX_EXPANSION_PROMPT_TEMPLATE,
-    PPTX_EXPANSION_PROMPT_TEMPLATE,
-    PODCAST_SCRIPT_PROMPT_TEMPLATE,
+  // Analysis
+  ANALYSIS_PROMPTS,
+  // KG
+  KG_GENERATION_SYSTEM_PROMPT,
+  KG_BATCH_USER_PROMPT_TEMPLATE,
+  // Chat
+  CHAT_MAIN_SYSTEM_PROMPT,
+  WEB_SEARCH_CHAT_SYSTEM_PROMPT,
+  CHAT_USER_PROMPT_TEMPLATES,
+  // Agentic Framework
+  createAgenticSystemPrompt,
+  createSynthesizerPrompt,
+  // Content Generation
+  DOCX_EXPANSION_PROMPT_TEMPLATE,
+  PPTX_EXPANSION_PROMPT_TEMPLATE,
+  PODCAST_SCRIPT_PROMPT_TEMPLATE,
+  // Code Assistant
+  CODE_ANALYSIS_PROMPT_TEMPLATE,
+  TEST_CASE_GENERATION_PROMPT_TEMPLATE,
 };
 ```
 
@@ -7007,60 +7556,72 @@ module.exports = ChatHistory;
 
 ```javascript
 // server/models/User.js
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-const { encrypt } = require('../utils/crypto'); // Import the new encrypt utility
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const { encrypt } = require("../utils/crypto");
 
-const ProfileSchema = new mongoose.Schema({
-    name: { type: String, default: '', trim: true },
-    college: { type: String, default: '', trim: true },
-    universityNumber: { type: String, default: '', trim: true },
-    degreeType: { type: String, default: '', trim: true },
-    branch: { type: String, default: '', trim: true },
-    year: { type: String, default: '', trim: true },
-}, { _id: false });
+const ProfileSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "", trim: true },
+    college: { type: String, default: "", trim: true },
+    universityNumber: { type: String, default: "", trim: true },
+    degreeType: { type: String, default: "", trim: true },
+    branch: { type: String, default: "", trim: true },
+    year: { type: String, default: "", trim: true },
+  },
+  { _id: false }
+);
 
 const UserSchema = new mongoose.Schema({
-  email: { // Changed from username to email
+  email: {
     type: String,
-    required: [true, 'Please provide an email'],
+    required: [true, "Please provide an email"],
     unique: true,
     trim: true,
     lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email address'],
+    match: [
+      /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
+      "Please provide a valid email address",
+    ],
+  },
+  username: {
+    type: String,
+    required: [true, "A unique username is required"],
+    unique: true,
+    trim: true,
   },
   password: {
     type: String,
-    required: [true, 'Please provide a password'],
+    required: [true, "Please provide a password"],
     minlength: 6,
     select: false,
   },
   profile: {
     type: ProfileSchema,
-    default: () => ({})
+    default: () => ({}),
   },
   apiKeyRequestStatus: {
     type: String,
-    enum: ['none', 'pending', 'approved', 'rejected'],
-    default: 'none', // Default for users who provide their own key or haven't requested
+    enum: ["none", "pending", "approved", "rejected"],
+    default: "none",
   },
-  encryptedApiKey: { 
+  encryptedApiKey: {
     type: String,
-    select: false, 
+    select: false,
   },
   preferredLlmProvider: {
     type: String,
-    enum: ['gemini', 'ollama'],
-    default: 'gemini',
+    enum: ["gemini", "ollama"],
+    default: "gemini",
   },
   ollamaUrl: {
     type: String,
     trim: true,
-    default: '',
+    default: "",
   },
   ollamaModel: {
     type: String,
-    default: process.env.OLLAMA_DEFAULT_MODEL || 'llama3',
+    default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
   },
   uploadedDocuments: [
     {
@@ -7071,14 +7632,14 @@ const UserSchema = new mongoose.Schema({
         topics: { type: String, default: "" },
         mindmap: { type: String, default: "" },
       },
-      ragStatus: { type: String, default: 'pending' },
-      analysisStatus: { type: String, default: 'pending' },
+      ragStatus: { type: String, default: "pending" },
+      analysisStatus: { type: String, default: "pending" },
       analysisTimestamp: { type: Date },
-      kgStatus: { type: String, default: 'pending' },
+      kgStatus: { type: String, default: "pending" },
       kgNodesCount: { type: Number, default: 0 },
       kgEdgesCount: { type: Number, default: 0 },
       kgTimestamp: { type: Date },
-      uploadedAt: { type: Date, default: Date.now }
+      uploadedAt: { type: Date, default: Date.now },
     },
   ],
   createdAt: {
@@ -7087,19 +7648,19 @@ const UserSchema = new mongoose.Schema({
   },
 });
 
-UserSchema.pre('save', async function (next) {
-  if (this.isModified('password')) {
+UserSchema.pre("save", async function (next) {
+  if (this.isModified("password")) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   }
-  if (this.isModified('encryptedApiKey') && this.encryptedApiKey) {
+  if (this.isModified("encryptedApiKey") && this.encryptedApiKey) {
     try {
-        this.encryptedApiKey = encrypt(this.encryptedApiKey);
+      this.encryptedApiKey = encrypt(this.encryptedApiKey);
     } catch (encError) {
-        console.error("Error encrypting API key during user save:", encError);
-        return next(new Error("Failed to encrypt API key."));
+      console.error("Error encrypting API key during user save:", encError);
+      return next(new Error("Failed to encrypt API key."));
     }
-  } else if (this.isModified('encryptedApiKey') && !this.encryptedApiKey) {
+  } else if (this.isModified("encryptedApiKey") && !this.encryptedApiKey) {
     this.encryptedApiKey = null;
   }
   next();
@@ -7110,20 +7671,21 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-UserSchema.statics.findByCredentials = async function(email, password) {
-    const user = await this.findOne({ email }).select('+password');
-    if (!user) {
-        return null;
-    }
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-        return null;
-    }
-    return user;
+UserSchema.statics.findByCredentials = async function (email, password) {
+  const user = await this.findOne({ email }).select("+password");
+  if (!user) {
+    return null;
+  }
+  const isMatch = await user.comparePassword(password);
+  if (!isMatch) {
+    return null;
+  }
+  return user;
 };
 
-const User = mongoose.model('User', UserSchema);
+const User = mongoose.model("User", UserSchema);
 module.exports = User;
+
 ```
 
 `server/protocols/contextProtocols.js`
@@ -8137,7 +8699,6 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 
 ```python
 # server/rag_service/app.py
-
 import os
 import sys
 import traceback
@@ -8145,9 +8706,19 @@ from flask import Flask, request, jsonify, current_app, send_from_directory, aft
 import logging
 import atexit
 import uuid
+import subprocess
+import tempfile
+import shutil
+import json
+
 
 from duckduckgo_search import DDGS
-from qdrant_client import models as qdrant_models # Import Qdrant models
+from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -8166,6 +8737,8 @@ try:
     import document_generator
     import podcast_generator
     import google.generativeai as genai
+    
+
 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -8222,7 +8795,6 @@ try:
     neo4j_handler.init_driver()
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
-
 atexit.register(neo4j_handler.close_driver)
 
 def create_error_response(message, status_code=500, details=None):
@@ -8234,6 +8806,125 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+
+    try:
+        # NOTE: This assumes CODE_ANALYSIS_PROMPT_TEMPLATE is now defined in a shared config
+        # that the Node.js `promptTemplates.js` mimics or is derived from.
+        # For now, we are re-defining it here for clarity.
+        from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis_text = llm_wrapper(prompt)
+        return jsonify({"analysis": analysis_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
+
+
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+
+    try:
+        from prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt)
+        # Clean the response to ensure it's valid JSON
+        cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
+        test_cases = json.loads(cleaned_json)
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+
+
+@app.route('/execute_code', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+
+    code = data.get('code')
+    language = data.get('language')
+    test_cases = data.get('testCases', [])
+
+    if not code or not language:
+        return create_error_response("Missing 'code' or 'language'", 400)
+    
+    if language.lower() != 'python':
+        return create_error_response(f"Language '{language}' is not supported.", 400)
+
+    results = []
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        script_path = os.path.join(temp_dir, 'main.py')
+        with open(script_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        for i, case in enumerate(test_cases):
+            case_input = case.get('input', '')
+            expected_output = str(case.get('expectedOutput', '')).strip()
+            
+            case_result = {
+                "input": case_input,
+                "expected": expected_output,
+                "output": "",
+                "error": None,
+                "status": "fail"
+            }
+
+            try:
+                # Execute the script using subprocess
+                process = subprocess.run(
+                    [sys.executable, script_path],
+                    input=case_input,
+                    capture_output=True,
+                    text=True,
+                    timeout=5, # 5-second timeout for execution
+                    encoding='utf-8'
+                )
+
+                stdout = process.stdout.strip()
+                stderr = process.stderr.strip()
+
+                case_result["output"] = stdout
+
+                if process.returncode != 0:
+                    case_result["status"] = "error"
+                    case_result["error"] = stderr or "Script failed with a non-zero exit code."
+                elif stderr:
+                     # Some warnings might go to stderr but not cause a failure
+                     case_result["error"] = f"Warning (stderr):\n{stderr}"
+
+                # Compare output if there was no runtime error
+                if case_result["status"] != "error":
+                    if stdout == expected_output:
+                        case_result["status"] = "pass"
+                    else:
+                        case_result["status"] = "fail"
+                
+            except subprocess.TimeoutExpired:
+                case_result["status"] = "error"
+                case_result["error"] = "Execution timed out after 5 seconds."
+            except Exception as exec_err:
+                case_result["status"] = "error"
+                case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
+
+            results.append(case_result)
+
+    finally:
+        # Securely remove the temporary directory and its contents
+        shutil.rmtree(temp_dir)
+
+    return jsonify({"results": results}), 200
 
 # --- THIS IS THE CORRECTED /query ENDPOINT ---
 @app.route('/query', methods=['POST'])
@@ -9321,6 +10012,65 @@ def synthesize_audio_with_gtts(text: str, output_path: str):
 
 ```
 
+`server/rag_service/prompts.py`
+
+```python
+# server/rag_service/prompts.py
+
+CODE_ANALYSIS_PROMPT_TEMPLATE = """
+You are an expert software engineer and code reviewer. Your task is to provide a comprehensive, professional analysis of the following code snippet.
+
+**Analysis Sections (Use Markdown headings for each):**
+1.  **Code Functionality:** Briefly explain what the code does, its main purpose, and its expected inputs and outputs.
+2.  **Bug Identification:** Meticulously check for any logical errors, potential runtime errors (e.g., division by zero, index out of bounds), or security vulnerabilities. If you find any, explain the bug clearly. If not, state that no obvious bugs were found.
+3.  **Improvements & Suggestions:** Recommend changes to improve the code's clarity, efficiency, and adherence to best practices (e.g., better variable names, more efficient algorithms, error handling).
+
+**Formatting:**
+- Use clear Markdown for structure.
+- For code suggestions, use fenced code blocks with the correct language identifier.
+
+---
+**LANGUAGE:**
+{language}
+---
+**CODE TO ANALYZE:**
+```{language}
+{code}```
+---
+
+**ANALYSIS REPORT:**
+"""
+
+TEST_CASE_GENERATION_PROMPT_TEMPLATE = """
+You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a comprehensive set of test cases for the given code.
+
+**Instructions:**
+1.  Analyze the code to understand its logic, inputs, and outputs.
+2.  Create a diverse set of test cases that cover:
+    -   **Standard Cases:** Common, expected inputs.
+    -   **Edge Cases:** Boundary values, empty inputs, zeros, negative numbers, etc.
+    -   **Error Cases:** Invalid inputs that should cause the program to handle an error gracefully (if applicable).
+3.  Your entire output **MUST** be a single, valid JSON array of objects.
+4.  Each object in the array must have two keys: `input` (a string) and `expectedOutput` (a string).
+5.  For inputs that require multiple lines, use the newline character `\\n`.
+
+**Example Output Format:**
+[
+  {{ "input": "5\\n10", "expectedOutput": "15" }},
+  {{ "input": "0\\n0", "expectedOutput": "0" }},
+  {{ "input": "-5\\n5", "expectedOutput": "0" }}
+]
+
+---
+**LANGUAGE:**
+{language}
+---
+**CODE TO ANALYZE:**
+```{language}
+{code}
+"""
+```
+
 `server/rag_service/requirements.txt`
 
 ```
@@ -10370,29 +11120,32 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // --- FIX START ---
-    // 3. Create the new user, correctly setting the apiKeyRequestStatus and encryptedApiKey based on the flag.
-    const newUser = new User({
+     const newUser = new User({
       email,
+      username: email.split('@')[0],
       password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
       apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
       encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
     });
-    // --- FIX END ---
     
     await newUser.save();
 
-    const payload = { userId: newUser._id, email: newUser.email };
+    const payload = {
+      userId: newUser._id,
+      email: newUser.email,
+      username: newUser.username,
+    };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
     res.status(201).json({
       token,
       _id: newUser._id,
       email: newUser.email,
+      username: newUser.username,
       sessionId: uuidv4(),
-      message: 'User registered successfully',
+      message: "User registered successfully",
     });
   } catch (error) {
     console.error('Signup Error:', error);
@@ -10439,8 +11192,9 @@ router.post('/signin', async (req, res) => {
       token,
       _id: user._id,
       email: user.email,
+      username: user.username,
       sessionId: uuidv4(),
-      message: 'Login successful',
+      message: "Login successful",
     });
   } catch (error) {
     console.error('Signin Error:', error);
@@ -10456,6 +11210,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   res.status(200).json({
     _id: req.user._id,
     email: req.user.email,
+    username: req.user.username,
   });
 });
 
@@ -11745,6 +12500,110 @@ module.exports = router;
 
 ```
 
+`server/routes/tools.js`
+
+```javascript
+// server/routes/tools.js
+const express = require("express");
+const axios = require("axios");
+const router = express.Router();
+
+// This entire router will be protected by the main authMiddleware in server.js
+
+// @route   POST /api/tools/execute
+// @desc    Execute code by proxying to the Python service
+// @access  Private
+router.post("/execute", async (req, res) => {
+  const { language, code, testCases } = req.body;
+
+  if (!code || !language) {
+    return res.status(400).json({ message: "Code and language are required." });
+  }
+
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    console.error("[Code Executor] PYTHON_RAG_SERVICE_URL is not set.");
+    return res
+      .status(500)
+      .json({ message: "Code execution service is not configured." });
+  }
+
+  const executionUrl = `${pythonServiceUrl}/execute_code`;
+  console.log(
+    `[Node Tools] Forwarding code execution request to: ${executionUrl}`
+  );
+
+  try {
+    const pythonResponse = await axios.post(
+      executionUrl,
+      {
+        language,
+        code,
+        testCases,
+      },
+      { timeout: 15000 }
+    ); // 15-second timeout for the entire execution process
+
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg =
+      error.response?.data?.error || error.message || "Failed to execute code.";
+    console.error(
+      `[Node Tools] Error calling Python execution service: ${errorMsg}`
+    );
+    // Pass through the status code from the Python service if available, otherwise use 500
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  }
+});
+
+// @route   POST /api/tools/analyze-code
+router.post('/analyze-code', async (req, res) => {
+    const { language, code } = req.body;
+    if (!code || !language) {
+        return res.status(400).json({ message: 'Code and language are required.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "AI service is not configured." });
+    }
+    
+    const analysisUrl = `${pythonServiceUrl}/analyze_code`;
+    try {
+        const pythonResponse = await axios.post(analysisUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
+        res.status(200).json(pythonResponse.data);
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+// @route   POST /api/tools/generate-test-cases
+router.post('/generate-test-cases', async (req, res) => {
+    const { language, code } = req.body;
+    if (!code || !language) {
+        return res.status(400).json({ message: 'Code and language are required.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "AI service is not configured." });
+    }
+
+    const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
+    try {
+        const pythonResponse = await axios.post(generationUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
+        res.status(200).json(pythonResponse.data);
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+module.exports = router;
+
+```
+
 `server/routes/upload.js`
 
 ```javascript
@@ -12047,12 +12906,13 @@ const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
 const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/adminDocuments"); // Renamed for clarity
+const adminApiRoutes = require("./routes/adminDocuments"); 
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generation");
 const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
+const toolsRoutes = require("./routes/tools");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -12096,6 +12956,7 @@ app.use("/api/generate", generationRoutes);
 app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
+app.use("/api/tools", toolsRoutes);
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {

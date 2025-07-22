@@ -1,5 +1,4 @@
 # server/rag_service/app.py
-
 import os
 import sys
 import traceback
@@ -7,14 +6,19 @@ from flask import Flask, request, jsonify, current_app, send_from_directory, aft
 import logging
 import atexit
 import uuid
-
-# --mk 
 import subprocess
 import tempfile
 import shutil
-# 
+import json
+
+
 from duckduckgo_search import DDGS
-from qdrant_client import models as qdrant_models # Import Qdrant models
+from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +37,8 @@ try:
     import document_generator
     import podcast_generator
     import google.generativeai as genai
+    
+
 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -89,7 +95,6 @@ try:
     neo4j_handler.init_driver()
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
-
 atexit.register(neo4j_handler.close_driver)
 
 def create_error_response(message, status_code=500, details=None):
@@ -101,6 +106,44 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+
+    try:
+        # NOTE: This assumes CODE_ANALYSIS_PROMPT_TEMPLATE is now defined in a shared config
+        # that the Node.js `promptTemplates.js` mimics or is derived from.
+        # For now, we are re-defining it here for clarity.
+        from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis_text = llm_wrapper(prompt)
+        return jsonify({"analysis": analysis_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
+
+
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+
+    try:
+        from prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt)
+        # Clean the response to ensure it's valid JSON
+        cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
+        test_cases = json.loads(cleaned_json)
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():

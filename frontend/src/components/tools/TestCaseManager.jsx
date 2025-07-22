@@ -1,10 +1,13 @@
 // frontend/src/components/tools/TestCaseManager.jsx
-import React from 'react';
-import { Plus, Trash2, ShieldQuestion } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, Trash2, Sparkles } from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
 
-const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting }) => {
+const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code, language }) => {
+    const [isGenerating, setIsGenerating] = useState(false);
 
     const addTestCase = () => {
         setTestCases([...testCases, { input: '', expectedOutput: '' }]);
@@ -19,6 +22,32 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting }) =>
         const newTestCases = [...testCases];
         newTestCases[index][field] = value;
         setTestCases(newTestCases);
+    };
+
+    const handleGenerateCases = async () => {
+        if (!code.trim()) {
+            toast.error("There is no code to generate test cases for.");
+            return;
+        }
+        setIsGenerating(true);
+        const toastId = toast.loading("AI is generating test cases...");
+        try {
+            const response = await api.generateTestCases({ code, language });
+            if (response.testCases && Array.isArray(response.testCases) && response.testCases.length > 0) {
+                const existingCases = new Set(testCases.map(tc => `${tc.input}|${tc.expectedOutput}`));
+                const newCases = response.testCases.filter(newTc => !existingCases.has(`${newTc.input}|${newTc.expectedOutput}`));
+                
+                setTestCases(prev => [...prev, ...newCases]);
+                toast.success(`${newCases.length} new test case(s) added!`, { id: toastId });
+            } else {
+                toast.error("The AI could not generate valid test cases.", { id: toastId });
+            }
+        } catch (err) {
+             const errorMessage = err.response?.data?.message || "Failed to generate test cases.";
+             toast.error(errorMessage, { id: toastId });
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
     return (
@@ -58,11 +87,11 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting }) =>
                     <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
                         Add Test Case
                     </Button>
-                    <Button size="sm" variant="outline" leftIcon={<ShieldQuestion size={14} />} disabled>
-                        AI Generate Cases (soon)
+                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
+                        AI Generate Cases
                     </Button>
                 </div>
-                <Button onClick={onExecute} size="md" isLoading={isExecuting}>
+                <Button onClick={onExecute} size="md" isLoading={isExecuting} disabled={isGenerating}>
                     Run Code & Evaluate
                 </Button>
             </div>

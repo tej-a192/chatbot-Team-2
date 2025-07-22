@@ -52,7 +52,6 @@ const CodeExecutorPage = () => {
 
     return (
         <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
-            {/* Header */}
             <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6">
                 <h1 className="text-xl font-bold">Secure Code Executor</h1>
                 <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
@@ -60,21 +59,15 @@ const CodeExecutorPage = () => {
                     Back to Main App
                 </Link>
             </header>
-
-            {/* Main Content */}
             <div className="flex flex-1 overflow-hidden">
-                {/* Left/Main Panel (Editor & Output) */}
                 <main className="flex-1 flex flex-col overflow-hidden">
                     <div className="flex-grow p-4 h-1/2">
                        <CodeEditor code={code} setCode={setCode} language={language} />
                     </div>
                     <div className="flex-shrink-0 border-t border-border-light dark:border-border-dark h-1/2 overflow-y-auto">
-                        {/* Tabbed view could go here. For now, a simple layout is fine. */}
                         <OutputDisplay results={results} compilationError={compilationError} />
                     </div>
                 </main>
-                
-                {/* Right Panel (Test Cases & AI Assistant) */}
                 <aside className="w-[500px] flex-shrink-0 flex flex-col border-l border-border-light dark:border-border-dark overflow-y-auto">
                      <div className="flex-shrink-0 h-2/3">
                         <TestCaseManager 
@@ -82,10 +75,15 @@ const CodeExecutorPage = () => {
                             setTestCases={setTestCases}
                             onExecute={handleExecute}
                             isExecuting={isExecuting}
+                            code={code}
+                            language={language}
                         />
                      </div>
                      <div className="flex-grow h-1/3">
-                        <AIAssistantPanel />
+                        <AIAssistantPanel 
+                            code={code}
+                            language={language}
+                        />
                      </div>
                 </aside>
             </div>

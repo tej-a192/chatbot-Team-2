@@ -51,4 +51,48 @@ router.post("/execute", async (req, res) => {
   }
 });
 
+// @route   POST /api/tools/analyze-code
+router.post('/analyze-code', async (req, res) => {
+    const { language, code } = req.body;
+    if (!code || !language) {
+        return res.status(400).json({ message: 'Code and language are required.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "AI service is not configured." });
+    }
+    
+    const analysisUrl = `${pythonServiceUrl}/analyze_code`;
+    try {
+        const pythonResponse = await axios.post(analysisUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
+        res.status(200).json(pythonResponse.data);
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+// @route   POST /api/tools/generate-test-cases
+router.post('/generate-test-cases', async (req, res) => {
+    const { language, code } = req.body;
+    if (!code || !language) {
+        return res.status(400).json({ message: 'Code and language are required.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "AI service is not configured." });
+    }
+
+    const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
+    try {
+        const pythonResponse = await axios.post(generationUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
+        res.status(200).json(pythonResponse.data);
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
 module.exports = router;
