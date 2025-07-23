@@ -1,20 +1,23 @@
 // frontend/src/components/chat/ThinkingDropdown.jsx
-import React, { useState } from 'react';
+import React from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-function ThinkingDropdown({ children }) {
-    const [isOpen, setIsOpen] = useState(false);
+function ThinkingDropdown({ children, isOpen, setIsOpen, isStreaming }) {
 
     return (
         <div className="w-full">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors py-1"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors py-1 group"
                 aria-expanded={isOpen}
             >
-                <BrainCircuit size={14} />
-                <span>Thinking Process</span>
+                <BrainCircuit size={14} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors" />
+                
+                <span className={isStreaming ? 'shimmer-text !text-transparent' : ''}>
+                    Thinking Process
+                </span>
+                
                 <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
             <AnimatePresence initial={false}>
@@ -31,9 +34,8 @@ function ThinkingDropdown({ children }) {
                         transition={{ duration: 0.3, ease: 'easeInOut' }}
                         className="overflow-hidden"
                     >
-                        {/* The vertical line and padding for the content */}
                         <div className="pl-4 border-l-2 border-gray-300 dark:border-gray-600">
-                            {children}
+                           {children}
                         </div>
                     </motion.div>
                 )}

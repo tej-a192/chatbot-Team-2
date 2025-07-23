@@ -3,7 +3,7 @@
 const { processAgenticRequest } = require('./agentService');
 const geminiService = require('./geminiService');
 const ollamaService = require('./ollamaService');
-const { PLANNER_PROMPT_TEMPLATE, EVALUATOR_PROMPT_TEMPLATE } = require('../config/promptTemplates');
+const { PLANNER_PROMPT_TEMPLATE, EVALUATOR_PROMPT_TEMPLATE, createSynthesizerPrompt } = require('../config/promptTemplates');
 
 
 async function isQueryComplex(query) {
@@ -31,7 +31,25 @@ async function generatePlans(query, requestContext) {
         const parsedResponse = JSON.parse(jsonString);
 
         if (parsedResponse.plans && Array.isArray(parsedResponse.plans) && parsedResponse.plans.length > 0) {
-            console.log(`[ToT] Planner: Successfully generated ${parsedResponse.plans.length} plans.`);
+            // --- THIS IS THE FIX ---
+            // Validate and sanitize the steps to ensure they are always strings.
+            parsedResponse.plans.forEach(plan => {
+                if (plan.steps && Array.isArray(plan.steps)) {
+                    plan.steps = plan.steps.map(step => {
+                        if (typeof step === 'string') {
+                            return step;
+                        }
+                        if (typeof step === 'object' && step !== null) {
+                            // If the LLM gives an object, stringify it into a readable format.
+                            return JSON.stringify(step); 
+                        }
+                        // For any other weird data type, convert it to a string.
+                        return String(step); 
+                    });
+                }
+            });
+            // --- END OF FIX ---
+            console.log(`[ToT] Planner: Successfully generated and validated ${parsedResponse.plans.length} plans.`);
             return parsedResponse.plans;
         }
     } catch (error) {
@@ -125,11 +143,15 @@ async function synthesizeFinalAnswer(originalQuery, finalContext, chatHistory, r
     const { llmProvider, ...llmOptions } = requestContext;
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
 
-    const synthesizerPrompt = `You are an expert AI Tutor. A multi-step reasoning process has been completed to gather comprehensive information. Your task is to synthesize all the provided context into a single, cohesive, and well-structured final answer for the user's original query.\n\n--- COLLECTED CONTEXT ---\n${finalContext}\n\n--- ORIGINAL USER QUERY ---\n${originalQuery}`;
+    const synthesizerUserQuery = createSynthesizerPrompt(
+        originalQuery, 
+        finalContext, 
+        'tree_of_thought_synthesis'
+    );
 
     const finalAnswer = await llmService.generateContentWithHistory(
         chatHistory,
-        synthesizerPrompt,
+        synthesizerUserQuery,
         requestContext.systemPrompt,
         llmOptions
     );
@@ -139,7 +161,7 @@ async function synthesizeFinalAnswer(originalQuery, finalContext, chatHistory, r
 async function processQueryWithToT_Streaming(query, chatHistory, requestContext, streamCallback) {
     const allThoughts = [];
     const streamAndStoreThought = (content) => {
-        streamCallback({ type: 'thought', content });
+        streamCallback({ type: 'thought', content: content + '\n' });
         allThoughts.push(content);
     };
 
@@ -148,8 +170,13 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
     if (!isComplex) {
         streamAndStoreThought("Query is straightforward. Generating a direct response.");
         const directResponse = await processAgenticRequest(query, chatHistory, requestContext.systemPrompt, requestContext);
-        streamCallback({ type: 'final_answer', content: directResponse.finalAnswer });
-        return { finalAnswer: directResponse.finalAnswer, thoughts: allThoughts, references: directResponse.references, sourcePipeline: directResponse.sourcePipeline };
+        const finalThoughts = [ ...allThoughts, directResponse.thinking ].filter(Boolean);
+        return { 
+            finalAnswer: directResponse.finalAnswer, 
+            thoughts: finalThoughts, 
+            references: directResponse.references, 
+            sourcePipeline: directResponse.sourcePipeline 
+        };
     }
 
     streamAndStoreThought("Complex query detected. Initiating multi-step reasoning process...");
@@ -163,13 +190,18 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
     const { finalContext, allReferences } = await executePlan(winningPlan, query, requestContext, streamCallback);
     streamAndStoreThought("All information gathered. Synthesizing final answer...");
 
-    const finalAnswer = await synthesizeFinalAnswer(query, finalContext, chatHistory, requestContext);
-    streamCallback({ type: 'final_answer', content: finalAnswer });
+    const finalAnswerWithThinking = await synthesizeFinalAnswer(query, finalContext, chatHistory, requestContext);
+
+    const thinkingMatch = finalAnswerWithThinking.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+    const finalAnswer = thinking ? finalAnswerWithThinking.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : finalAnswerWithThinking;
+
+    const finalThoughts = [ ...allThoughts, thinking ].filter(Boolean);
     
     console.log('--- ToT Streaming Orchestration Finished ---');
     return {
         finalAnswer,
-        thoughts: allThoughts,
+        thoughts: finalThoughts,
         references: allReferences,
         sourcePipeline: `tot-${requestContext.llmProvider}`
     };
