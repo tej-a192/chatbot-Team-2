@@ -8,12 +8,16 @@ import { Link } from 'react-router-dom';
 import { 
     LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench 
 } from 'lucide-react';
+import ToolsModal from '../tools/ToolsModal.jsx'; 
+
 
 
 function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestratorStatus, isChatProcessing  }) {
     const { selectedLLM, switchLLM } = useAppState();
     const [isLLMModalOpen, setIsLLMModalOpen] = useState(false);
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+    const [isToolsModalOpen, setIsToolsModalOpen] = useState(false); // <<< NEW STATE
+
     
     const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
     const profileDropdownRef = useRef(null);
@@ -71,17 +75,14 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                             <HistoryIcon size={14} /> <span className="hidden sm:inline">History</span>
                         </button>
 
-                         {/* --- NEW TOOLS BUTTON --- */}
-                        <Link
-                            to="/tools/code-executor"
+                         <button
+                            onClick={() => setIsToolsModalOpen(true)}
                             className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 text-amber-700 dark:text-amber-400 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            aria-disabled={isChatProcessing}
-                            onClick={(e) => isChatProcessing && e.preventDefault()}
+                            disabled={isChatProcessing}
                             title="Open Tools"
                         >
                             <Wrench size={14} /> <span className="hidden sm:inline">Tools</span>
-                        </Link>
-                        {/* --- END NEW TOOLS BUTTON --- */}
+                        </button>
 
                         <button
                             onClick={() => setIsLLMModalOpen(true)}
@@ -95,7 +96,6 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* --- FIX: Added a fixed-size wrapper div for the status indicator --- */}
                     <div className="w-8 h-8 flex items-center justify-center">
                         {getStatusIndicator()}
                     </div>
@@ -146,6 +146,11 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
             <ProfileSettingsModal
                 isOpen={isProfileModalOpen}
                 onClose={() => setIsProfileModalOpen(false)}
+            />
+            {/* The ToolsModal is now correctly managed here */}
+            <ToolsModal 
+                isOpen={isToolsModalOpen} 
+                onClose={() => setIsToolsModalOpen(false)} 
             />
         </>
     );

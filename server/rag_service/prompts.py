@@ -52,3 +52,29 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 ```{language}
 {code}
 """
+
+
+EXPLAIN_ERROR_PROMPT_TEMPLATE = """
+You are an expert programming tutor, specializing in explaining complex errors to beginners. Your task is to explain the following runtime error in a clear, step-by-step manner.
+Instructions:
+Identify the Root Cause: Analyze the error message in the context of the provided code to determine the exact reason for the error.
+Explain the Error: Describe what the error message means in simple terms. Avoid jargon where possible, or explain it if necessary.
+Pinpoint the Location: State which line(s) of code are causing the problem.
+Provide a Solution: Give a corrected version of the problematic code in a fenced code block and explain why the fix works.
+Offer General Advice: Provide a concluding tip to help the user avoid similar errors in the future.
+Formatting:
+Use clear Markdown headings for each section (e.g., ## What Went Wrong, ## How to Fix It).
+Use fenced code blocks for all code snippets.
+LANGUAGE:
+{language}
+CODE WITH THE ERROR:
+Generated {language}
+{code}
+Use code with caution.
+{language}
+ERROR MESSAGE:
+Generated code
+{error_message}
+Use code with caution.
+ERROR EXPLANATION:
+"""

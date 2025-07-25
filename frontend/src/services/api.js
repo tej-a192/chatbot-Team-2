@@ -204,7 +204,7 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] }
+    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
@@ -216,6 +216,10 @@ const api = {
       payload
     );
     return response.data; // Should be { testCases: [...] }
+  },
+  explainError: async (payload) => {
+    const response = await apiClient.post("/tools/explain-error", payload);
+    return response.data; // Should be { explanation: "..." }
   },
 };
 

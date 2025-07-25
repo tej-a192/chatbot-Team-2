@@ -6,10 +6,15 @@ import IconButton from '../core/IconButton.jsx';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
 
-const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code, language }) => {
+const TestCaseManager = ({ testCases, setTestCases, code, language }) => {
     const [isGenerating, setIsGenerating] = useState(false);
 
     const addTestCase = () => {
+        const lastTestCase = testCases[testCases.length - 1];
+        if (testCases.length > 0 && lastTestCase.input.trim() === '' && lastTestCase.expectedOutput.trim() === '') {
+            toast.error('Please fill out the current empty test case first.');
+            return;
+        }
         setTestCases([...testCases, { input: '', expectedOutput: '' }]);
     };
 
@@ -34,11 +39,8 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
         try {
             const response = await api.generateTestCases({ code, language });
             if (response.testCases && Array.isArray(response.testCases) && response.testCases.length > 0) {
-                const existingCases = new Set(testCases.map(tc => `${tc.input}|${tc.expectedOutput}`));
-                const newCases = response.testCases.filter(newTc => !existingCases.has(`${newTc.input}|${newTc.expectedOutput}`));
-                
-                setTestCases(prev => [...prev, ...newCases]);
-                toast.success(`${newCases.length} new test case(s) added!`, { id: toastId });
+                setTestCases(response.testCases);
+                toast.success('AI generated a new set of test cases!', { id: toastId });
             } else {
                 toast.error("The AI could not generate valid test cases.", { id: toastId });
             }
@@ -51,9 +53,19 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
     };
 
     return (
-        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark">
-            <h3 className="text-lg font-semibold mb-3">Test Cases</h3>
-            <div className="space-y-4 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+        <div className="p-4 bg-surface-light dark:bg-surface-dark h-full flex flex-col">
+            <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h3 className="text-lg font-semibold">Test Cases</h3>
+                <div className="flex items-center gap-2">
+                    <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
+                        Add Case
+                    </Button>
+                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
+                            Generate by AI
+                    </Button>
+                </div>
+            </div>
+            <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-2">
                 {testCases.map((tc, index) => (
                     <div key={index} className="flex flex-col md:flex-row gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
                         <div className="flex-1">
@@ -81,19 +93,11 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
                         </div>
                     </div>
                 ))}
-            </div>
-            <div className="flex items-center justify-between mt-4">
-                <div className="space-x-2">
-                    <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
-                        Add Test Case
-                    </Button>
-                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
-                        AI Generate Cases
-                    </Button>
-                </div>
-                <Button onClick={onExecute} size="md" isLoading={isExecuting} disabled={isGenerating}>
-                    Run Code & Evaluate
-                </Button>
+                {testCases.length === 0 && (
+                    <div className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-8">
+                        Add a test case to begin.
+                    </div>
+                )}
             </div>
         </div>
     );

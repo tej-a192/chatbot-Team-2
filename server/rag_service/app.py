@@ -37,7 +37,7 @@ try:
     import document_generator
     import podcast_generator
     import google.generativeai as genai
-    
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
 
 
     if config.GEMINI_API_KEY:
@@ -112,18 +112,12 @@ def analyze_code():
     if not data: return create_error_response("Request must be JSON", 400)
     code, language = data.get('code'), data.get('language')
     if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-
     try:
-        # NOTE: This assumes CODE_ANALYSIS_PROMPT_TEMPLATE is now defined in a shared config
-        # that the Node.js `promptTemplates.js` mimics or is derived from.
-        # For now, we are re-defining it here for clarity.
-        from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE
         prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
         analysis_text = llm_wrapper(prompt)
         return jsonify({"analysis": analysis_text}), 200
     except Exception as e:
         return create_error_response(f"Failed to analyze code: {str(e)}", 500)
-
 
 @app.route('/generate_test_cases', methods=['POST'])
 def generate_test_cases():
@@ -131,19 +125,51 @@ def generate_test_cases():
     if not data: return create_error_response("Request must be JSON", 400)
     code, language = data.get('code'), data.get('language')
     if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-
     try:
-        from prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE
         prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
         response_text = llm_wrapper(prompt)
-        # Clean the response to ensure it's valid JSON
         cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
         test_cases = json.loads(cleaned_json)
         return jsonify({"testCases": test_cases}), 200
     except Exception as e:
         return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
 
+@app.route('/explain_error', methods=['POST'])
+def explain_error():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language, error_message = data.get('code'), data.get('language'), data.get('errorMessage')
+    if not all([code, language, error_message]):
+        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation_text = llm_wrapper(prompt)
+        return jsonify({"explanation": explanation_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
 
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    }
+}
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
@@ -152,23 +178,41 @@ def execute_code():
         return create_error_response("Request must be JSON", 400)
 
     code = data.get('code')
-    language = data.get('language')
+    language = data.get('language', '').lower()
     test_cases = data.get('testCases', [])
 
     if not code or not language:
         return create_error_response("Missing 'code' or 'language'", 400)
-    
-    if language.lower() != 'python':
-        return create_error_response(f"Language '{language}' is not supported.", 400)
+
+    lang_config = LANGUAGE_CONFIG.get(language)
+    if not lang_config:
+        unsupported_message = f"Language '{language}' is not currently supported for execution."
+        return jsonify({"compilationError": unsupported_message}), 200
 
     results = []
     temp_dir = tempfile.mkdtemp()
     
     try:
-        script_path = os.path.join(temp_dir, 'main.py')
-        with open(script_path, 'w', encoding='utf-8') as f:
+        source_path = os.path.join(temp_dir, lang_config["filename"])
+        with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
+        # --- Compilation Step ---
+        if lang_config["compile_cmd"]:
+            compile_process = subprocess.run(
+                lang_config["compile_cmd"],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=10, # 10-second timeout for compilation
+                encoding='utf-8'
+            )
+            if compile_process.returncode != 0:
+                error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
+                logger.warning(f"Compilation failed for {language}. Error: {error_output}")
+                return jsonify({"compilationError": error_output}), 200
+
+        # --- Execution Step ---
         for i, case in enumerate(test_cases):
             case_input = case.get('input', '')
             expected_output = str(case.get('expectedOutput', '')).strip()
@@ -182,29 +226,26 @@ def execute_code():
             }
 
             try:
-                # Execute the script using subprocess
-                process = subprocess.run(
-                    [sys.executable, script_path],
+                run_process = subprocess.run(
+                    lang_config["run_cmd"],
+                    cwd=temp_dir,
                     input=case_input,
                     capture_output=True,
                     text=True,
-                    timeout=5, # 5-second timeout for execution
+                    timeout=5,
                     encoding='utf-8'
                 )
 
-                stdout = process.stdout.strip()
-                stderr = process.stderr.strip()
-
+                stdout = run_process.stdout.strip()
+                stderr = run_process.stderr.strip()
                 case_result["output"] = stdout
 
-                if process.returncode != 0:
+                if run_process.returncode != 0:
                     case_result["status"] = "error"
                     case_result["error"] = stderr or "Script failed with a non-zero exit code."
                 elif stderr:
-                     # Some warnings might go to stderr but not cause a failure
                      case_result["error"] = f"Warning (stderr):\n{stderr}"
-
-                # Compare output if there was no runtime error
+                
                 if case_result["status"] != "error":
                     if stdout == expected_output:
                         case_result["status"] = "pass"
@@ -221,7 +262,6 @@ def execute_code():
             results.append(case_result)
 
     finally:
-        # Securely remove the temporary directory and its contents
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
