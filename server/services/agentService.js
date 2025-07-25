@@ -6,6 +6,40 @@ const geminiService = require('./geminiService.js');
 const ollamaService = require('./ollamaService.js');
 const User = require('../models/User');
 const { decrypt } = require('../utils/crypto');
+const { redisClient } = require('../config/redisClient');
+
+async function getCachedUser(userId) {
+    if (!redisClient || !redisClient.isOpen) {
+        // Fallback to DB if Redis is down
+        return User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl');
+    }
+
+    const cacheKey = `user:${userId}`;
+    const CACHE_TTL_SECONDS = 300; // Cache user data for 5 minutes
+
+    try {
+        const cachedUser = await redisClient.get(cacheKey);
+        if (cachedUser) {
+            console.log(`[AgentService] Cache HIT for user ${userId}`);
+            return JSON.parse(cachedUser);
+        }
+
+        console.log(`[AgentService] Cache MISS for user ${userId}`);
+        const userFromDb = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean(); // Use .lean() for plain object
+        if (userFromDb) {
+            // Don't await this, let it run in the background
+            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(userFromDb)).catch(err => {
+                console.error(`Redis SETEX error for user ${userId}:`, err);
+            });
+        }
+        return userFromDb;
+
+    } catch (err) {
+        console.error(`Redis error getting user ${userId}:`, err);
+        // Fallback to DB on Redis error
+        return User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl');
+    }
+}
 
 function parseToolCall(responseText) {
     const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
@@ -25,7 +59,8 @@ function parseToolCall(responseText) {
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
     const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled } = requestContext;
 
-    const user = await User.findById(userId).select('+encryptedApiKey');
+    // const user = await User.findById(userId).select('+encryptedApiKey');
+    const user = await getCachedUser(userId);
     if (!user) {
         throw new Error("User not found during agent processing.");
     }

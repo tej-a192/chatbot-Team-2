@@ -8,14 +8,15 @@ const AdminDocument = require('../models/AdminDocument');
 const axios = require('axios');
 const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
+const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
-
+const CACHE_DURATION_SECONDS = 30; 
 // --- NEW Dashboard Stats Route ---
 // @route   GET /api/admin/dashboard-stats
 // @desc    Get key statistics for the admin dashboard
-router.get('/dashboard-stats', async (req, res) => {
+router.get('/dashboard-stats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const [totalUsers, totalAdminDocs, totalSessions, pendingApiKeys] = await Promise.all([
             User.countDocuments(),
@@ -41,7 +42,7 @@ router.get('/dashboard-stats', async (req, res) => {
 
 // @route   GET /api/admin/key-requests
 // @desc    Get all users with a pending API key request
-router.get('/key-requests', async (req, res) => {
+router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const requests = await User.find({ apiKeyRequestStatus: 'pending' })
             .select('email profile createdAt')
@@ -256,7 +257,7 @@ router.post('/documents/upload', adminUpload.single('file'), async (req, res) =>
 });
 
 // @route   GET /api/admin/documents
-router.get('/documents', async (req, res) => {
+router.get('/documents',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
             .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap');
@@ -341,7 +342,7 @@ router.get('/documents/by-original-name/:originalName/analysis', async (req, res
 
 // @route   GET /api/admin/users-with-chats
 // @desc    Get all users and their chat session summaries
-router.get('/users-with-chats', async (req, res) => {
+router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const allHistories = await ChatHistory.find({})
             .populate('userId', 'email profile.name')

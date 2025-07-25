@@ -14,21 +14,30 @@ async function queryAcademicService(query) {
     const searchUrl = `${pythonServiceUrl}/academic_search`;
     
     try {
+        console.log(`[toolRegistry] Calling Python academic search at ${searchUrl} for query: "${query}"`);
         const response = await axios.post(searchUrl, { query }, { timeout: 45000 });
         const papers = response.data?.results || [];
         
-        // Format the results into a string for the LLM to synthesize
+        // --- THIS IS THE FIX ---
+        // Format the results into a string with all necessary details for the Synthesizer prompt
         const toolOutput = papers.length > 0
             ? "Found the following relevant academic papers:\n\n" + papers.map((p, index) => 
-                `[${index + 1}] **${p.title || 'Untitled Paper'}**\n` +
-                `   - Authors: ${p.authors ? p.authors.join(', ') : 'N/A'}\n` +
-                `   - Source: ${p.source || 'Unknown'}\n` +
-                `   - URL: ${p.url || '#'}\n` +
-                `   - Summary: ${p.summary ? p.summary.substring(0, 300) + '...' : 'No summary available.'}`
+                `[${index + 1}] Title: ${p.title || 'Untitled Paper'}\n` +
+                `   Source: ${p.source || 'Unknown'}\n` +
+                `   URL: ${p.url || '#'}\n` +
+                `   Authors: ${p.authors ? p.authors.join(', ') : 'N/A'}\n` +
+                `   Summary: ${p.summary ? p.summary.substring(0, 400).replace(/\s+/g, ' ') + '...' : 'No summary available.'}`
               ).join('\n\n')
             : "No relevant academic papers were found for this query.";
+        
+        const references = papers.map((p, index) => ({
+            number: index + 1,
+            source: `${p.authors ? p.authors.slice(0, 2).join(', ') + (p.authors.length > 2 ? ', et al.' : '') : 'N/A'}. (${p.source || 'N/A'})`,
+            content_preview: p.title || 'Untitled Paper',
+        }));
 
-        return { references: [], toolOutput };
+        return { references, toolOutput };
+        // --- END OF FIX ---
 
     } catch (error) {
         const errorMsg = error.response?.data?.error || `Academic Service Error: ${error.message}`;

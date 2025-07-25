@@ -15,7 +15,7 @@ const { getLocalIPs } = require('./utils/networkUtils');
 const { performAssetCleanup } = require('./utils/assetCleanup');
 const { authMiddleware } = require('./middleware/authMiddleware');
 const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware');
-
+const { redisClient, connectRedis } = require('./config/redisClient');
 // --- Route Imports ---
 const networkRoutes = require('./routes/network');
 const authRoutes = require('./routes/auth');
@@ -60,7 +60,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', fixedAdminAuthMiddleware, adminApiRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
-app.use(authMiddleware); 
+app.use(authMiddleware);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/upload', uploadRoutes);
@@ -87,22 +87,26 @@ async function startServer() {
     console.log("\n--- Starting Server Initialization ---");
     try {
         await ensureServerDirectories();
-        await connectDB(mongoUri); 
-        await performAssetCleanup(); 
+        await connectDB(mongoUri);
+        await performAssetCleanup();
         await checkRagService(pythonRagUrl);
-
+        await connectRedis();
         const server = app.listen(port, '0.0.0.0', () => {
             console.log('\n=== Node.js Server Ready ===');
             console.log(`🚀 Server listening on port ${port}`);
             getLocalIPs().forEach(ip => {
-                 console.log(`   - http://${ip}:${port}`);
+                console.log(`   - http://${ip}:${port}`);
             });
             console.log('============================\n');
         });
-        
+
         const gracefulShutdown = (signal) => {
             console.log(`\n${signal} received. Shutting down...`);
-            server.close(() => {
+            server.close(async () => { // <<< Make async
+                if (redisClient && redisClient.isOpen) { // <<< NEW
+                    await redisClient.quit();
+                    console.log('Redis client connection closed.');
+                }
                 mongoose.connection.close(false, () => {
                     console.log('MongoDB connection closed.');
                     process.exit(0);
@@ -111,7 +115,7 @@ async function startServer() {
         };
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
+        
     } catch (error) {
         console.error("!!! Failed to start Node.js server:", error.message);
         process.exit(1);
@@ -126,7 +130,7 @@ async function ensureServerDirectories() {
     }
 }
 async function checkRagService(url) {
-    if(!url) { console.warn('! Python RAG service URL not configured.'); return; }
+    if (!url) { console.warn('! Python RAG service URL not configured.'); return; }
     try {
         const response = await axios.get(`${url}/health`, { timeout: 7000 });
         if (response.data.status === 'ok') {

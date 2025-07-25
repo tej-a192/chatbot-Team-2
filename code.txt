@@ -2504,7 +2504,7 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
-    // Handler for the Academic Search Toggle
+    // --- THIS IS THE NEW HANDLER ---
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
@@ -2533,7 +2533,7 @@ function ChatInput({
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute bottom-full left-0 mb-2 w-52 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
+                            className="absolute bottom-full left-0 mb-2 w-56 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
                             {/* Web Search Button */}
                             <button
@@ -2548,7 +2548,7 @@ function ChatInput({
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
 
-                            {/* --- THIS IS THE BUTTON THAT WAS MISSING --- */}
+                            {/* --- THIS IS THE NEW ACADEMIC SEARCH BUTTON --- */}
                             <button
                                 onClick={handleAcademicSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -2619,10 +2619,11 @@ function ChatInput({
                 </Button>
             </form>
             
-            <div className="flex flex-col items-center justify-center mt-2 px-2 text-center h-4">
+            <div className="flex flex-wrap items-center justify-center mt-2 px-2 text-center h-4 gap-x-4">
                 <AnimatePresence>
                     {useWebSearch && (
                         <motion.p
+                            key="web-search-indicator"
                             initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
                             className="text-xs text-blue-500 dark:text-blue-400 flex items-center gap-1.5 font-medium"
                         >
@@ -2631,6 +2632,7 @@ function ChatInput({
                     )}
                     {useAcademicSearch && (
                         <motion.p
+                            key="academic-search-indicator"
                             initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
                             className="text-xs text-purple-500 dark:text-purple-400 flex items-center gap-1.5 font-medium"
                         >
@@ -6008,7 +6010,7 @@ PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
 ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
-
+REDIS_URL="redis://localhost:6379"
 # --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
@@ -6328,15 +6330,17 @@ const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext)
 
   let activeModeInstructions;
 
-  // --- THIS IS THE NEW, SMARTER LOGIC ---
+  // --- THIS IS THE NEW, SMARTER LOGIC with ACADEMIC SEARCH ---
   if (requestContext.isWebSearchEnabled) {
       activeModeInstructions = `**CURRENT MODE: Web Search.** The user has manually enabled web search. Your decision MUST be 'web_search'. This is not optional.`;
-  } 
+  }
+  else if (requestContext.isAcademicSearchEnabled) { // <-- NEW
+      activeModeInstructions = `**CURRENT MODE: Academic Search.** The user has manually enabled academic search. Your decision MUST be 'academic_search'. This is not optional.`;
+  }
   else if (requestContext.documentContextName) {
       activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". Your decision MUST be 'rag_search'. This is not optional.`;
   }
   else {
-      // This is the new, more intelligent instruction for Direct Chat mode.
       activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool has been selected by the user. You must analyze the user's query to make a decision.
 -   If the query asks for general knowledge, definitions, explanations, or concepts (like "what is X?", "explain Y", "how does Z work?"), your decision MUST be 'direct_answer'.
 -   Only if the query explicitly asks for very recent, real-time information (e.g., "what is the weather today?", "latest news") should you consider 'web_search'.
@@ -6351,6 +6355,7 @@ You are a "Router" agent. Your single task is to analyze the user's query and th
 1. 'web_search'
 2. 'rag_search'
 3. 'direct_answer'
+4. 'academic_search'
 
 **CONTEXT FOR YOUR DECISION:**
 - ${activeModeInstructions}
@@ -6359,7 +6364,7 @@ You are a "Router" agent. Your single task is to analyze the user's query and th
 **YOUR TASK:**
 Based on the CURRENT MODE and QUERY ANALYSIS, you MUST choose one action. Your entire output MUST be a single, valid JSON object with a "tool_call" key. Do not provide any other text or explanation.
 
-- If your decision is 'web_search' or 'rag_search', format as:
+- If your decision is 'web_search', 'rag_search', or 'academic_search', format as:
   \`\`\`json
   {
     "tool_call": {
@@ -6382,7 +6387,6 @@ Provide your JSON decision now.
 
 
 const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
-    // Shared instruction block for all synthesizer prompts
     const formattingInstructions = `
 **Formatting Guidelines (MANDATORY):**
 - **Structure:** Use Markdown for headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>).
@@ -6391,7 +6395,6 @@ const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
 - **Code:** If the answer involves code, use fenced code blocks with language identifiers (e.g., \`\`\`python ... \`\`\`).
 `;
 
-    // Default prompt for RAG and other tools (no change here)
     let systemInstruction = `
 You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
 
@@ -6414,26 +6417,23 @@ ${toolOutput}
 **FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
 `;
 
-    // --- **THIS IS THE MODIFIED SECTION FOR WEB SEARCH** ---
     if (toolName === 'web_search') {
         systemInstruction = `
 You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
 
 Your final response MUST follow this two-part structure precisely:
-A detailed, well-written answer to the user's query.
-**References Section:** A formatted list of the sources used.
+1.  A detailed, well-written answer to the user's query.
+2.  **References Section:** A formatted list of the sources used.
 
 ---
 **PART 1: MAIN ANSWER INSTRUCTIONS**
-
 -   Your answer **MUST** be based on the provided search results.
 -   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]." If information comes from multiple sources, cite them all, like so: "[2, 3]".
--   Be comprehensive. Do not just give a one-sentence answer. Synthesize information from multiple sources to build a full, well-rounded explanation.
+-   Be comprehensive. Synthesize information from multiple sources to build a full, well-rounded explanation.
 -   Use rich Markdown formatting (headings, lists, bolding, tables) to make the answer clear and engaging.
 
 ---
 **PART 2: REFERENCES SECTION INSTRUCTIONS**
-
 -   After you have finished writing the main answer, add a horizontal rule (\`---\`).
 -   After the line, add a heading: \`## References\`.
 -   Below the heading, create a numbered list of all the sources you cited.
@@ -6441,14 +6441,12 @@ A detailed, well-written answer to the user's query.
 
 ---
 **EXAMPLE OF COMPLETE OUTPUT:**
-
-The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2]. While violet light is scattered even more than blue, our eyes are more sensitive to blue light, which is why we perceive the sky as blue [1, 3].
+The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2].
 
 ---
 ## References
 [1] [Why Is the Sky Blue? - NASA SpacePlace](https://spaceplace.nasa.gov/blue-sky/en/)
 [2] [Rayleigh scattering - Wikipedia](https://en.wikipedia.org/wiki/Rayleigh_scattering)
-[3] [Optics: The Blue Sky - The Physics Classroom](https://www.physicsclassroom.com/class/light/Lesson-2/Blue-Skies)
 
 ---
 **Now, perform this task using the following information:**
@@ -6457,6 +6455,52 @@ The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is
 ${originalQuery}
 
 **WEB SEARCH RESULTS:**
+${toolOutput}
+
+**YOUR COMPLETE, FORMATTED RESPONSE:**
+`;
+    }
+    // --- **NEW SECTION FOR ACADEMIC SEARCH** ---
+    else if (toolName === 'academic_search') {
+        systemInstruction = `
+You are an expert AI Academic Research Assistant. Your task is to synthesize the provided "ACADEMIC SEARCH RESULTS" into a comprehensive, detailed, and scholarly response to the user's query.
+
+Your final response MUST follow this two-part structure precisely:
+1.  A detailed, well-written answer to the user's query, synthesizing the key findings from the provided papers.
+2.  **References Section:** A formatted list of the academic sources used.
+
+---
+**PART 1: MAIN ANSWER INSTRUCTIONS**
+-   Your answer **MUST** be based on the provided academic paper summaries.
+-   When you use information from a paper, you **MUST** include its corresponding number in brackets. For example: "Recent studies show that Model A outperforms Model B in specific tasks [1]." Cite multiple sources if needed: "[2, 3]".
+-   Synthesize findings from multiple papers to provide a nuanced and well-rounded explanation. Compare and contrast where appropriate.
+-   Maintain a formal, academic tone suitable for a research context.
+-   Use rich Markdown formatting (headings, lists, bolding) for clarity.
+
+---
+**PART 2: REFERENCES SECTION INSTRUCTIONS**
+-   After the main answer, add a horizontal rule (\`---\`).
+-   Add a heading: \`## References\`.
+-   Create a numbered list of all the sources you cited.
+-   Format each reference like this: \`[1] [Paper Title](Paper URL) - *{Authors (e.g., Author A, Author B)}* ({Source e.g., ArXiv})\`.
+
+---
+**EXAMPLE OF COMPLETE OUTPUT:**
+The primary approach for this problem involves using transformer-based architectures, which have shown state-of-the-art results in natural language understanding [1]. One study highlights the importance of pre-training on large, domain-specific corpora to improve performance [2]. However, another paper suggests that fine-tuning with a smaller, high-quality dataset can yield comparable results with less computational cost [3].
+
+---
+## References
+[1] [Attention Is All You Need](http://export.arxiv.org/abs/1706.03762v7) - *Vaswani, A., et al.* (ArXiv)
+[2] [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://www.semanticscholar.org/paper/1e78457223b375b6a48a313c0053d1005a76798c) - *Devlin, J., et al.* (Semantic Scholar)
+[3] [Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer](http://export.arxiv.org/abs/1910.10683v3) - *Raffel, C., et al.* (ArXiv)
+
+---
+**Now, perform this task using the following information:**
+
+**USER'S ORIGINAL QUERY:**
+${originalQuery}
+
+**ACADEMIC SEARCH RESULTS:**
 ${toolOutput}
 
 **YOUR COMPLETE, FORMATTED RESPONSE:**
@@ -6582,6 +6626,43 @@ module.exports = {
 };
 ```
 
+`server/config/redisClient.js`
+
+```javascript
+// server/config/redisClient.js
+const { createClient } = require('redis');
+const
+ 
+dotenv = require('dotenv');
+dotenv.config();
+
+const redisUrl = process.env.REDIS_URL;
+if (!redisUrl) {
+    console.warn("! REDIS_URL not found in .env, Redis caching will be disabled.");
+}
+
+const redisClient = redisUrl ? createClient({ url: redisUrl }) : null;
+
+if (redisClient) {
+    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+    redisClient.on('connect', () => console.log('✓ Redis client connected successfully.'));
+    redisClient.on('reconnecting', () => console.log('Redis client is reconnecting...'));
+}
+
+// Function to connect the client
+const connectRedis = async () => {
+    if (redisClient && !redisClient.isOpen) {
+        try {
+            await redisClient.connect();
+        } catch (err) {
+            console.error('Failed to connect to Redis:', err);
+        }
+    }
+};
+
+module.exports = { redisClient, connectRedis };
+```
+
 `server/middleware/authMiddleware.js`
 
 ```javascript
@@ -6631,6 +6712,48 @@ const authMiddleware = async (req, res, next) => {
 };
 
 module.exports = { authMiddleware }; // ONLY export this
+```
+
+`server/middleware/cacheMiddleware.js`
+
+```javascript
+// server/middleware/cacheMiddleware.js
+const { redisClient } = require('../config/redisClient');
+
+const cacheMiddleware = (durationInSeconds) => async (req, res, next) => {
+    if (!redisClient || !redisClient.isOpen || req.method !== 'GET') {
+        return next();
+    }
+
+    const key = `__express__${req.originalUrl || req.url}`;
+    try {
+        const cachedResponse = await redisClient.get(key);
+        if (cachedResponse) {
+            res.setHeader('X-Cache', 'HIT');
+            res.send(JSON.parse(cachedResponse));
+            return;
+        }
+
+        res.setHeader('X-Cache', 'MISS');
+        const originalSend = res.send;
+
+        res.send = (body) => {
+            // Only cache successful 2xx responses
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+                redisClient.setEx(key, durationInSeconds, JSON.stringify(body)).catch(err => {
+                    console.error(`Redis SETEX error for key ${key}:`, err);
+                });
+            }
+            return originalSend.call(res, body);
+        };
+        next();
+    } catch (err) {
+        console.error('Redis cache middleware error:', err);
+        next();
+    }
+};
+
+module.exports = { cacheMiddleware };
 ```
 
 `server/middleware/fixedAdminAuthMiddleware.js`
@@ -9149,44 +9272,6 @@ def synthesize_audio_with_gtts(text: str, output_path: str):
 `server/rag_service/requirements.txt`
 
 ```
-<<<<<<< HEAD
-# server/rag_service/requirements.txt
-flask
-requests
-faiss-cpu # or faiss-gpu
-langchain
-langchain-huggingface
-pypdf
-PyPDF2
-python-docx
-python-dotenv
-ollama # Keep if using Ollama embeddings
-python-pptx
-uuid
-langchain-community
-pdfplumber
-fitz # PyMuPDF for PDF parsing
-pytesseract
-nltk
-spacy-layout
-pandas
-numpy
-typing
-pytesseract # OCR
-pillow
-qdrant-client
-neo4j
-sentence_transformers
-spacy
-opencv-python
-duckduckgo-search
-python-pptx
-python-docx
-reportlab
-google-generativeai
-gTTS
-
-=======
 
 # server/rag_service/requirements.txt
 
@@ -9227,7 +9312,6 @@ soundfile
 
 # --- Final, Simple, and Free TTS ---
 gTTS
->>>>>>> origin/skms
 
 ```
 
@@ -9665,14 +9749,15 @@ const AdminDocument = require('../models/AdminDocument');
 const axios = require('axios');
 const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
+const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
-
+const CACHE_DURATION_SECONDS = 30; 
 // --- NEW Dashboard Stats Route ---
 // @route   GET /api/admin/dashboard-stats
 // @desc    Get key statistics for the admin dashboard
-router.get('/dashboard-stats', async (req, res) => {
+router.get('/dashboard-stats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const [totalUsers, totalAdminDocs, totalSessions, pendingApiKeys] = await Promise.all([
             User.countDocuments(),
@@ -9698,7 +9783,7 @@ router.get('/dashboard-stats', async (req, res) => {
 
 // @route   GET /api/admin/key-requests
 // @desc    Get all users with a pending API key request
-router.get('/key-requests', async (req, res) => {
+router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const requests = await User.find({ apiKeyRequestStatus: 'pending' })
             .select('email profile createdAt')
@@ -9913,7 +9998,7 @@ router.post('/documents/upload', adminUpload.single('file'), async (req, res) =>
 });
 
 // @route   GET /api/admin/documents
-router.get('/documents', async (req, res) => {
+router.get('/documents',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
             .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap');
@@ -9998,7 +10083,7 @@ router.get('/documents/by-original-name/:originalName/analysis', async (req, res
 
 // @route   GET /api/admin/users-with-chats
 // @desc    Get all users and their chat session summaries
-router.get('/users-with-chats', async (req, res) => {
+router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const allHistories = await ChatHistory.find({})
             .populate('userId', 'email profile.name')
@@ -10249,7 +10334,7 @@ const User = require('../models/User');
 const { createOrUpdateSummary } = require('../services/summarizationService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
-
+const { redisClient } = require('../config/redisClient');
 const router = express.Router();
 
 function doesQuerySuggestRecall(query) {
@@ -10353,7 +10438,10 @@ router.post('/message', async (req, res) => {
             { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } }, $set: { updatedAt: new Date() } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `session:${sessionId}`;
+            await redisClient.del(cacheKey);
+        }
         console.log(`<<< POST /api/chat/message (AGENTIC) successful for Session ${sessionId}.`);
         res.status(200).json({ reply: aiMessageForDbAndClient });
 
@@ -10459,11 +10547,47 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+    const cacheKey = `session:${sessionId}`;
+    const CACHE_TTL_SECONDS = 3600;
     try {
-        const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
-        if (!session) return res.status(404).json({ message: 'Chat session not found.' });
-        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
-        res.status(200).json({ ...session, messages: messagesForFrontend });
+        // 1. Check Redis Cache First
+        if (redisClient && redisClient.isOpen) {
+            const cachedSession = await redisClient.get(cacheKey);
+            if (cachedSession) {
+                console.log(`[Chat History] Cache HIT for session ${sessionId}`);
+                return res.status(200).json(JSON.parse(cachedSession));
+            }
+            console.log(`[Chat History] Cache MISS for session ${sessionId}`);
+        }
+
+        // 2. If miss, fetch from MongoDB
+        const session = await ChatHistory.findOne({ sessionId, userId }).lean();
+        if (!session) {
+            return res.status(404).json({ message: 'Chat session not found.' });
+        }
+        
+        const messagesForFrontend = (session.messages || []).map(msg => ({ 
+            id: msg._id || uuidv4(), 
+            sender: msg.role === 'model' ? 'bot' : 'user', 
+            text: msg.parts?.[0]?.text || '', 
+            thinking: msg.thinking, 
+            references: msg.references, 
+            timestamp: msg.timestamp, 
+            source_pipeline: msg.source_pipeline 
+        }));
+        
+        const responsePayload = { ...session, messages: messagesForFrontend };
+
+        // 3. Store the result in Redis for next time
+        if (redisClient && redisClient.isOpen) {
+            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(responsePayload)).catch(err => {
+                console.error(`Redis SETEX error for session ${sessionId}:`, err);
+            });
+        }
+
+        res.status(200).json(responsePayload);
     } catch (error) {
         res.status(500).json({ message: 'Failed to retrieve chat session.' });
     }
@@ -10474,6 +10598,10 @@ router.delete('/session/:sessionId', async (req, res) => {
     const userId = req.user._id;
     try {
         const result = await ChatHistory.deleteOne({ sessionId: sessionId, userId: userId });
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `session:${sessionId}`;
+            await redisClient.del(cacheKey);
+        }
         if (result.deletedCount === 0) {
             return res.status(404).json({ message: 'Chat session not found.' });
         }
@@ -11266,6 +11394,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { encrypt } = require('../utils/crypto');
+const { redisClient } = require('../config/redisClient');
 
 // @route   PUT /api/llm/config
 // @desc    Update user's LLM preferences (provider, key, or URL)
@@ -11309,7 +11438,11 @@ router.put('/config', async (req, res) => {
         // 4. Use $set to only modify the fields present in the 'updates' object.
         // This will NEVER delete a field that isn't included in the request.
         await User.updateOne({ _id: userId }, { $set: updates });
-
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `user:${userId}`;
+            await redisClient.del(cacheKey);
+            console.log(`[Cache Invalidation] Deleted cache for user ${userId} due to LLM config update.`);
+        }
         res.status(200).json({ message: "LLM preferences updated successfully." });
     } catch (error) {
         console.error(`Error updating LLM config for user ${userId}:`, error);
@@ -11750,6 +11883,7 @@ module.exports = router;
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const { redisClient } = require('../config/redisClient');
 
 // Note: The main 'authMiddleware' will be applied in server.js before this router is used,
 // so we don't need to add it to each route here. req.user will be available.
@@ -11799,7 +11933,11 @@ router.put('/profile', async (req, res) => {
         };
 
         await user.save();
-
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `user:${req.user._id}`;
+            await redisClient.del(cacheKey);
+            console.log(`[Cache Invalidation] Deleted cache for user ${req.user._id} due to profile update.`);
+        }
         res.json({
             message: 'Profile updated successfully!',
             profile: user.profile
@@ -11834,7 +11972,7 @@ const { getLocalIPs } = require('./utils/networkUtils');
 const { performAssetCleanup } = require('./utils/assetCleanup');
 const { authMiddleware } = require('./middleware/authMiddleware');
 const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware');
-
+const { redisClient, connectRedis } = require('./config/redisClient');
 // --- Route Imports ---
 const networkRoutes = require('./routes/network');
 const authRoutes = require('./routes/auth');
@@ -11879,7 +12017,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', fixedAdminAuthMiddleware, adminApiRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
-app.use(authMiddleware); 
+app.use(authMiddleware);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/upload', uploadRoutes);
@@ -11906,22 +12044,26 @@ async function startServer() {
     console.log("\n--- Starting Server Initialization ---");
     try {
         await ensureServerDirectories();
-        await connectDB(mongoUri); 
-        await performAssetCleanup(); 
+        await connectDB(mongoUri);
+        await performAssetCleanup();
         await checkRagService(pythonRagUrl);
-
+        await connectRedis();
         const server = app.listen(port, '0.0.0.0', () => {
             console.log('\n=== Node.js Server Ready ===');
             console.log(`🚀 Server listening on port ${port}`);
             getLocalIPs().forEach(ip => {
-                 console.log(`   - http://${ip}:${port}`);
+                console.log(`   - http://${ip}:${port}`);
             });
             console.log('============================\n');
         });
-        
+
         const gracefulShutdown = (signal) => {
             console.log(`\n${signal} received. Shutting down...`);
-            server.close(() => {
+            server.close(async () => { // <<< Make async
+                if (redisClient && redisClient.isOpen) { // <<< NEW
+                    await redisClient.quit();
+                    console.log('Redis client connection closed.');
+                }
                 mongoose.connection.close(false, () => {
                     console.log('MongoDB connection closed.');
                     process.exit(0);
@@ -11930,7 +12072,7 @@ async function startServer() {
         };
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
+        
     } catch (error) {
         console.error("!!! Failed to start Node.js server:", error.message);
         process.exit(1);
@@ -11945,7 +12087,7 @@ async function ensureServerDirectories() {
     }
 }
 async function checkRagService(url) {
-    if(!url) { console.warn('! Python RAG service URL not configured.'); return; }
+    if (!url) { console.warn('! Python RAG service URL not configured.'); return; }
     try {
         const response = await axios.get(`${url}/health`, { timeout: 7000 });
         if (response.data.status === 'ok') {
@@ -11973,6 +12115,40 @@ const geminiService = require('./geminiService.js');
 const ollamaService = require('./ollamaService.js');
 const User = require('../models/User');
 const { decrypt } = require('../utils/crypto');
+const { redisClient } = require('../config/redisClient');
+
+async function getCachedUser(userId) {
+    if (!redisClient || !redisClient.isOpen) {
+        // Fallback to DB if Redis is down
+        return User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl');
+    }
+
+    const cacheKey = `user:${userId}`;
+    const CACHE_TTL_SECONDS = 300; // Cache user data for 5 minutes
+
+    try {
+        const cachedUser = await redisClient.get(cacheKey);
+        if (cachedUser) {
+            console.log(`[AgentService] Cache HIT for user ${userId}`);
+            return JSON.parse(cachedUser);
+        }
+
+        console.log(`[AgentService] Cache MISS for user ${userId}`);
+        const userFromDb = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean(); // Use .lean() for plain object
+        if (userFromDb) {
+            // Don't await this, let it run in the background
+            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(userFromDb)).catch(err => {
+                console.error(`Redis SETEX error for user ${userId}:`, err);
+            });
+        }
+        return userFromDb;
+
+    } catch (err) {
+        console.error(`Redis error getting user ${userId}:`, err);
+        // Fallback to DB on Redis error
+        return User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl');
+    }
+}
 
 function parseToolCall(responseText) {
     const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
@@ -11992,7 +12168,8 @@ function parseToolCall(responseText) {
 async function processAgenticRequest(userQuery, chatHistory, systemPrompt, requestContext) {
     const { llmProvider, ollamaModel, userId, ollamaUrl, isAcademicSearchEnabled } = requestContext;
 
-    const user = await User.findById(userId).select('+encryptedApiKey');
+    // const user = await User.findById(userId).select('+encryptedApiKey');
+    const user = await getCachedUser(userId);
     if (!user) {
         throw new Error("User not found during agent processing.");
     }
@@ -12776,21 +12953,30 @@ async function queryAcademicService(query) {
     const searchUrl = `${pythonServiceUrl}/academic_search`;
     
     try {
+        console.log(`[toolRegistry] Calling Python academic search at ${searchUrl} for query: "${query}"`);
         const response = await axios.post(searchUrl, { query }, { timeout: 45000 });
         const papers = response.data?.results || [];
         
-        // Format the results into a string for the LLM to synthesize
+        // --- THIS IS THE FIX ---
+        // Format the results into a string with all necessary details for the Synthesizer prompt
         const toolOutput = papers.length > 0
             ? "Found the following relevant academic papers:\n\n" + papers.map((p, index) => 
-                `[${index + 1}] **${p.title || 'Untitled Paper'}**\n` +
-                `   - Authors: ${p.authors ? p.authors.join(', ') : 'N/A'}\n` +
-                `   - Source: ${p.source || 'Unknown'}\n` +
-                `   - URL: ${p.url || '#'}\n` +
-                `   - Summary: ${p.summary ? p.summary.substring(0, 300) + '...' : 'No summary available.'}`
+                `[${index + 1}] Title: ${p.title || 'Untitled Paper'}\n` +
+                `   Source: ${p.source || 'Unknown'}\n` +
+                `   URL: ${p.url || '#'}\n` +
+                `   Authors: ${p.authors ? p.authors.join(', ') : 'N/A'}\n` +
+                `   Summary: ${p.summary ? p.summary.substring(0, 400).replace(/\s+/g, ' ') + '...' : 'No summary available.'}`
               ).join('\n\n')
             : "No relevant academic papers were found for this query.";
+        
+        const references = papers.map((p, index) => ({
+            number: index + 1,
+            source: `${p.authors ? p.authors.slice(0, 2).join(', ') + (p.authors.length > 2 ? ', et al.' : '') : 'N/A'}. (${p.source || 'N/A'})`,
+            content_preview: p.title || 'Untitled Paper',
+        }));
 
-        return { references: [], toolOutput };
+        return { references, toolOutput };
+        // --- END OF FIX ---
 
     } catch (error) {
         const errorMsg = error.response?.data?.error || `Academic Service Error: ${error.message}`;

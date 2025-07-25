@@ -6,7 +6,7 @@ const User = require('../models/User');
 const { createOrUpdateSummary } = require('../services/summarizationService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
-
+const { redisClient } = require('../config/redisClient');
 const router = express.Router();
 
 function doesQuerySuggestRecall(query) {
@@ -110,7 +110,10 @@ router.post('/message', async (req, res) => {
             { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } }, $set: { updatedAt: new Date() } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `session:${sessionId}`;
+            await redisClient.del(cacheKey);
+        }
         console.log(`<<< POST /api/chat/message (AGENTIC) successful for Session ${sessionId}.`);
         res.status(200).json({ reply: aiMessageForDbAndClient });
 
@@ -216,11 +219,47 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+    const cacheKey = `session:${sessionId}`;
+    const CACHE_TTL_SECONDS = 3600;
     try {
-        const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
-        if (!session) return res.status(404).json({ message: 'Chat session not found.' });
-        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
-        res.status(200).json({ ...session, messages: messagesForFrontend });
+        // 1. Check Redis Cache First
+        if (redisClient && redisClient.isOpen) {
+            const cachedSession = await redisClient.get(cacheKey);
+            if (cachedSession) {
+                console.log(`[Chat History] Cache HIT for session ${sessionId}`);
+                return res.status(200).json(JSON.parse(cachedSession));
+            }
+            console.log(`[Chat History] Cache MISS for session ${sessionId}`);
+        }
+
+        // 2. If miss, fetch from MongoDB
+        const session = await ChatHistory.findOne({ sessionId, userId }).lean();
+        if (!session) {
+            return res.status(404).json({ message: 'Chat session not found.' });
+        }
+        
+        const messagesForFrontend = (session.messages || []).map(msg => ({ 
+            id: msg._id || uuidv4(), 
+            sender: msg.role === 'model' ? 'bot' : 'user', 
+            text: msg.parts?.[0]?.text || '', 
+            thinking: msg.thinking, 
+            references: msg.references, 
+            timestamp: msg.timestamp, 
+            source_pipeline: msg.source_pipeline 
+        }));
+        
+        const responsePayload = { ...session, messages: messagesForFrontend };
+
+        // 3. Store the result in Redis for next time
+        if (redisClient && redisClient.isOpen) {
+            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(responsePayload)).catch(err => {
+                console.error(`Redis SETEX error for session ${sessionId}:`, err);
+            });
+        }
+
+        res.status(200).json(responsePayload);
     } catch (error) {
         res.status(500).json({ message: 'Failed to retrieve chat session.' });
     }
@@ -231,6 +270,10 @@ router.delete('/session/:sessionId', async (req, res) => {
     const userId = req.user._id;
     try {
         const result = await ChatHistory.deleteOne({ sessionId: sessionId, userId: userId });
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `session:${sessionId}`;
+            await redisClient.del(cacheKey);
+        }
         if (result.deletedCount === 0) {
             return res.status(404).json({ message: 'Chat session not found.' });
         }

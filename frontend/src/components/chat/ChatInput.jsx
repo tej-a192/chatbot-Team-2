@@ -72,7 +72,7 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
-    // Handler for the Academic Search Toggle
+    // --- THIS IS THE NEW HANDLER ---
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
@@ -101,7 +101,7 @@ function ChatInput({
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute bottom-full left-0 mb-2 w-52 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
+                            className="absolute bottom-full left-0 mb-2 w-56 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
                             {/* Web Search Button */}
                             <button
@@ -116,7 +116,7 @@ function ChatInput({
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
 
-                            {/* --- THIS IS THE BUTTON THAT WAS MISSING --- */}
+                            {/* --- THIS IS THE NEW ACADEMIC SEARCH BUTTON --- */}
                             <button
                                 onClick={handleAcademicSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -187,10 +187,11 @@ function ChatInput({
                 </Button>
             </form>
             
-            <div className="flex flex-col items-center justify-center mt-2 px-2 text-center h-4">
+            <div className="flex flex-wrap items-center justify-center mt-2 px-2 text-center h-4 gap-x-4">
                 <AnimatePresence>
                     {useWebSearch && (
                         <motion.p
+                            key="web-search-indicator"
                             initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
                             className="text-xs text-blue-500 dark:text-blue-400 flex items-center gap-1.5 font-medium"
                         >
@@ -199,6 +200,7 @@ function ChatInput({
                     )}
                     {useAcademicSearch && (
                         <motion.p
+                            key="academic-search-indicator"
                             initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
                             className="text-xs text-purple-500 dark:text-purple-400 flex items-center gap-1.5 font-medium"
                         >
