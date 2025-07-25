@@ -5,12 +5,21 @@ import traceback
 import logging
 import atexit
 import uuid
-import io
+import subprocess
+import tempfile
+import shutil
+import json
+
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +40,40 @@ try:
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
+
+
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+    else:
+        LLM_MODEL = None
+        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
+
+    def llm_wrapper(prompt):
+        if not LLM_MODEL:
+            raise ConnectionError("Gemini API Key is not configured in the Python service.")
+        for attempt in range(3):
+            try:
+                response = LLM_MODEL.generate_content(prompt)
+                if response.parts:
+                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+                elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+                else:
+                    logger.warning("LLM returned empty response without explicit block reason.")
+                    return ""
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                if attempt == 2: raise
+        return ""
+
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -92,7 +135,6 @@ try:
     neo4j_handler.init_driver()
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
-
 atexit.register(neo4j_handler.close_driver)
 
 def create_error_response(message, status_code=500, details=None):
@@ -104,6 +146,165 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+    try:
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis_text = llm_wrapper(prompt)
+        return jsonify({"analysis": analysis_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
+
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language = data.get('code'), data.get('language')
+    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
+    try:
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt)
+        cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
+        test_cases = json.loads(cleaned_json)
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+@app.route('/explain_error', methods=['POST'])
+def explain_error():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language, error_message = data.get('code'), data.get('language'), data.get('errorMessage')
+    if not all([code, language, error_message]):
+        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation_text = llm_wrapper(prompt)
+        return jsonify({"explanation": explanation_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    }
+}
+
+@app.route('/execute_code', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+
+    code = data.get('code')
+    language = data.get('language', '').lower()
+    test_cases = data.get('testCases', [])
+
+    if not code or not language:
+        return create_error_response("Missing 'code' or 'language'", 400)
+
+    lang_config = LANGUAGE_CONFIG.get(language)
+    if not lang_config:
+        unsupported_message = f"Language '{language}' is not currently supported for execution."
+        return jsonify({"compilationError": unsupported_message}), 200
+
+    results = []
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        source_path = os.path.join(temp_dir, lang_config["filename"])
+        with open(source_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        # --- Compilation Step ---
+        if lang_config["compile_cmd"]:
+            compile_process = subprocess.run(
+                lang_config["compile_cmd"],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=10, # 10-second timeout for compilation
+                encoding='utf-8'
+            )
+            if compile_process.returncode != 0:
+                error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
+                logger.warning(f"Compilation failed for {language}. Error: {error_output}")
+                return jsonify({"compilationError": error_output}), 200
+
+        # --- Execution Step ---
+        for i, case in enumerate(test_cases):
+            case_input = case.get('input', '')
+            expected_output = str(case.get('expectedOutput', '')).strip()
+            
+            case_result = {
+                "input": case_input,
+                "expected": expected_output,
+                "output": "",
+                "error": None,
+                "status": "fail"
+            }
+
+            try:
+                run_process = subprocess.run(
+                    lang_config["run_cmd"],
+                    cwd=temp_dir,
+                    input=case_input,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    encoding='utf-8'
+                )
+
+                stdout = run_process.stdout.strip()
+                stderr = run_process.stderr.strip()
+                case_result["output"] = stdout
+
+                if run_process.returncode != 0:
+                    case_result["status"] = "error"
+                    case_result["error"] = stderr or "Script failed with a non-zero exit code."
+                elif stderr:
+                     case_result["error"] = f"Warning (stderr):\n{stderr}"
+                
+                if case_result["status"] != "error":
+                    if stdout == expected_output:
+                        case_result["status"] = "pass"
+                    else:
+                        case_result["status"] = "fail"
+                
+            except subprocess.TimeoutExpired:
+                case_result["status"] = "error"
+                case_result["error"] = "Execution timed out after 5 seconds."
+            except Exception as exec_err:
+                case_result["status"] = "error"
+                case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
+
+            results.append(case_result)
+
+    finally:
+        shutil.rmtree(temp_dir)
+
+    return jsonify({"results": results}), 200
 
 @app.route('/health', methods=['GET'])
 def health_check():

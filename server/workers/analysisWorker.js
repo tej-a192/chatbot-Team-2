@@ -111,7 +111,6 @@ async function run() {
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
-
         await User.updateOne(
             { _id: userId, "uploadedDocuments.filename": originalName },
             { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }

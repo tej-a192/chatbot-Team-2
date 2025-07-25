@@ -78,5 +78,4 @@ async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmPr
     }
 }
 
-
 module.exports = { createOrUpdateSummary };

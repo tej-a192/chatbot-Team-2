@@ -70,7 +70,9 @@ const api = {
     return response.data;
   },
   startNewSession: async (previousSessionId) => {
-    const response = await apiClient.post("/chat/history", { previousSessionId });
+    const response = await apiClient.post("/chat/history", {
+      previousSessionId,
+    });
     return response.data;
   },
   deleteChatSession: async (sessionId) => {
@@ -100,7 +102,10 @@ const api = {
   getOrchestratorStatus: async () => {
     try {
       const response = await apiClient.get("/network/ip");
-      return { status: "ok", message: `Backend Online at ${response.data.ips[0]}` };
+      return {
+        status: "ok",
+        message: `Backend Online at ${response.data.ips[0]}`,
+      };
     } catch (e) {
       return { status: "error", message: "Backend Unreachable" };
     }
@@ -122,52 +127,99 @@ const api = {
     if (!filename || !analysis_type) {
       throw new Error("Filename and analysis type are required.");
     }
-    const toastId = toast.loading(`Generating ${analysis_type} for "${filename}"...`);
+    const toastId = toast.loading(
+      `Generating ${analysis_type} for "${filename}"...`
+    );
     try {
-      const response = await apiClient.get(`/analysis/${encodeURIComponent(filename)}`);
+      const response = await apiClient.get(
+        `/analysis/${encodeURIComponent(filename)}`
+      );
       const fullAnalysisObject = response.data;
       const rawOutput = fullAnalysisObject[analysis_type];
-      if (!rawOutput || typeof rawOutput !== 'string' || rawOutput.trim() === "") {
-         toast.success(`No stored ${analysis_type} found for "${filename}".`, { id: toastId });
-         return {
-            content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-            thinking: "No analysis data found in the database for this type."
-         };
+      if (
+        !rawOutput ||
+        typeof rawOutput !== "string" ||
+        rawOutput.trim() === ""
+      ) {
+        toast.success(`No stored ${analysis_type} found for "${filename}".`, {
+          id: toastId,
+        });
+        return {
+          content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
+          thinking: "No analysis data found in the database for this type.",
+        };
       }
       const { content, thinking } = parseAnalysisOutput(rawOutput);
-      toast.success(`Successfully generated ${analysis_type} for "${filename}".`, { id: toastId });
+      toast.success(
+        `Successfully generated ${analysis_type} for "${filename}".`,
+        { id: toastId }
+      );
       return { content, thinking };
     } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
-      toast.error(`Error generating ${analysis_type}: ${errorMessage}`, { id: toastId });
+      const errorMessage =
+        error.response?.data?.message || error.message || "Unknown error";
+      toast.error(`Error generating ${analysis_type}: ${errorMessage}`, {
+        id: toastId,
+      });
       throw error;
     }
   },
-  generateDocument: async ({ markdownContent, docType, sourceDocumentName }) => {
-    const response = await apiClient.post('/generate/document', 
+  generateDocument: async ({
+    markdownContent,
+    docType,
+    sourceDocumentName,
+  }) => {
+    const response = await apiClient.post(
+      "/generate/document",
       { markdownContent, docType, sourceDocumentName },
-      { responseType: 'blob' }
+      { responseType: "blob" }
     );
-    const contentDisposition = response.headers['content-disposition'];
+    const contentDisposition = response.headers["content-disposition"];
     let filename = `generated-document.${docType}`;
     if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (filenameMatch && filenameMatch.length > 1) {
-            filename = filenameMatch[1];
-        }
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = filenameMatch[1];
+      }
     }
     return { fileBlob: response.data, filename: filename };
   },
-  generatePodcast: async ({ analysisContent, sourceDocumentName, podcastOptions }) => {
-    const response = await apiClient.post('/export/podcast', 
+  generatePodcast: async ({
+    analysisContent,
+    sourceDocumentName,
+    podcastOptions,
+  }) => {
+    const response = await apiClient.post(
+      "/export/podcast",
       { analysisContent, sourceDocumentName, podcastOptions },
-      { responseType: 'blob' }
+      { responseType: "blob" }
     );
     return { audioBlob: response.data, sourceDocumentName };
   },
   getKnowledgeGraph: async (documentName) => {
-    const response = await apiClient.get(`/kg/visualize/${encodeURIComponent(documentName)}`);
+    const response = await apiClient.get(
+      `/kg/visualize/${encodeURIComponent(documentName)}`
+    );
     return response.data;
+  },
+  executeCode: async (payload) => {
+    const response = await apiClient.post("/tools/execute", payload);
+    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+  },
+  analyzeCode: async (payload) => {
+    const response = await apiClient.post("/tools/analyze-code", payload);
+    return response.data; // Should be { analysis: "..." }
+  },
+  generateTestCases: async (payload) => {
+    const response = await apiClient.post(
+      "/tools/generate-test-cases",
+      payload
+    );
+    return response.data; // Should be { testCases: [...] }
+  },
+  explainError: async (payload) => {
+    const response = await apiClient.post("/tools/explain-error", payload);
+    return response.data; // Should be { explanation: "..." }
   },
 };
 

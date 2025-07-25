@@ -13,6 +13,7 @@ import RightCollapsedNav from './components/layout/RightCollapsedNav.jsx';
 import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
+import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -158,7 +159,7 @@ function App() {
             setShowAuthModal(false);
             if (location.pathname.startsWith('/admin')) {
                 navigate('/', { replace: true });
-            } else if (!currentSessionId) {
+            } else if (!currentSessionId && !location.pathname.startsWith('/tools')) { 
                 api.startNewSession(null).then(data => {
                     if (data && data.newSessionId) {
                         setGlobalSessionId(data.newSessionId);
@@ -198,6 +199,9 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
+                    <CodeExecutorPage /> : <Navigate to="/" />} 
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
             </Routes>
