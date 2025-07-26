@@ -18,8 +18,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
 
     useEffect(() => {
-        // Cleanup function
-        return () => { if (abortControllerRef.current) abortControllerRef.current.abort(); };
+        return () => { 
+            if (abortControllerRef.current) abortControllerRef.current.abort(); 
+        };
     }, []);
 
     const handleSendMessage = async (inputText) => {
@@ -28,7 +29,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         abortControllerRef.current = new AbortController();
 
         const userMessage = {
-            id: `user-${Date.now()}`, sender: 'user', text: inputText.trim(),
+            id: `user-${Date.now()}`, 
+            sender: 'user', 
+            text: inputText.trim(),
             timestamp: new Date().toISOString(),
         };
 
@@ -37,13 +40,13 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             id: streamingPlaceholderId,
             sender: 'bot',
             text: '',
-            thinking: criticalThinkingEnabled ? '' : null, // Determines if dropdown shows initially
+            thinking: criticalThinkingEnabled ? '' : null,
             isStreaming: true,
             timestamp: new Date().toISOString(),
+            _accumulatedContent: '' // New field to accumulate content
         };
 
         setMessages(prev => [...prev, userMessage, placeholderMessage]);
-
         onChatProcessingChange(true);
         setIsActuallySendingAPI(true);
 
@@ -55,12 +58,12 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             }
         } catch (error) {
             console.error("Error in handleSendMessage:", error);
-            // Handle error by updating the placeholder
             setMessages(prev => prev.map(msg =>
                 msg.id === streamingPlaceholderId
                 ? { ...msg, isStreaming: false, text: `Error: ${error.message}` }
                 : msg
             ));
+            toast.error(error.message);
         } finally {
             setIsActuallySendingAPI(false);
             onChatProcessingChange(false);
@@ -69,13 +72,21 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     
     const handleStreamingSendMessage = async (inputText, placeholderId) => {
         const payload = {
-            query: inputText.trim(), sessionId: currentSessionId, useWebSearch, useAcademicSearch,
-            systemPrompt, criticalThinkingEnabled, documentContextName: selectedSubject || selectedDocumentForAnalysis,
+            query: inputText.trim(), 
+            sessionId: currentSessionId, 
+            useWebSearch, 
+            useAcademicSearch,
+            systemPrompt, 
+            criticalThinkingEnabled, 
+            documentContextName: selectedSubject || selectedDocumentForAnalysis,
         };
 
         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/message`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${regularUserToken}` 
+            },
             body: JSON.stringify(payload),
             signal: abortControllerRef.current.signal,
         });
@@ -88,6 +99,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let finalBotMessageObject = null;
+        let accumulatedThinking = '';
 
         while (true) {
             const { done, value } = await reader.read();
@@ -100,25 +112,41 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 const jsonString = line.replace('data: ', '');
                 try {
                     const eventData = JSON.parse(jsonString);
+                    
                     if (eventData.type === 'thought') {
+                        accumulatedThinking += eventData.content;
                         setMessages(prev => prev.map(msg =>
                             msg.id === placeholderId
-                            ? { ...msg, thinking: (msg.thinking || '') + eventData.content }
+                            ? { 
+                                ...msg, 
+                                thinking: accumulatedThinking,
+                                _accumulatedContent: accumulatedThinking
+                              }
                             : msg
                         ));
-                    } else if (eventData.type === 'final_answer') {
+                    } 
+                    else if (eventData.type === 'final_answer') {
                         finalBotMessageObject = eventData.content;
-                    } else if (eventData.type === 'error') {
+                    } 
+                    else if (eventData.type === 'error') {
                         throw new Error(eventData.content);
                     }
-                } catch (e) { console.error("Error parsing SSE chunk:", jsonString, e); }
+                } catch (e) { 
+                    console.error("Error parsing SSE chunk:", jsonString, e); 
+                }
             }
         }
         
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg =>
                 msg.id === placeholderId
-                ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false }
+                ? { 
+                    ...finalBotMessageObject, 
+                    id: placeholderId, 
+                    sender: 'bot', 
+                    isStreaming: false,
+                    thinking: accumulatedThinking || finalBotMessageObject.thinking
+                  }
                 : msg
             ));
         }
@@ -126,8 +154,13 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
 
     const handleStandardSendMessage = async (inputText, placeholderId) => {
         const response = await api.sendMessage({
-            query: inputText.trim(), history: messages.slice(0, -2), sessionId: currentSessionId,
-            useWebSearch, useAcademicSearch, systemPrompt, documentContextName: selectedSubject || selectedDocumentForAnalysis
+            query: inputText.trim(), 
+            history: messages.slice(0, -2), 
+            sessionId: currentSessionId,
+            useWebSearch, 
+            useAcademicSearch, 
+            systemPrompt, 
+            documentContextName: selectedSubject || selectedDocumentForAnalysis
         });
 
         if (response && response.reply) {
@@ -145,10 +178,14 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
             <ChatHistory messages={messages} />
             <ChatInput
-                onSendMessage={handleSendMessage} isLoading={isActuallySendingAPI}
-                useWebSearch={useWebSearch} setUseWebSearch={setUseWebSearch}
-                useAcademicSearch={useAcademicSearch} setUseAcademicSearch={setUseAcademicSearch}
-                criticalThinkingEnabled={criticalThinkingEnabled} setCriticalThinkingEnabled={setCriticalThinkingEnabled}
+                onSendMessage={handleSendMessage} 
+                isLoading={isActuallySendingAPI}
+                useWebSearch={useWebSearch} 
+                setUseWebSearch={setUseWebSearch}
+                useAcademicSearch={useAcademicSearch} 
+                setUseAcademicSearch={setUseAcademicSearch}
+                criticalThinkingEnabled={criticalThinkingEnabled} 
+                setCriticalThinkingEnabled={setCriticalThinkingEnabled}
             />
         </div>
     );

@@ -495,97 +495,9 @@ Provide your JSON decision now.
 };
 
 
-// const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
-//     // Shared instruction block for all synthesizer prompts
-//     const formattingInstructions = `
-// **Formatting Guidelines (MANDATORY):**
-// - **Structure:** Use Markdown for headings (#, ##), lists (- or 1.), bold (**text**), italics (*text*), and blockquotes (>).
-// - **Clarity:** Use the most appropriate combination of formatting elements to make your answer easy to read and understand.
-// - **Tables:** If data is tabular, present it as a Markdown table.
-// - **Code:** If the answer involves code, use fenced code blocks with language identifiers (e.g., \`\`\`python ... \`\`\`).
-// `;
-
-//     // Default prompt for RAG and other tools (no change here)
-// let systemInstruction = `You are an expert AI Tutor. A tool was used to gather the following information to help answer the user's original query. Your task is to synthesize this information into a single, comprehensive, and helpful response.
-
-// **Response Guidelines:**
-// 1.  **PRIORITIZE TOOL OUTPUT:** Your primary responsibility is to accurately represent the information from the "INFORMATION GATHERED BY TOOL" section. The core of your answer **MUST** come from this provided context.
-// 2.  **BE COMPREHENSIVE:** Do not just give a one-sentence answer. Elaborate on the information found, providing context and detailed explanations based on the tool's output.
-// 3.  **SEAMLESS INTEGRATION:** Present the final answer as a single, coherent response. Do **NOT** mention that a tool was used.
-// 4.  **DO NOT CITE:** Do not include citation markers like [1], [2] in your answer. This will be handled separately.
-
-// ${formattingInstructions}
-
-// ---
-// **USER'S ORIGINAL QUERY:**
-// ${originalQuery}
-// ---
-// **INFORMATION GATHERED BY TOOL (Output from '${toolName}'):**
-// ${toolOutput}
-// ---
-
-// **FINAL, DETAILED, AND WELL-FORMATTED ANSWER:**
-// `;
-
-//     // --- **THIS IS THE MODIFIED SECTION FOR WEB SEARCH** ---
-//     if (toolName === 'web_search') {
-//         systemInstruction = `
-// You are an expert AI Research Assistant. Your task is to synthesize the provided "WEB SEARCH RESULTS" into a comprehensive, detailed, and helpful response to the user's query.
-
-// Your final response MUST follow this two-part structure precisely:
-// A detailed, well-written answer to the user's query.
-// **References Section:** A formatted list of the sources used.
-
-// ---
-// **PART 1: MAIN ANSWER INSTRUCTIONS**
-
-// -   Your answer **MUST** be based on the provided search results.
-// -   When you use information from a source, you **MUST** include its corresponding number in brackets. For example: "The sky appears blue due to Rayleigh scattering [1]." If information comes from multiple sources, cite them all, like so: "[2, 3]".
-// -   Be comprehensive. Do not just give a one-sentence answer. Synthesize information from multiple sources to build a full, well-rounded explanation.
-// -   Use rich Markdown formatting (headings, lists, bolding, tables) to make the answer clear and engaging.
-
-// ---
-// **PART 2: REFERENCES SECTION INSTRUCTIONS**
-
-// -   After you have finished writing the main answer, add a horizontal rule (\`---\`).
-// -   After the line, add a heading: \`## References\`.
-// -   Below the heading, create a numbered list of all the sources you cited.
-// -   Format each reference like this: \`[1] [Source Title](Source URL)\`.
-
-// ---
-// **EXAMPLE OF COMPLETE OUTPUT:**
-
-// The sky appears blue due to a phenomenon called Rayleigh scattering [1]. This is where shorter wavelengths of light, like blue and violet, are scattered more effectively by the small molecules of gas in the Earth's atmosphere than longer wavelengths like red and yellow [2]. While violet light is scattered even more than blue, our eyes are more sensitive to blue light, which is why we perceive the sky as blue [1, 3].
-
-// ---
-// ## References
-// [1] [Why Is the Sky Blue? - NASA SpacePlace](https://spaceplace.nasa.gov/blue-sky/en/)
-// [2] [Rayleigh scattering - Wikipedia](https://en.wikipedia.org/wiki/Rayleigh_scattering)
-// [3] [Optics: The Blue Sky - The Physics Classroom](https://www.physicsclassroom.com/class/light/Lesson-2/Blue-Skies)
-
-// ---
-// **Now, perform this task using the following information:**
-
-// **USER'S ORIGINAL QUERY:**
-// ${originalQuery}
-
-// **WEB SEARCH RESULTS:**
-// ${toolOutput}
-
-// **YOUR COMPLETE, FORMATTED RESPONSE:**
-// `;
-//     }
-
-//     return systemInstruction;
-// };
-
-
-
-// ==============================================================================
-// === CONTENT CREATION PROMPTS (PPTX, DOCX, PODCAST) ===
-// ==============================================================================
 
 const createSynthesizerPrompt = (originalQuery, toolOutput, toolName) => {
+    
     let synthesizerUserMessage;
 
     if (toolName === 'web_search') {

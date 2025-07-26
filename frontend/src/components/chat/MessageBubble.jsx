@@ -50,12 +50,13 @@ const AnimatedThinking = ({ content }) => {
     }, [currentTyping]);
 
     const animatedChunk = useTypingEffect(currentTyping, 4, onTypingComplete);
+    const combinedText = completedTyping + animatedChunk;
 
     return (
-        <pre className="text-xs text-text-muted-light dark:text-text-muted-dark whitespace-pre-wrap font-sans leading-relaxed">
-            {completedTyping}{animatedChunk}
+        <div className="prose prose-xs dark:prose-invert max-w-none text-text-muted-light dark:text-text-muted-dark">
+            <div dangerouslySetInnerHTML={createMarkup(combinedText)} />
             {isWaiting && <span className="animate-pulse"> Thinking...</span>}
-        </pre>
+        </div>
     );
 };
 
@@ -68,7 +69,6 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
     const mainContent = text || '';
     const thinkingContent = thinking;
-
     const showThinkingDropdown = !isUser && thinkingContent !== null;
 
     useEffect(() => {
@@ -112,7 +112,7 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                         >
                             {isStreaming 
                                 ? <AnimatedThinking content={thinkingContent} /> 
-                                : <pre className="text-xs text-text-muted-light dark:text-text-muted-dark whitespace-pre-wrap font-sans leading-relaxed">{thinkingContent}</pre>
+                                : <div className="prose prose-xs dark:prose-invert max-w-none text-text-muted-light dark:text-text-muted-dark" dangerouslySetInnerHTML={createMarkup(thinkingContent)} />
                             }
                         </ThinkingDropdown>
                     </div>
@@ -127,16 +127,14 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                         : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
                     }`}>
                         <div ref={contentRef} className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" dangerouslySetInnerHTML={createMarkup(mainContent)} />
-                        
                         <div className="flex items-center justify-end mt-1.5 text-xs gap-1">
-                                <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
+                            <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
                                 <AnimatePresence mode="wait" initial={false}>
                                     <motion.div key={isCopied ? 'check' : 'copy'} initial={{ scale: 0.6, opacity: 0, rotate: -30 }} animate={{ scale: 1, opacity: 1, rotate: 0 }} exit={{ scale: 0.6, opacity: 0, rotate: 30 }} transition={{ duration: 0.15 }}>
                                         {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
                                     </motion.div>
                                 </AnimatePresence>
                             </button>
-                            
                             <div className="flex items-center gap-2 pl-1 opacity-70">
                                 {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
                                 <span>{formatTimestamp(timestamp)}</span>

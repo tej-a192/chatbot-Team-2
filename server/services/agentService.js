@@ -36,34 +36,48 @@ async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt,
 
     console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
     const routerResponseText = await llmService.generateContentWithHistory([], "Analyze the query and decide on an action.", routerSystemPrompt, llmOptions);
+    console.log("ROuter Response : ", routerResponseText);
     const toolCall = parseToolCall(routerResponseText);
 
     // --- DIRECT ANSWER PATH (Corrected Logic) ---
-    if (!toolCall || !toolCall.tool_name) {
-        console.log('[AgentService] Decision: Direct Answer. Using main prompt engine.');
-        // This now correctly combines your base instructions with the user's selected persona.
+    if (requestContext.forceSimple === true || !toolCall || !toolCall.tool_name) {
+        if (requestContext.forceSimple === true) {
+            console.log('[AgentService] Skipping router/tool logic due to forceSimple flag. Responding directly.');
+        } else {
+            console.log('[AgentService] Router decided a direct answer is best (no tool call). Responding directly.');
+        }
+
         const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
-        const fullUserQuery = `${clientSystemPrompt}\n\nUSER QUERY:\n${userQuery}`;
-        
+        // NOTE: The original `fullUserQuery` was combining the system prompt and user query, 
+        // which might be redundant if the LLM service already handles system prompts separately.
+        // Let's pass the user query directly, as is standard.
+        const userPrompt = userQuery; 
         const directAnswer = await llmService.generateContentWithHistory(
             chatHistory,
-            fullUserQuery,
+            userPrompt,
+            // We pass the client's system prompt here, or a default if none is provided.
             finalSystemPrompt,
             llmOptions
         );
 
-        // Extract thinking if present
         const thinkingMatch = directAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
         const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
         const mainContent = thinking ? directAnswer.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : directAnswer;
+        
+        // Determine the correct pipeline source
+        const pipelineSource = requestContext.forceSimple 
+            ? `${requestContext.llmProvider}-agent-direct-bypass`
+            : `${requestContext.llmProvider}-agent-direct-no-tool`;
 
         return {
             finalAnswer: mainContent,
             thinking: thinking,
             references: [],
-            sourcePipeline: `${llmProvider}-agent-direct`,
+            sourcePipeline: pipelineSource,
         };
     }
+
+
 
     // --- TOOL-BASED ANSWER PATH (With KG Enhancement) ---
     console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);

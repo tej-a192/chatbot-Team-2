@@ -5,6 +5,7 @@ import GraphemeSplitter from 'grapheme-splitter';
 export const useTypingEffect = (textToType, speed = 20, onComplete) => {
     const [displayedText, setDisplayedText] = useState('');
     const onCompleteRef = useRef(onComplete);
+    const animationFrameRef = useRef();
 
     useEffect(() => {
         onCompleteRef.current = onComplete;
@@ -14,22 +15,38 @@ export const useTypingEffect = (textToType, speed = 20, onComplete) => {
         if (textToType) {
             const splitter = new GraphemeSplitter();
             const graphemes = splitter.splitGraphemes(textToType);
-            let index = 0;
-            setDisplayedText('');
+            let startTime = null;
 
-            const intervalId = setInterval(() => {
-                if (index < graphemes.length) {
-                    setDisplayedText(prev => prev + graphemes[index]);
-                    index++;
+            const animate = (timestamp) => {
+                if (startTime === null) {
+                    startTime = timestamp;
+                }
+
+                const elapsedTime = timestamp - startTime;
+                const charactersToShow = Math.min(
+                    Math.floor(elapsedTime / speed),
+                    graphemes.length
+                );
+
+                setDisplayedText(graphemes.slice(0, charactersToShow).join(''));
+                
+                if (charactersToShow < graphemes.length) {
+                    animationFrameRef.current = requestAnimationFrame(animate);
                 } else {
-                    clearInterval(intervalId);
+                    setDisplayedText(textToType); 
                     if (onCompleteRef.current) {
                         onCompleteRef.current();
                     }
                 }
-            }, speed);
-            
-            return () => clearInterval(intervalId);
+            };
+
+            animationFrameRef.current = requestAnimationFrame(animate);
+
+            return () => {
+                if (animationFrameRef.current) {
+                    cancelAnimationFrame(animationFrameRef.current);
+                }
+            };
         } else {
             setDisplayedText('');
         }

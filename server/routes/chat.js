@@ -105,39 +105,33 @@ router.post('/message', async (req, res) => {
             res.setHeader('Connection', 'keep-alive');
             res.flushHeaders();
 
-            // --- THIS IS THE FIX ---
-            // Create an intercepting callback. It will pass 'thought' and 'error' events
-            // straight through to the client, but it will IGNORE the premature 'final_answer'
-            // event sent by the orchestrator.
+            const accumulatedThoughts = [];
+
             const interceptingStreamCallback = (eventData) => {
                 if (eventData.type === 'thought' || eventData.type === 'error') {
+                    if (eventData.type === 'thought') {
+                        accumulatedThoughts.push(eventData.content);
+                    }
                     streamEvent(res, eventData);
                 }
-                // Intentionally do nothing for eventData.type === 'final_answer'
             };
 
-            // Run the orchestrator. It will stream thoughts via our interceptor,
-            // then return the complete result object when it's done.
             const totResult = await processQueryWithToT_Streaming(
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
 
-            // Now that we have the complete result, we can construct the full message object.
             const aiMessageForDbAndClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: totResult.finalAnswer }],
                 text: totResult.finalAnswer,
                 timestamp: new Date(),
-                thinking: totResult.thoughts.join('\n'),
+                thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
             };
 
-            // Stream our OWN 'final_answer' event, this time with the complete object.
             streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
             
-            // --- END OF FIX ---
-
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
