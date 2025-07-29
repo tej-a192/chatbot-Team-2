@@ -7928,7 +7928,6 @@ function ApiKeyRequestManager({ requests, onAction }) {
 export default ApiKeyRequestManager;
 ```
 
-<<<<<<< HEAD
 `frontend/src/components/admin/UserChatManager.jsx`
 
 ```javascript
@@ -8048,7 +8047,13 @@ function UserChatManager({ usersWithChats }) {
                     })}
                 </div>
             )}
-=======
+        </div>
+    );
+}
+
+export default UserChatManager;
+```
+
 `frontend/src/components/analysis/AnalysisTool.jsx`
 
 ```javascript
@@ -8439,16 +8444,11 @@ function AnalysisTool({ toolType, title, iconName, selectedDocumentFilename, isT
                     {renderModalContent()}
                 </div>
             </Modal>
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
         </div>
     );
 }
 
-<<<<<<< HEAD
-export default UserChatManager;
-=======
 export default AnalysisTool;
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 ```
 
 `frontend/src/components/analysis/AnalysisToolRunner.jsx`
@@ -11875,12 +11875,16 @@ import { Link } from 'react-router-dom';
 import { 
     LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench 
 } from 'lucide-react';
+import ToolsModal from '../tools/ToolsModal.jsx'; 
+
 
 
 function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestratorStatus, isChatProcessing  }) {
     const { selectedLLM, switchLLM } = useAppState();
     const [isLLMModalOpen, setIsLLMModalOpen] = useState(false);
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+    const [isToolsModalOpen, setIsToolsModalOpen] = useState(false); // <<< NEW STATE
+
     
     const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
     const profileDropdownRef = useRef(null);
@@ -11938,17 +11942,14 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                             <HistoryIcon size={14} /> <span className="hidden sm:inline">History</span>
                         </button>
 
-                         {/* --- NEW TOOLS BUTTON --- */}
-                        <Link
-                            to="/tools/code-executor"
+                         <button
+                            onClick={() => setIsToolsModalOpen(true)}
                             className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 text-amber-700 dark:text-amber-400 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            aria-disabled={isChatProcessing}
-                            onClick={(e) => isChatProcessing && e.preventDefault()}
+                            disabled={isChatProcessing}
                             title="Open Tools"
                         >
                             <Wrench size={14} /> <span className="hidden sm:inline">Tools</span>
-                        </Link>
-                        {/* --- END NEW TOOLS BUTTON --- */}
+                        </button>
 
                         <button
                             onClick={() => setIsLLMModalOpen(true)}
@@ -11962,7 +11963,6 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* --- FIX: Added a fixed-size wrapper div for the status indicator --- */}
                     <div className="w-8 h-8 flex items-center justify-center">
                         {getStatusIndicator()}
                     </div>
@@ -12013,6 +12013,11 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
             <ProfileSettingsModal
                 isOpen={isProfileModalOpen}
                 onClose={() => setIsProfileModalOpen(false)}
+            />
+            {/* The ToolsModal is now correctly managed here */}
+            <ToolsModal 
+                isOpen={isToolsModalOpen} 
+                onClose={() => setIsToolsModalOpen(false)} 
             />
         </>
     );
@@ -12539,23 +12544,35 @@ export default CodeEditorWrapper;
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Home } from 'lucide-react';
-import CodeEditor from './CodeEditor';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import CodeEditorWrapper from './CodeEditorWrapper';
 import TestCaseManager from './TestCaseManager';
 import OutputDisplay from './OutputDisplay';
-import AIAssistantPanel from './AIAssistantPanel';
+import AIAssistantBot from './AIAssistantBot';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
+const starterCode = {
+    python: `# Welcome to the Code Executor!\n# Write your Python code here.\n\ndef main():\n    # Example: Read two numbers and print their sum\n    try:\n        line1 = input()\n        line2 = input()\n        print(int(line1) + int(line2))\n    except (ValueError, EOFError):\n        print("Invalid input.")\n\nif __name__ == "__main__":\n    main()\n`,
+    java: `// Welcome to the Code Executor!\n// Your public class must be named "Main".\nimport java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int a = sc.nextInt();\n        int b = sc.nextInt();\n        System.out.println(a + b);\n        sc.close();\n    }\n}\n`,
+    c: `// Welcome to the Code Executor!\n#include <stdio.h>\n\nint main() {\n    int a, b;\n    if (scanf("%d %d", &a, &b) == 2) {\n        printf("%d\\n", a + b);\n    }\n    return 0;\n}\n`,
+    cpp: `// Welcome to the Code Executor!\n#include <iostream>\n\nint main() {\n    int a, b;\n    if (std::cin >> a >> b) {\n        std::cout << a + b << std::endl;\n    }\n    return 0;\n}\n`
+};
+
 const CodeExecutorPage = () => {
     const [language, setLanguage] = useState('python');
-    const [code, setCode] = useState('# Welcome to the Code Executor!\n# Write your Python code here.\n\ndef main():\n    # Example: Read two numbers and print their sum\n    try:\n        a = int(input())\n        b = int(input())\n        print(a + b)\n    except (ValueError, EOFError):\n        print("Invalid input. Please provide two integers on separate lines.")\n\nif __name__ == "__main__":\n    main()\n');
+    const [code, setCode] = useState(starterCode.python);
     const [testCases, setTestCases] = useState([
-        { input: '5\n10', expectedOutput: '15' },
-        { input: '1\n-1', expectedOutput: '0' }
+        { input: '5\n10', expectedOutput: '15' }
     ]);
     const [results, setResults] = useState([]);
     const [compilationError, setCompilationError] = useState(null);
     const [isExecuting, setIsExecuting] = useState(false);
+
+    const handleLanguageChange = (newLanguage) => {
+        setLanguage(newLanguage);
+        setCode(starterCode[newLanguage] || '');
+    };
 
     const handleExecute = async () => {
         setIsExecuting(true);
@@ -12564,18 +12581,19 @@ const CodeExecutorPage = () => {
         const toastId = toast.loading('Executing code...');
 
         try {
-            const response = await api.executeCode({
-                language,
-                code,
-                testCases
-            });
+            const response = await api.executeCode({ language, code, testCases });
             
-            setResults(response.results);
-            const failures = response.results.filter(r => r.status !== 'pass').length;
-            if (failures > 0) {
-                 toast.error(`${failures} test case(s) failed or had errors.`, { id: toastId });
+            if (response.compilationError) {
+                setCompilationError(response.compilationError);
+                toast.error("Code failed to compile.", { id: toastId });
             } else {
-                 toast.success('All test cases passed!', { id: toastId });
+                setResults(response.results);
+                const failures = response.results.filter(r => r.status !== 'pass').length;
+                if (failures > 0) {
+                    toast.error(`${failures} test case(s) failed or had errors.`, { id: toastId });
+                } else {
+                    toast.success('All test cases passed!', { id: toastId });
+                }
             }
 
         } catch (error) {
@@ -12589,41 +12607,51 @@ const CodeExecutorPage = () => {
 
     return (
         <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
-            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6">
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
                 <h1 className="text-xl font-bold">Secure Code Executor</h1>
                 <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
                     <Home size={16}/>
                     Back to Main App
                 </Link>
             </header>
-            <div className="flex flex-1 overflow-hidden">
-                <main className="flex-1 flex flex-col overflow-hidden">
-                    <div className="flex-grow p-4 h-1/2">
-                       <CodeEditor code={code} setCode={setCode} language={language} />
-                    </div>
-                    <div className="flex-shrink-0 border-t border-border-light dark:border-border-dark h-1/2 overflow-y-auto">
-                        <OutputDisplay results={results} compilationError={compilationError} />
-                    </div>
-                </main>
-                <aside className="w-[500px] flex-shrink-0 flex flex-col border-l border-border-light dark:border-border-dark overflow-y-auto">
-                     <div className="flex-shrink-0 h-2/3">
-                        <TestCaseManager 
+
+            <div className="flex-1 overflow-hidden">
+                <PanelGroup direction="horizontal">
+                    <Panel defaultSize={65} minSize={30}>
+                        <PanelGroup direction="vertical">
+                            <Panel defaultSize={60} minSize={20}>
+                                <div className="p-1 md:p-2 h-full">
+                                    <CodeEditorWrapper
+                                        code={code} setCode={setCode}
+                                        language={language} setLanguage={handleLanguageChange}
+                                        onExecute={handleExecute} isExecuting={isExecuting}
+                                    />
+                                </div>
+                            </Panel>
+                            <PanelResizeHandle className="h-2 panel-resize-handle" />
+                            <Panel defaultSize={40} minSize={20}>
+                                <OutputDisplay
+                                    results={results}
+                                    compilationError={compilationError}
+                                    code={code}
+                                    language={language}
+                                />
+                            </Panel>
+                        </PanelGroup>
+                    </Panel>
+                    <PanelResizeHandle className="w-2 panel-resize-handle" />
+                    <Panel defaultSize={35} minSize={25}>
+                         <TestCaseManager 
                             testCases={testCases} 
                             setTestCases={setTestCases}
-                            onExecute={handleExecute}
-                            isExecuting={isExecuting}
                             code={code}
                             language={language}
                         />
-                     </div>
-                     <div className="flex-grow h-1/3">
-                        <AIAssistantPanel 
-                            code={code}
-                            language={language}
-                        />
-                     </div>
-                </aside>
+                    </Panel>
+                </PanelGroup>
             </div>
+            
+            <AIAssistantBot code={code} language={language} />
         </div>
     );
 };
@@ -12635,22 +12663,50 @@ export default CodeExecutorPage;
 
 ```javascript
 // frontend/src/components/tools/OutputDisplay.jsx
-import React from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { CheckCircle, XCircle, AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
+import Button from '../core/Button';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
-const OutputDisplay = ({ results, compilationError }) => {
+const createMarkup = (markdownText) => {
+    if (!markdownText) return { __html: '' };
+    const rawHtml = marked.parse(markdownText);
+    const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+    return { __html: cleanHtml };
+};
+
+
+const OutputDisplay = ({ results, compilationError, code, language }) => {
+    const [explanations, setExplanations] = useState({});
+    const [isLoadingExplanation, setIsLoadingExplanation] = useState(null); // Tracks index
+
+    const handleExplainError = async (index, errorMessage) => {
+        setIsLoadingExplanation(index);
+        try {
+            const response = await api.explainError({ code, language, errorMessage });
+            setExplanations(prev => ({ ...prev, [index]: response.explanation }));
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to get explanation.");
+        } finally {
+            setIsLoadingExplanation(null);
+        }
+    };
+
     if (compilationError) {
         return (
-            <div className="p-4 bg-red-900/10 text-red-400 border-t border-red-500/30">
+            <div className="p-4 bg-red-900/10 text-red-400 border-t border-red-500/30 h-full flex flex-col">
                 <h3 className="text-lg font-semibold mb-2 flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
-                <pre className="bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono">{compilationError}</pre>
+                <pre className="flex-grow bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono overflow-auto custom-scrollbar">{compilationError}</pre>
             </div>
         );
     }
     
     if (!results || results.length === 0) {
         return (
-            <div className="p-4 text-center text-text-muted-light dark:text-text-muted-dark border-t border-border-light dark:border-border-dark">
+            <div className="p-4 text-center text-text-muted-light dark:text-text-muted-dark border-t border-border-light dark:border-border-dark h-full flex items-center justify-center">
                 <p>Run the code to see the output and test case results here.</p>
             </div>
         );
@@ -12659,13 +12715,13 @@ const OutputDisplay = ({ results, compilationError }) => {
     const getStatusIcon = (status) => {
         if (status === 'pass') return <CheckCircle className="text-green-500" />;
         if (status === 'fail') return <XCircle className="text-yellow-500" />;
-        return <AlertTriangle className="text-red-500" />; // error
+        return <AlertTriangle className="text-red-500" />;
     };
 
     return (
-        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark">
-            <h3 className="text-lg font-semibold mb-3">Execution Results</h3>
-            <div className="space-y-4 max-h-80 overflow-y-auto custom-scrollbar pr-2">
+        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark h-full flex flex-col">
+            <h3 className="text-lg font-semibold mb-3 flex-shrink-0">Execution Results</h3>
+            <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-2">
                 {results.map((res, index) => (
                     <div key={index} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
                         <div className="flex justify-between items-center mb-2">
@@ -12673,7 +12729,6 @@ const OutputDisplay = ({ results, compilationError }) => {
                                 {getStatusIcon(res.status)}
                                 Test Case #{index + 1}: <span className="uppercase">{res.status}</span>
                             </h4>
-                            {res.duration && <span className="text-xs text-text-muted-light dark:text-text-muted-dark flex items-center gap-1"><Clock size={12}/>{res.duration}ms</span>}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                             <div>
@@ -12690,8 +12745,24 @@ const OutputDisplay = ({ results, compilationError }) => {
                             </div>
                             {res.error && (
                                 <div className="md:col-span-2">
-                                    <strong className="block mb-1 text-red-500 dark:text-red-400">Error:</strong>
+                                    <div className="flex justify-between items-center">
+                                        <strong className="block mb-1 text-red-500 dark:text-red-400">Error:</strong>
+                                        {!explanations[index] && (
+                                            <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError(index, res.error)} isLoading={isLoadingExplanation === index}>
+                                                Explain Error
+                                            </Button>
+                                        )}
+                                    </div>
                                     <pre className="bg-red-900/20 p-2 rounded text-red-400 whitespace-pre-wrap font-mono">{res.error}</pre>
+                                </div>
+                            )}
+                            {isLoadingExplanation === index && (
+                                <div className="md:col-span-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
+                            )}
+                            {explanations[index] && (
+                                <div className="md:col-span-2 mt-2 p-3 bg-primary/10 rounded-md border border-primary/30">
+                                    <h5 className="font-bold text-sm mb-1 text-primary dark:text-primary-light flex items-center gap-1.5"><Sparkles size={14}/> AI Explanation</h5>
+                                    <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanations[index])} />
                                 </div>
                             )}
                         </div>
@@ -12716,10 +12787,15 @@ import IconButton from '../core/IconButton.jsx';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
 
-const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code, language }) => {
+const TestCaseManager = ({ testCases, setTestCases, code, language }) => {
     const [isGenerating, setIsGenerating] = useState(false);
 
     const addTestCase = () => {
+        const lastTestCase = testCases[testCases.length - 1];
+        if (testCases.length > 0 && lastTestCase.input.trim() === '' && lastTestCase.expectedOutput.trim() === '') {
+            toast.error('Please fill out the current empty test case first.');
+            return;
+        }
         setTestCases([...testCases, { input: '', expectedOutput: '' }]);
     };
 
@@ -12744,11 +12820,8 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
         try {
             const response = await api.generateTestCases({ code, language });
             if (response.testCases && Array.isArray(response.testCases) && response.testCases.length > 0) {
-                const existingCases = new Set(testCases.map(tc => `${tc.input}|${tc.expectedOutput}`));
-                const newCases = response.testCases.filter(newTc => !existingCases.has(`${newTc.input}|${newTc.expectedOutput}`));
-                
-                setTestCases(prev => [...prev, ...newCases]);
-                toast.success(`${newCases.length} new test case(s) added!`, { id: toastId });
+                setTestCases(response.testCases);
+                toast.success('AI generated a new set of test cases!', { id: toastId });
             } else {
                 toast.error("The AI could not generate valid test cases.", { id: toastId });
             }
@@ -12761,9 +12834,19 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
     };
 
     return (
-        <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark">
-            <h3 className="text-lg font-semibold mb-3">Test Cases</h3>
-            <div className="space-y-4 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+        <div className="p-4 bg-surface-light dark:bg-surface-dark h-full flex flex-col">
+            <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h3 className="text-lg font-semibold">Test Cases</h3>
+                <div className="flex items-center gap-2">
+                    <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
+                        Add Case
+                    </Button>
+                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
+                            Generate by AI
+                    </Button>
+                </div>
+            </div>
+            <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-2">
                 {testCases.map((tc, index) => (
                     <div key={index} className="flex flex-col md:flex-row gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
                         <div className="flex-1">
@@ -12791,19 +12874,11 @@ const TestCaseManager = ({ testCases, setTestCases, onExecute, isExecuting, code
                         </div>
                     </div>
                 ))}
-            </div>
-            <div className="flex items-center justify-between mt-4">
-                <div className="space-x-2">
-                    <Button onClick={addTestCase} size="sm" variant="outline" leftIcon={<Plus size={14}/>}>
-                        Add Test Case
-                    </Button>
-                    <Button onClick={handleGenerateCases} size="sm" variant="outline" leftIcon={<Sparkles size={14} />} isLoading={isGenerating} disabled={!code.trim()}>
-                        AI Generate Cases
-                    </Button>
-                </div>
-                <Button onClick={onExecute} size="md" isLoading={isExecuting} disabled={isGenerating}>
-                    Run Code & Evaluate
-                </Button>
+                {testCases.length === 0 && (
+                    <div className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-8">
+                        Add a test case to begin.
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -13501,14 +13576,20 @@ export const useWebSpeech = () => {
 @tailwind utilities;
 
 @layer base {
-  html, body, #root { /* Apply to html, body, AND your React root div */
-    @apply h-full overflow-hidden; /* Force full height and no scroll on these */
+
+  html,
+  body,
+  #root {
+    /* Apply to html, body, AND your React root div */
+    @apply h-full overflow-hidden;
+    /* Force full height and no scroll on these */
   }
 
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    scroll-behavior: smooth; /* This is fine, affects internal scrolls */
+    scroll-behavior: smooth;
+    /* This is fine, affects internal scrolls */
   }
 
   body {
@@ -13520,49 +13601,94 @@ export const useWebSpeech = () => {
   html.dark body {
     @apply bg-background-dark text-text-dark;
   }
+
   html.light body {
     @apply bg-background-light text-text-light;
   }
 
   .custom-scrollbar {
-     @apply scrollbar-thin scrollbar-thumb-secondary dark:scrollbar-thumb-secondary-dark scrollbar-track-surface-light dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full;
+    @apply scrollbar-thin scrollbar-thumb-secondary dark:scrollbar-thumb-secondary-dark scrollbar-track-surface-light dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full;
   }
 
   /* --- Enhanced Prose Styles --- */
   .prose {
     @apply max-w-none text-text-light dark:text-text-dark;
   }
-  .prose, .prose-sm {
+
+  .prose,
+  .prose-sm {
+
     /* Headings */
-    h1 { @apply text-2xl sm:text-3xl font-extrabold mb-6 mt-2 text-text-light dark:text-text-dark; }
-    h2 { @apply text-xl sm:text-2xl font-bold mb-4 mt-8 border-b border-border-light dark:border-border-dark pb-2; }
-    h3 { @apply text-lg sm:text-xl font-semibold mb-3 mt-6; }
-    h4 { @apply text-base sm:text-lg font-semibold mb-2 mt-4; }
+    h1 {
+      @apply text-2xl sm:text-3xl font-extrabold mb-6 mt-2 text-text-light dark:text-text-dark;
+    }
+
+    h2 {
+      @apply text-xl sm:text-2xl font-bold mb-4 mt-8 border-b border-border-light dark:border-border-dark pb-2;
+    }
+
+    h3 {
+      @apply text-lg sm:text-xl font-semibold mb-3 mt-6;
+    }
+
+    h4 {
+      @apply text-base sm:text-lg font-semibold mb-2 mt-4;
+    }
 
     /* Paragraphs */
-    p { @apply mb-4 leading-relaxed; }
+    p {
+      @apply mb-4 leading-relaxed;
+    }
 
     /* Links */
-    a { @apply text-primary dark:text-primary-light hover:underline font-medium; }
-    pre a, pre code a { @apply text-inherit no-underline hover:text-inherit; }
+    a {
+      @apply text-primary dark:text-primary-light hover:underline font-medium;
+    }
+
+    pre a,
+    pre code a {
+      @apply text-inherit no-underline hover:text-inherit;
+    }
 
     /* Lists */
-    ul, ol { @apply pl-5 mb-4 space-y-1; }
-    ul { @apply list-disc; }
-    ol { @apply list-decimal; }
-    li { @apply mb-1; }
-    ul ul, ol ol, ul ol, ol ul { @apply pl-5 mt-1 mb-1; }
-    li::marker { @apply text-text-muted-light dark:text-text-muted-dark; }
+    ul,
+    ol {
+      @apply pl-5 mb-4 space-y-1;
+    }
+
+    ul {
+      @apply list-disc;
+    }
+
+    ol {
+      @apply list-decimal;
+    }
+
+    li {
+      @apply mb-1;
+    }
+
+    ul ul,
+    ol ol,
+    ul ol,
+    ol ul {
+      @apply pl-5 mt-1 mb-1;
+    }
+
+    li::marker {
+      @apply text-text-muted-light dark:text-text-muted-dark;
+    }
 
     /* --- GFM Task List Checkboxes - Custom GREEN Styling --- */
     li:has(> input[type="checkbox"]) {
       @apply flex items-center;
       list-style-type: none;
-      margin-left: -1.25rem; /* Adjust as needed for alignment */
+      margin-left: -1.25rem;
+      /* Adjust as needed for alignment */
       padding-left: 0;
     }
 
-    li > input[type="checkbox"] {
+    li>input[type="checkbox"] {
       @apply opacity-0 w-0 h-0 absolute;
     }
 
@@ -13598,34 +13724,68 @@ export const useWebSpeech = () => {
     blockquote {
       @apply border-l-4 border-primary dark:border-primary-light pl-4 py-2 my-4 italic text-text-muted-light dark:text-text-muted-dark bg-surface-light dark:bg-gray-800/30 rounded-r-md;
     }
-    blockquote p { @apply mb-0; }
+
+    blockquote p {
+      @apply mb-0;
+    }
 
     /* Horizontal Rules */
-    hr { @apply my-8 border-t border-border-light dark:border-border-dark; }
+    hr {
+      @apply my-8 border-t border-border-light dark:border-border-dark;
+    }
 
     /* Tables */
-    table { @apply w-full my-6 text-sm border-collapse; }
-    thead { @apply border-b-2 border-border-light dark:border-border-dark; }
+    table {
+      @apply w-full my-6 text-sm border-collapse;
+    }
+
+    thead {
+      @apply border-b-2 border-border-light dark:border-border-dark;
+    }
+
     th {
       @apply px-4 py-2.5 text-left font-semibold text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700/50;
       @apply border border-border-light dark:border-border-dark;
     }
-    tbody tr { @apply border-b border-border-light dark:border-border-dark; }
-    tbody tr:last-child { @apply border-b-0; }
-    tbody tr:nth-child(even) { @apply bg-gray-50 dark:bg-gray-800/20; }
-    td { @apply px-4 py-2.5 text-left border-x border-border-light dark:border-border-dark; }
-    td code { @apply text-xs; }
-    td strong { @apply font-semibold; }
+
+    tbody tr {
+      @apply border-b border-border-light dark:border-border-dark;
+    }
+
+    tbody tr:last-child {
+      @apply border-b-0;
+    }
+
+    tbody tr:nth-child(even) {
+      @apply bg-gray-50 dark:bg-gray-800/20;
+    }
+
+    td {
+      @apply px-4 py-2.5 text-left border-x border-border-light dark:border-border-dark;
+    }
+
+    td code {
+      @apply text-xs;
+    }
+
+    td strong {
+      @apply font-semibold;
+    }
 
     /* --- Code Styling --- */
     code:not(pre code) {
       @apply px-1.5 py-0.5 bg-primary/10 dark:bg-primary-dark/20 text-primary dark:text-primary-light rounded-md text-xs font-mono break-words;
     }
-    code:not(pre code)::before, code:not(pre code)::after { content: ''; }
+
+    code:not(pre code)::before,
+    code:not(pre code)::after {
+      content: '';
+    }
 
     pre {
       @apply bg-[#282c34] dark:bg-[#21252b] p-4 rounded-lg shadow-md overflow-x-auto custom-scrollbar my-5;
     }
+
     pre code {
       @apply bg-transparent p-0 font-mono text-sm leading-relaxed;
       color: #abb2bf;
@@ -13633,7 +13793,9 @@ export const useWebSpeech = () => {
       word-break: break-all;
     }
 
-    strong { @apply font-semibold text-text-light dark:text-text-dark; }
+    strong {
+      @apply font-semibold text-text-light dark:text-text-dark;
+    }
   }
 }
 
@@ -13645,24 +13807,46 @@ export const useWebSpeech = () => {
   .btn {
     @apply font-semibold py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-opacity-75 transition-all duration-150 ease-in-out flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed;
   }
-  html.dark .btn { @apply focus:ring-offset-background-dark; }
-  html:not(.dark) .btn { @apply focus:ring-offset-background-light; }
 
-  .btn-primary { @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary; }
-  .btn-secondary { @apply btn bg-secondary text-white hover:bg-secondary-dark focus:ring-secondary; }
-  .btn-ghost { @apply btn text-text-muted-light dark:text-text-muted-dark hover:bg-gray-500 hover:bg-opacity-10 focus:ring-primary; }
+  html.dark .btn {
+    @apply focus:ring-offset-background-dark;
+  }
+
+  html:not(.dark) .btn {
+    @apply focus:ring-offset-background-light;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary;
+  }
+
+  .btn-secondary {
+    @apply btn bg-secondary text-white hover:bg-secondary-dark focus:ring-secondary;
+  }
+
+  .btn-ghost {
+    @apply btn text-text-muted-light dark:text-text-muted-dark hover:bg-gray-500 hover:bg-opacity-10 focus:ring-primary;
+  }
 
   .input-field {
-    @apply block w-full px-3 py-2 bg-surface-light dark:bg-gray-700 border border-border-light dark:border-border-dark rounded-md text-sm shadow-sm placeholder-text-muted-light dark:placeholder-text-muted-dark
-           focus:outline-none focus:border-primary dark:focus:border-primary-light focus:ring-1 focus:ring-primary dark:focus:ring-primary-light;
+    @apply block w-full px-3 py-2 bg-surface-light dark:bg-gray-700 border border-border-light dark:border-border-dark rounded-md text-sm shadow-sm placeholder-text-muted-light dark:placeholder-text-muted-dark focus:outline-none focus:border-primary dark:focus:border-primary-light focus:ring-1 focus:ring-primary dark:focus:ring-primary-light;
   }
-  .form-input, .form-textarea, .form-select, .form-multiselect { @apply input-field; }
 
-  .form-checkbox, .form-radio {
+  .form-input,
+  .form-textarea,
+  .form-select,
+  .form-multiselect {
+    @apply input-field;
+  }
+
+  .form-checkbox,
+  .form-radio {
     @apply rounded shadow-sm border-border-light dark:border-border-dark text-primary focus:ring-primary dark:focus:ring-primary-light;
     @apply bg-surface-light dark:bg-gray-600;
   }
-  .form-checkbox:disabled, .form-radio:disabled {
+
+  .form-checkbox:disabled,
+  .form-radio:disabled {
     @apply opacity-70 bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600;
   }
 
@@ -13670,9 +13854,23 @@ export const useWebSpeech = () => {
     @apply border rounded-panel shadow-panel;
     @apply bg-surface-light dark:bg-surface-dark border-border-light dark:border-border-dark;
   }
+
   .card-header-base {
     @apply px-4 py-3 text-sm font-semibold border-b;
     @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
+  }
+
+  .panel-resize-handle {
+    @apply relative bg-transparent;
+  }
+
+  .panel-resize-handle::after {
+    content: '';
+    @apply absolute inset-0 transition-colors duration-200;
+  }
+
+  .panel-resize-handle[data-active='true']::after {
+    @apply bg-primary/50;
   }
 }
 ```
@@ -14001,7 +14199,7 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] }
+    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
@@ -14013,6 +14211,10 @@ const api = {
       payload
     );
     return response.data; // Should be { testCases: [...] }
+  },
+  explainError: async (payload) => {
+    const response = await apiClient.post("/tools/explain-error", payload);
+    return response.data; // Should be { explanation: "..." }
   },
 };
 
@@ -14238,28 +14440,18 @@ export default defineConfig({
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
-<<<<<<< HEAD
 # ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
 GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
-=======
-# ENCRYPTION_SECRET=your_generated_64_character_hex_string_hsere
-GEMINI_API_KEY="AIzaSyA0Yii55h3YyydZ7kfkRpVVZEuBw3W1AdM"
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 # OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
-<<<<<<< HEAD
 ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
 REDIS_URL="redis://localhost:6379"
 # --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
-=======
-ENCRYPTION_SECRET = "MuraliKrishna@143MuraliKrishna@143MuraliKrishna@143"
 
-
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 ```
 
 `server/config/db.js`
@@ -15370,10 +15562,7 @@ UserSchema.statics.findByCredentials = async function (email, password) {
 
 const User = mongoose.model("User", UserSchema);
 module.exports = User;
-<<<<<<< HEAD
-=======
 
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 ```
 
 `server/protocols/contextProtocols.js`
@@ -16390,13 +16579,6 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 import os
 import sys
 import traceback
-<<<<<<< HEAD
-import logging
-import atexit
-import uuid
-import io
-=======
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 import logging
 import atexit
 import uuid
@@ -16405,18 +16587,16 @@ import tempfile
 import shutil
 import json
 
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
+from pydub import AudioSegment
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
-<<<<<<< HEAD
-=======
 
 import subprocess
 import tempfile
 import shutil
 import json
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16434,13 +16614,10 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
-<<<<<<< HEAD
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
-=======
-    import google.generativeai as genai
-    
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
 
 
     if config.GEMINI_API_KEY:
@@ -16474,7 +16651,6 @@ try:
                 if attempt == 2: raise
         return ""
 
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -16486,7 +16662,6 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-<<<<<<< HEAD
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
     """Dynamically creates a GenerativeModel instance with the provided API key."""
@@ -16525,9 +16700,6 @@ def llm_wrapper(prompt: str, api_key: str):
     return ""
 
 # --- Initialize other services ---
-=======
-# Initialize services
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -16557,18 +16729,12 @@ def analyze_code():
     if not data: return create_error_response("Request must be JSON", 400)
     code, language = data.get('code'), data.get('language')
     if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-
     try:
-        # NOTE: This assumes CODE_ANALYSIS_PROMPT_TEMPLATE is now defined in a shared config
-        # that the Node.js `promptTemplates.js` mimics or is derived from.
-        # For now, we are re-defining it here for clarity.
-        from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE
         prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
         analysis_text = llm_wrapper(prompt)
         return jsonify({"analysis": analysis_text}), 200
     except Exception as e:
         return create_error_response(f"Failed to analyze code: {str(e)}", 500)
-
 
 @app.route('/generate_test_cases', methods=['POST'])
 def generate_test_cases():
@@ -16576,19 +16742,51 @@ def generate_test_cases():
     if not data: return create_error_response("Request must be JSON", 400)
     code, language = data.get('code'), data.get('language')
     if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-
     try:
-        from prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE
         prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
         response_text = llm_wrapper(prompt)
-        # Clean the response to ensure it's valid JSON
         cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
         test_cases = json.loads(cleaned_json)
         return jsonify({"testCases": test_cases}), 200
     except Exception as e:
         return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
 
+@app.route('/explain_error', methods=['POST'])
+def explain_error():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    code, language, error_message = data.get('code'), data.get('language'), data.get('errorMessage')
+    if not all([code, language, error_message]):
+        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation_text = llm_wrapper(prompt)
+        return jsonify({"explanation": explanation_text}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
 
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"]
+    }
+}
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
@@ -16597,23 +16795,41 @@ def execute_code():
         return create_error_response("Request must be JSON", 400)
 
     code = data.get('code')
-    language = data.get('language')
+    language = data.get('language', '').lower()
     test_cases = data.get('testCases', [])
 
     if not code or not language:
         return create_error_response("Missing 'code' or 'language'", 400)
-    
-    if language.lower() != 'python':
-        return create_error_response(f"Language '{language}' is not supported.", 400)
+
+    lang_config = LANGUAGE_CONFIG.get(language)
+    if not lang_config:
+        unsupported_message = f"Language '{language}' is not currently supported for execution."
+        return jsonify({"compilationError": unsupported_message}), 200
 
     results = []
     temp_dir = tempfile.mkdtemp()
     
     try:
-        script_path = os.path.join(temp_dir, 'main.py')
-        with open(script_path, 'w', encoding='utf-8') as f:
+        source_path = os.path.join(temp_dir, lang_config["filename"])
+        with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
+        # --- Compilation Step ---
+        if lang_config["compile_cmd"]:
+            compile_process = subprocess.run(
+                lang_config["compile_cmd"],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=10, # 10-second timeout for compilation
+                encoding='utf-8'
+            )
+            if compile_process.returncode != 0:
+                error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
+                logger.warning(f"Compilation failed for {language}. Error: {error_output}")
+                return jsonify({"compilationError": error_output}), 200
+
+        # --- Execution Step ---
         for i, case in enumerate(test_cases):
             case_input = case.get('input', '')
             expected_output = str(case.get('expectedOutput', '')).strip()
@@ -16627,29 +16843,26 @@ def execute_code():
             }
 
             try:
-                # Execute the script using subprocess
-                process = subprocess.run(
-                    [sys.executable, script_path],
+                run_process = subprocess.run(
+                    lang_config["run_cmd"],
+                    cwd=temp_dir,
                     input=case_input,
                     capture_output=True,
                     text=True,
-                    timeout=5, # 5-second timeout for execution
+                    timeout=5,
                     encoding='utf-8'
                 )
 
-                stdout = process.stdout.strip()
-                stderr = process.stderr.strip()
-
+                stdout = run_process.stdout.strip()
+                stderr = run_process.stderr.strip()
                 case_result["output"] = stdout
 
-                if process.returncode != 0:
+                if run_process.returncode != 0:
                     case_result["status"] = "error"
                     case_result["error"] = stderr or "Script failed with a non-zero exit code."
                 elif stderr:
-                     # Some warnings might go to stderr but not cause a failure
                      case_result["error"] = f"Warning (stderr):\n{stderr}"
-
-                # Compare output if there was no runtime error
+                
                 if case_result["status"] != "error":
                     if stdout == expected_output:
                         case_result["status"] = "pass"
@@ -16666,12 +16879,10 @@ def execute_code():
             results.append(case_result)
 
     finally:
-        # Securely remove the temporary directory and its contents
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
 
-<<<<<<< HEAD
 @app.route('/health', methods=['GET'])
 def health_check():
     status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
@@ -16736,54 +16947,6 @@ def academic_search_route():
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
 
-=======
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
-@app.route('/query', methods=['POST'])
-def search_qdrant_documents():
-    current_app.logger.info("--- /query Request (RAG Search Only) ---")
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    
-    query_text = data.get('query')
-    user_id = data.get('user_id') # user_id is mainly for logging here
-    
-    if not query_text or not user_id:
-        return create_error_response("Missing 'query' or 'user_id'", 400)
-
-    try:
-        k = data.get('k', 5)
-        document_context_name = data.get('documentContextName')
-        
-        must_conditions = []
-        if document_context_name:
-            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
-            must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
-                match=qdrant_models.MatchValue(value=document_context_name)
-            ))
-        
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
-        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-        
-        retrieved_docs, snippet, docs_map = vector_service.search_documents(
-            query=query_text, k=k, filter_conditions=qdrant_filters
-        )
-        
-        response_payload = {
-            "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
-            "formatted_context_snippet": snippet,
-            "retrieved_documents_map": docs_map,
-        }
-        
-        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
-        return jsonify(response_payload), 200
-        
-    except Exception as e:
-        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
-        return create_error_response(f"Query failed: {str(e)}", 500)
-
-# All other endpoints remain unchanged and are included for completeness
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 @app.route('/web_search', methods=['POST'])
 def web_search_route():
     data = request.get_json()
@@ -16796,7 +16959,6 @@ def web_search_route():
 
 @app.route('/export_podcast', methods=['POST'])
 def export_podcast_route():
-<<<<<<< HEAD
     current_app.logger.info("--- /export_podcast Request (gTTS + Speed-Up) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
@@ -16862,32 +17024,11 @@ def generate_kg_from_text_route():
     except Exception as e:
         logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
         return create_error_response(f"KG Generation failed: {str(e)}", 500)
-=======
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    source_document_text, outline_content = data.get('sourceDocumentText'), data.get('outlineContent')
-    if not all([source_document_text, outline_content]): return create_error_response("Missing required fields", 400)
-    try:
-        script = podcast_generator.generate_podcast_script(source_document_text, outline_content, llm_wrapper)
-        dialogue = podcast_generator.parse_script_into_dialogue(script)
-        if not dialogue: raise ValueError("Failed to parse the generated script.")
-        filename = f"podcast_{uuid.uuid4()}.mp3"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        podcast_generator.synthesize_dual_speaker_audio(dialogue, output_path)
-        @after_this_request
-        def cleanup(response):
-            try: os.remove(output_path)
-            except OSError as e: logger.error(f"Error deleting temp podcast file {output_path}: {e}")
-            return response
-        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-    except Exception as e: return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-<<<<<<< HEAD
     outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
     if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
     try:
@@ -16896,27 +17037,12 @@ def generate_document_route():
         filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
         if doc_type == 'pptx': document_generator.create_ppt(slides, path)
         else: document_generator.create_doc(slides, path, "text_content")
-=======
-    outline_content, doc_type, source_document_text = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText')
-    if not all([outline_content, doc_type, source_document_text]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline_content, source_document_text, doc_type, llm_wrapper)
-        slides_data = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename = f"generated_doc_{uuid.uuid4()}.{doc_type}"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        if doc_type == 'pptx': document_generator.create_ppt(slides_data, output_path)
-        else: document_generator.create_doc(slides_data, output_path, "text_content")
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
         return jsonify({"success": True, "filename": filename}), 201
     except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
-<<<<<<< HEAD
     if '..' in filename: return create_error_response("Invalid filename.", 400)
-=======
-    if '..' in filename or filename.startswith('/'): return create_error_response("Invalid filename.", 400)
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
     try:
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
         if not os.path.exists(file_path): return create_error_response("File not found.", 404)
@@ -16926,60 +17052,10 @@ def download_document_route(filename):
             except OSError as e: logger.error(f"Error deleting temp file {file_path}: {e}")
             return response
         return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-<<<<<<< HEAD
     except Exception as e:
         return create_error_response("Could not process download request.", 500)
 
 # KG & DB Management Routes
-=======
-    except Exception as e: return create_error_response("Could not process download request.", 500)
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
-    http_status_code = 503
-    if not vector_service: status_details["qdrant_service"] = "failed_to_initialize"
-    else:
-        status_details["qdrant_service"] = "initialized"
-        try:
-            vector_service.client.get_collection(collection_name=vector_service.collection_name)
-            status_details["qdrant_collection_status"] = "exists_and_accessible"
-        except Exception as e: status_details["qdrant_collection_status"] = f"error: {str(e)}"
-    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
-    if neo4j_ok: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialized_via_handler", "connected"
-    else: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialization_failed_or_handler_error", neo4j_conn_status
-    if status_details["qdrant_service"] == "initialized" and status_details.get("qdrant_collection_status") == "exists_and_accessible" and neo4j_ok:
-        status_details["status"], http_status_code = "ok", 200
-    return jsonify(status_details), http_status_code
-
-@app.route('/add_document', methods=['POST'])
-def add_document_qdrant():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_chunks_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_chunks_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_chunks_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_chunks_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
-
-@app.route('/query_kg', methods=['POST'])
-def query_kg_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, document_name, query_text = data.get('user_id'), data.get('document_name'), data.get('query')
-    if not all([user_id, document_name, query_text]): return create_error_response("Missing fields", 400)
-    try:
-        facts_summary = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
-        return jsonify({"success": True, "facts": facts_summary}), 200
-    except Exception as e: return create_error_response(f"Failed to query KG: {str(e)}", 500)
-
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 @app.route('/delete_qdrant_document_data', methods=['DELETE'])
 def delete_qdrant_data_route():
     data = request.get_json()
@@ -17018,11 +17094,7 @@ def delete_kg_route(user_id, document_name):
 
 if __name__ == '__main__':
     logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-<<<<<<< HEAD
     app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
-=======
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=True)
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 ```
 
@@ -17975,17 +18047,41 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 ```{language}
 {code}
 """
+
+
+EXPLAIN_ERROR_PROMPT_TEMPLATE = """
+You are an expert programming tutor, specializing in explaining complex errors to beginners. Your task is to explain the following runtime error in a clear, step-by-step manner.
+Instructions:
+Identify the Root Cause: Analyze the error message in the context of the provided code to determine the exact reason for the error.
+Explain the Error: Describe what the error message means in simple terms. Avoid jargon where possible, or explain it if necessary.
+Pinpoint the Location: State which line(s) of code are causing the problem.
+Provide a Solution: Give a corrected version of the problematic code in a fenced code block and explain why the fix works.
+Offer General Advice: Provide a concluding tip to help the user avoid similar errors in the future.
+Formatting:
+Use clear Markdown headings for each section (e.g., ## What Went Wrong, ## How to Fix It).
+Use fenced code blocks for all code snippets.
+LANGUAGE:
+{language}
+CODE WITH THE ERROR:
+Generated {language}
+{code}
+Use code with caution.
+{language}
+ERROR MESSAGE:
+Generated code
+{error_message}
+Use code with caution.
+ERROR EXPLANATION:
+"""
 ```
 
 `server/rag_service/requirements.txt`
 
 ```
-<<<<<<< HEAD
-=======
 # server/rag_service/requirements.txt
 flask
 requests
-faiss-cpu # or faiss-gpu
+# faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
 pypdf
@@ -18018,48 +18114,7 @@ reportlab
 google-generativeai
 gTTS
 
-=======
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
-# server/rag_service/requirements.txt
-
-# --- Core and Web ---
-flask
-python-dotenv
-requests
-pydub
-
-# --- Document Parsing ---
-pdfplumber
-PyMuPDF
-pypdf
-python-docx
-python-pptx
-
-# --- AI & NLP ---
-google-generativeai
-langchain
-langchain-community
-langchain-huggingface
-ollama
-sentencepiece
-sentence_transformers
-spacy
-transformers
-
-# --- Vector & Graph Databases ---
-neo4j
-qdrant-client
-
-# --- Search & Utility ---
-arxiv
-duckduckgo-search
-opencv-python
-pytesseract
-soundfile
-
-# --- Final, Simple, and Free TTS ---
-gTTS
 
 ```
 
@@ -18487,7 +18542,6 @@ class VectorDBService:
 `server/routes/admin.js`
 
 ```javascript
-<<<<<<< HEAD
 // server/routes/admin.js
 const express = require('express');
 const multer = require('multer');
@@ -18500,18 +18554,6 @@ const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { encrypt } = require('../utils/crypto');
-=======
-// server/routes/adminDocuments.js
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const fsPromises = fs.promises;
-const AdminDocument = require("../models/AdminDocument");
-const axios = require("axios");
-const User = require("../models/User");
-const { encrypt } = require("../utils/crypto");
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 const router = express.Router();
 const CACHE_DURATION_SECONDS = 30; 
@@ -18544,7 +18586,6 @@ router.get('/dashboard-stats',cacheMiddleware(CACHE_DURATION_SECONDS), async (re
 
 // @route   GET /api/admin/key-requests
 // @desc    Get all users with a pending API key request
-<<<<<<< HEAD
 router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const requests = await User.find({ apiKeyRequestStatus: 'pending' })
@@ -18555,18 +18596,6 @@ router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, 
         console.error('Error fetching API key requests:', error);
         res.status(500).json({ message: 'Server error while fetching requests.' });
     }
-=======
-router.get("/key-requests", async (req, res) => {
-  try {
-    const requests = await User.find({ apiKeyRequestStatus: "pending" })
-      .select("email profile createdAt")
-      .sort({ createdAt: -1 });
-    res.json(requests);
-  } catch (error) {
-    console.error("Error fetching API key requests:", error);
-    res.status(500).json({ message: "Server error while fetching requests." });
-  }
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 });
 
 // @route   POST /api/admin/key-requests/approve
@@ -18845,7 +18874,6 @@ router.post(
 );
 
 // @route   GET /api/admin/documents
-<<<<<<< HEAD
 router.get('/documents',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
     try {
         const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
@@ -18861,28 +18889,6 @@ router.get('/documents',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res
     } catch (error) {
         res.status(500).json({ message: 'Server error fetching admin documents.' });
     }
-=======
-router.get("/documents", async (req, res) => {
-  try {
-    const adminDocs = await AdminDocument.find()
-      .sort({ uploadedAt: -1 })
-      .select(
-        "originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap"
-      );
-    const documentsList = adminDocs.map((doc) => ({
-      originalName: doc.originalName,
-      serverFilename: doc.filename,
-      uploadedAt: doc.uploadedAt,
-      analysisUpdatedAt: doc.analysisUpdatedAt,
-      hasFaq: !!doc.analysis?.faq?.trim(),
-      hasTopics: !!doc.analysis?.topics?.trim(),
-      hasMindmap: !!doc.analysis?.mindmap?.trim(),
-    }));
-    res.json({ documents: documentsList });
-  } catch (error) {
-    res.status(500).json({ message: "Server error fetching admin documents." });
-  }
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 });
 
 // @route   DELETE /api/admin/documents/:serverFilename
@@ -20311,84 +20317,88 @@ module.exports = router;
 
 ```javascript
 // server/routes/llmConfig.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const User = require('../models/User');
-const { encrypt } = require('../utils/crypto');
-const { redisClient } = require('../config/redisClient');
+const User = require("../models/User");
+const { encrypt } = require("../utils/crypto");
 
 // @route   PUT /api/llm/config
 // @desc    Update user's LLM preferences (provider, key, or URL)
 // @access  Private
-router.put('/config', async (req, res) => {
-    // 1. Destructure all possible fields.
-    const { llmProvider, apiKey, ollamaUrl, ollamaModel } = req.body;
-    const userId = req.user._id;
+router.put("/config", async (req, res) => {
+  // 1. Destructure all possible fields.
+  const { llmProvider, apiKey, ollamaUrl, ollamaModel } = req.body;
+  const userId = req.user._id;
 
-    try {
-        // 2. Start with a blank object. We will only update what is sent.
-        const updates = {};
+  try {
+    // 2. Start with a blank object. We will only update what is sent.
+    const updates = {};
 
-        if (llmProvider) {
-            if (!['gemini', 'ollama'].includes(llmProvider)) {
-                return res.status(400).json({ message: "Invalid LLM provider specified." });
-            }
-            updates.preferredLlmProvider = llmProvider;
-        }
-
-        // If a new API key is provided, encrypt and add it to updates.
-        if (apiKey) {
-            updates.encryptedApiKey = encrypt(apiKey);
-        }
-
-        // If a new Ollama URL is provided, add it to updates.
-        if (typeof ollamaUrl === 'string') {
-            updates.ollamaUrl = ollamaUrl.trim();
-        }
-
-        // If a new Ollama model is provided, add it to updates.
-        if (ollamaModel) {
-            updates.ollamaModel = ollamaModel;
-        }
-
-        // 3. If the updates object is empty, nothing was sent to change.
-        if (Object.keys(updates).length === 0) {
-            return res.status(400).json({ message: "No valid update information provided." });
-        }
-        
-        // 4. Use $set to only modify the fields present in the 'updates' object.
-        // This will NEVER delete a field that isn't included in the request.
-        await User.updateOne({ _id: userId }, { $set: updates });
-        if (redisClient && redisClient.isOpen) {
-            const cacheKey = `user:${userId}`;
-            await redisClient.del(cacheKey);
-            console.log(`[Cache Invalidation] Deleted cache for user ${userId} due to LLM config update.`);
-        }
-        res.status(200).json({ message: "LLM preferences updated successfully." });
-    } catch (error) {
-        console.error(`Error updating LLM config for user ${userId}:`, error);
-        res.status(500).json({ message: `Server error while updating LLM preferences: ${error.message}` });
+    if (llmProvider) {
+      if (!["gemini", "ollama"].includes(llmProvider)) {
+        return res
+          .status(400)
+          .json({ message: "Invalid LLM provider specified." });
+      }
+      updates.preferredLlmProvider = llmProvider;
     }
+
+    // If a new API key is provided, encrypt and add it to updates.
+    if (apiKey) {
+      updates.encryptedApiKey = encrypt(apiKey);
+    }
+
+    // If a new Ollama URL is provided, add it to updates.
+    if (typeof ollamaUrl === "string") {
+      updates.ollamaUrl = ollamaUrl.trim();
+    }
+
+    // If a new Ollama model is provided, add it to updates.
+    if (ollamaModel) {
+      updates.ollamaModel = ollamaModel;
+    }
+
+    // 3. If the updates object is empty, nothing was sent to change.
+    if (Object.keys(updates).length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No valid update information provided." });
+    }
+
+    // 4. Use $set to only modify the fields present in the 'updates' object.
+    // This will NEVER delete a field that isn't included in the request.
+    await User.updateOne({ _id: userId }, { $set: updates });
+
+    res.status(200).json({ message: "LLM preferences updated successfully." });
+  } catch (error) {
+    console.error(`Error updating LLM config for user ${userId}:`, error);
+    res
+      .status(500)
+      .json({
+        message: `Server error while updating LLM preferences: ${error.message}`,
+      });
+  }
 });
 
-
 // This GET route is correct and doesn't need changes, but it should also return ollamaUrl
-router.get('/config', async (req, res) => {
-    const userId = req.user._id;
-    try {
-        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl');
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
-        res.status(200).json({
-            preferredLlmProvider: user.preferredLlmProvider,
-            ollamaModel: user.ollamaModel,
-            ollamaUrl: user.ollamaUrl // Also return the URL
-        });
-    } catch (error) {
-        console.error(`Error fetching LLM config for user ${userId}:`, error);
-        res.status(500).json({ message: "Server error fetching LLM preferences." });
+router.get("/config", async (req, res) => {
+  const userId = req.user._id;
+  try {
+    const user = await User.findById(userId).select(
+      "preferredLlmProvider ollamaModel ollamaUrl"
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
     }
+    res.status(200).json({
+      preferredLlmProvider: user.preferredLlmProvider,
+      ollamaModel: user.ollamaModel,
+      ollamaUrl: user.ollamaUrl, // Also return the URL
+    });
+  } catch (error) {
+    console.error(`Error fetching LLM config for user ${userId}:`, error);
+    res.status(500).json({ message: "Server error fetching LLM preferences." });
+  }
 });
 
 module.exports = router;
@@ -20648,53 +20658,88 @@ router.post("/execute", async (req, res) => {
     console.error(
       `[Node Tools] Error calling Python execution service: ${errorMsg}`
     );
-    // Pass through the status code from the Python service if available, otherwise use 500
     res.status(error.response?.status || 500).json({ message: errorMsg });
   }
 });
 
 // @route   POST /api/tools/analyze-code
-router.post('/analyze-code', async (req, res) => {
-    const { language, code } = req.body;
-    if (!code || !language) {
-        return res.status(400).json({ message: 'Code and language are required.' });
-    }
+router.post("/analyze-code", async (req, res) => {
+  const { language, code } = req.body;
+  if (!code || !language) {
+    return res.status(400).json({ message: "Code and language are required." });
+  }
 
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-    if (!pythonServiceUrl) {
-        return res.status(500).json({ message: "AI service is not configured." });
-    }
-    
-    const analysisUrl = `${pythonServiceUrl}/analyze_code`;
-    try {
-        const pythonResponse = await axios.post(analysisUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
-        res.status(200).json(pythonResponse.data);
-    } catch (error) {
-        const errorMsg = error.response?.data?.error || error.message;
-        res.status(error.response?.status || 500).json({ message: errorMsg });
-    }
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    return res.status(500).json({ message: "AI service is not configured." });
+  }
+
+  const analysisUrl = `${pythonServiceUrl}/analyze_code`;
+  try {
+    const pythonResponse = await axios.post(
+      analysisUrl,
+      { language, code },
+      { timeout: 60000 }
+    ); // 1 min timeout
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg = error.response?.data?.error || error.message;
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  }
 });
 
 // @route   POST /api/tools/generate-test-cases
-router.post('/generate-test-cases', async (req, res) => {
-    const { language, code } = req.body;
-    if (!code || !language) {
-        return res.status(400).json({ message: 'Code and language are required.' });
-    }
+router.post("/generate-test-cases", async (req, res) => {
+  const { language, code } = req.body;
+  if (!code || !language) {
+    return res.status(400).json({ message: "Code and language are required." });
+  }
 
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-    if (!pythonServiceUrl) {
-        return res.status(500).json({ message: "AI service is not configured." });
-    }
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    return res.status(500).json({ message: "AI service is not configured." });
+  }
 
-    const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
-    try {
-        const pythonResponse = await axios.post(generationUrl, { language, code }, { timeout: 60000 }); // 1 min timeout
-        res.status(200).json(pythonResponse.data);
-    } catch (error) {
-        const errorMsg = error.response?.data?.error || error.message;
-        res.status(error.response?.status || 500).json({ message: errorMsg });
-    }
+  const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
+  try {
+    const pythonResponse = await axios.post(
+      generationUrl,
+      { language, code },
+      { timeout: 60000 }
+    ); // 1 min timeout
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg = error.response?.data?.error || error.message;
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  }
+});
+
+// @route   POST /api/tools/explain-error
+router.post("/explain-error", async (req, res) => {
+  const { language, code, errorMessage } = req.body;
+  if (!code || !language || !errorMessage) {
+    return res
+      .status(400)
+      .json({ message: "Code, language, and errorMessage are required." });
+  }
+
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    return res.status(500).json({ message: "AI service is not configured." });
+  }
+
+  const explanationUrl = `${pythonServiceUrl}/explain_error`;
+  try {
+    const pythonResponse = await axios.post(
+      explanationUrl,
+      { language, code, errorMessage },
+      { timeout: 60000 }
+    );
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg = error.response?.data?.error || error.message;
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  }
 });
 
 module.exports = router;
@@ -20992,28 +21037,6 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 
 // --- Custom Modules & Middleware ---
-<<<<<<< HEAD
-const connectDB = require('./config/db');
-const { getLocalIPs } = require('./utils/networkUtils');
-const { performAssetCleanup } = require('./utils/assetCleanup');
-const { authMiddleware } = require('./middleware/authMiddleware');
-const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware');
-const { redisClient, connectRedis } = require('./config/redisClient');
-// --- Route Imports ---
-const networkRoutes = require('./routes/network');
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/user');
-const chatRoutes = require('./routes/chat');
-const uploadRoutes = require('./routes/upload');
-const filesRoutes = require('./routes/files');
-const analysisRoutes = require('./routes/analysis');
-const adminApiRoutes = require('./routes/admin');
-const subjectsRoutes = require('./routes/subjects');
-const generationRoutes = require('./routes/generation');
-const exportRoutes = require('./routes/export');
-const kgRoutes = require('./routes/kg');
-const llmConfigRoutes = require('./routes/llmConfig');
-=======
 const connectDB = require("./config/db");
 const { getLocalIPs } = require("./utils/networkUtils");
 const { performAssetCleanup } = require("./utils/assetCleanup");
@@ -21030,14 +21053,13 @@ const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
 const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/adminDocuments");
+const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generation");
 const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -21071,18 +21093,6 @@ app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
-<<<<<<< HEAD
-app.use('/api/user', userRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/upload', uploadRoutes);
-app.use('/api/files', filesRoutes);
-app.use('/api/analysis', analysisRoutes);
-app.use('/api/subjects', subjectsRoutes);
-app.use('/api/generate', generationRoutes);
-app.use('/api/export', exportRoutes);
-app.use('/api/kg', kgRoutes);
-app.use('/api/llm', llmConfigRoutes);
-=======
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/upload", uploadRoutes);
@@ -21094,7 +21104,6 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
@@ -21108,44 +21117,6 @@ app.use((err, req, res, next) => {
 
 // --- Server Startup Logic ---
 async function startServer() {
-<<<<<<< HEAD
-    console.log("\n--- Starting Server Initialization ---");
-    try {
-        await ensureServerDirectories();
-        await connectDB(mongoUri);
-        await performAssetCleanup();
-        await checkRagService(pythonRagUrl);
-        await connectRedis();
-        const server = app.listen(port, '0.0.0.0', () => {
-            console.log('\n=== Node.js Server Ready ===');
-            console.log(`🚀 Server listening on port ${port}`);
-            getLocalIPs().forEach(ip => {
-                console.log(`   - http://${ip}:${port}`);
-            });
-            console.log('============================\n');
-        });
-
-        const gracefulShutdown = (signal) => {
-            console.log(`\n${signal} received. Shutting down...`);
-            server.close(async () => { // <<< Make async
-                if (redisClient && redisClient.isOpen) { // <<< NEW
-                    await redisClient.quit();
-                    console.log('Redis client connection closed.');
-                }
-                mongoose.connection.close(false, () => {
-                    console.log('MongoDB connection closed.');
-                    process.exit(0);
-                });
-            });
-        };
-        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-        
-    } catch (error) {
-        console.error("!!! Failed to start Node.js server:", error.message);
-        process.exit(1);
-    }
-=======
   console.log("\n--- Starting Server Initialization ---");
   try {
     await ensureServerDirectories();
@@ -21177,7 +21148,6 @@ async function startServer() {
     console.error("!!! Failed to start Node.js server:", error.message);
     process.exit(1);
   }
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
 }
 
 // Helper functions
@@ -21192,18 +21162,6 @@ async function ensureServerDirectories() {
   }
 }
 async function checkRagService(url) {
-<<<<<<< HEAD
-    if (!url) { console.warn('! Python RAG service URL not configured.'); return; }
-    try {
-        const response = await axios.get(`${url}/health`, { timeout: 7000 });
-        if (response.data.status === 'ok') {
-            console.log('✓ Python RAG service is available.');
-        } else {
-            console.warn(`! Python RAG service responded but is not healthy. Status: ${response.data.status}`);
-        }
-    } catch (error) {
-        console.warn('! Python RAG service is not reachable.');
-=======
   if (!url) {
     console.warn("! Python RAG service URL not configured.");
     return;
@@ -21216,7 +21174,6 @@ async function checkRagService(url) {
       console.warn(
         `! Python RAG service responded but is not healthy. Status: ${response.data.status}`
       );
->>>>>>> 27a3bfdb7126b006eb22d76d787f805e38eb20af
     }
   } catch (error) {
     console.warn("! Python RAG service is not reachable.");
@@ -21224,7 +21181,6 @@ async function checkRagService(url) {
 }
 
 startServer();
-
 ```
 
 `server/services/agentService.js`
@@ -22585,14 +22541,34 @@ module.exports = { performAssetCleanup };
 const crypto = require("crypto");
 
 const ALGORITHM = "aes-256-cbc";
-const ENCRYPTION_KEY_BUFFER = Buffer.from(process.env.ENCRYPTION_SECRET, "hex");
 const IV_LENGTH = 16;
+
+let ENCRYPTION_KEY_BUFFER;
+try {
+  if (
+    !process.env.ENCRYPTION_SECRET ||
+    process.env.ENCRYPTION_SECRET.length !== 64
+  ) {
+    throw new Error(
+      "ENCRYPTION_SECRET must be a 64-character hexadecimal string."
+    );
+  }
+  ENCRYPTION_KEY_BUFFER = Buffer.from(process.env.ENCRYPTION_SECRET, "hex");
+  if (ENCRYPTION_KEY_BUFFER.length !== 32) {
+    throw new Error(
+      "Derived encryption key is not 32 bytes long. Check ENCRYPTION_SECRET format."
+    );
+  }
+} catch (e) {
+  console.error(`FATAL CRYPTO CONFIG ERROR: ${e.message}`);
+  ENCRYPTION_KEY_BUFFER = null;
+}
 
 function encrypt(text) {
   if (!text) return null;
-  if (!process.env.ENCRYPTION_SECRET || ENCRYPTION_KEY_BUFFER.length !== 32) {
+  if (!ENCRYPTION_KEY_BUFFER) {
     console.error(
-      "FATAL: ENCRYPTION_SECRET is not set correctly (must be 64 hex chars / 32 bytes). Cannot encrypt."
+      "FATAL: Encryption service is not properly configured. Cannot encrypt."
     );
     throw new Error("Encryption service is not properly configured.");
   }
@@ -22605,9 +22581,9 @@ function encrypt(text) {
 
 function decrypt(text) {
   if (!text) return null;
-  if (!process.env.ENCRYPTION_SECRET || ENCRYPTION_KEY_BUFFER.length !== 32) {
+  if (!ENCRYPTION_KEY_BUFFER) {
     console.error(
-      "FATAL: ENCRYPTION_SECRET is not set correctly (must be 64 hex chars / 32 bytes). Cannot decrypt."
+      "FATAL: Decryption service is not properly configured. Cannot decrypt."
     );
     throw new Error("Decryption service is not properly configured.");
   }
@@ -22626,8 +22602,6 @@ function decrypt(text) {
     );
     let decrypted = decipher.update(encryptedText, "hex", "utf8");
     decrypted += decipher.final("utf8");
-
-    // THE CONSOLE.LOG HAS BEEN REMOVED FOR SECURITY
 
     return decrypted.toString();
   } catch (error) {

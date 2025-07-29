@@ -1,9 +1,8 @@
 // server/routes/llmConfig.js
 const express = require("express");
 const router = express.Router();
-const User = require('../models/User');
-const { encrypt } = require('../utils/crypto');
-const { redisClient } = require('../config/redisClient');
+const User = require("../models/User");
+const { encrypt } = require("../utils/crypto");
 
 // @route   PUT /api/llm/config
 // @desc    Update user's LLM preferences (provider, key, or URL)
@@ -17,45 +16,13 @@ router.put("/config", async (req, res) => {
     // 2. Start with a blank object. We will only update what is sent.
     const updates = {};
 
-        if (llmProvider) {
-            if (!['gemini', 'ollama'].includes(llmProvider)) {
-                return res.status(400).json({ message: "Invalid LLM provider specified." });
-            }
-            updates.preferredLlmProvider = llmProvider;
-        }
-
-        // If a new API key is provided, encrypt and add it to updates.
-        if (apiKey) {
-            updates.encryptedApiKey = encrypt(apiKey);
-        }
-
-        // If a new Ollama URL is provided, add it to updates.
-        if (typeof ollamaUrl === 'string') {
-            updates.ollamaUrl = ollamaUrl.trim();
-        }
-
-        // If a new Ollama model is provided, add it to updates.
-        if (ollamaModel) {
-            updates.ollamaModel = ollamaModel;
-        }
-
-        // 3. If the updates object is empty, nothing was sent to change.
-        if (Object.keys(updates).length === 0) {
-            return res.status(400).json({ message: "No valid update information provided." });
-        }
-        
-        // 4. Use $set to only modify the fields present in the 'updates' object.
-        // This will NEVER delete a field that isn't included in the request.
-        await User.updateOne({ _id: userId }, { $set: updates });
-        if (redisClient && redisClient.isOpen) {
-            const cacheKey = `user:${userId}`;
-            await redisClient.del(cacheKey);
-            console.log(`[Cache Invalidation] Deleted cache for user ${userId} due to LLM config update.`);
-        }
-        res.status(200).json({ message: "LLM preferences updated successfully." });
-    } catch (error) {
-        console.error(`Error updating LLM config for user ${userId}:`, error);
-        res.status(500).json({ message: `Server error while updating LLM preferences: ${error.message}` });
+    if (llmProvider) {
+      if (!["gemini", "ollama"].includes(llmProvider)) {
+        return res
+          .status(400)
+          .json({ message: "Invalid LLM provider specified." });
+      }
+      updates.preferredLlmProvider = llmProvider;
     }
 
     // If a new API key is provided, encrypt and add it to updates.

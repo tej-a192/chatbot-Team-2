@@ -10,26 +10,29 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 
 // --- Custom Modules & Middleware ---
-const connectDB = require('./config/db');
-const { getLocalIPs } = require('./utils/networkUtils');
-const { performAssetCleanup } = require('./utils/assetCleanup');
-const { authMiddleware } = require('./middleware/authMiddleware');
-const { fixedAdminAuthMiddleware } = require('./middleware/fixedAdminAuthMiddleware');
+const connectDB = require("./config/db");
+const { getLocalIPs } = require("./utils/networkUtils");
+const { performAssetCleanup } = require("./utils/assetCleanup");
+const { authMiddleware } = require("./middleware/authMiddleware");
+const {
+  fixedAdminAuthMiddleware,
+} = require("./middleware/fixedAdminAuthMiddleware");
 
 // --- Route Imports ---
-const networkRoutes = require('./routes/network');
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/user');
-const chatRoutes = require('./routes/chat');
-const uploadRoutes = require('./routes/upload');
-const filesRoutes = require('./routes/files');
-const analysisRoutes = require('./routes/analysis');
-const adminApiRoutes = require('./routes/adminDocuments'); // Renamed for clarity
-const subjectsRoutes = require('./routes/subjects');
-const generationRoutes = require('./routes/generation');
-const exportRoutes = require('./routes/export');
-const kgRoutes = require('./routes/kg');
-const llmConfigRoutes = require('./routes/llmConfig');
+const networkRoutes = require("./routes/network");
+const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/user");
+const chatRoutes = require("./routes/chat");
+const uploadRoutes = require("./routes/upload");
+const filesRoutes = require("./routes/files");
+const analysisRoutes = require("./routes/analysis");
+const adminApiRoutes = require("./routes/admin");
+const subjectsRoutes = require("./routes/subjects");
+const generationRoutes = require("./routes/generation");
+const exportRoutes = require("./routes/export");
+const kgRoutes = require("./routes/kg");
+const llmConfigRoutes = require("./routes/llmConfig");
+const toolsRoutes = require("./routes/tools");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -62,17 +65,18 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
-app.use(authMiddleware); 
-app.use('/api/user', userRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/upload', uploadRoutes);
-app.use('/api/files', filesRoutes);
-app.use('/api/analysis', analysisRoutes);
-app.use('/api/subjects', subjectsRoutes);
-app.use('/api/generate', generationRoutes);
-app.use('/api/export', exportRoutes);
-app.use('/api/kg', kgRoutes);
-app.use('/api/llm', llmConfigRoutes);
+app.use(authMiddleware);
+app.use("/api/user", userRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/files", filesRoutes);
+app.use("/api/analysis", analysisRoutes);
+app.use("/api/subjects", subjectsRoutes);
+app.use("/api/generate", generationRoutes);
+app.use("/api/export", exportRoutes);
+app.use("/api/kg", kgRoutes);
+app.use("/api/llm", llmConfigRoutes);
+app.use("/api/tools", toolsRoutes);
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
@@ -86,38 +90,37 @@ app.use((err, req, res, next) => {
 
 // --- Server Startup Logic ---
 async function startServer() {
-    console.log("\n--- Starting Server Initialization ---");
-    try {
-        await ensureServerDirectories();
-        await connectDB(mongoUri); 
-        await performAssetCleanup(); 
-        await checkRagService(pythonRagUrl);
+  console.log("\n--- Starting Server Initialization ---");
+  try {
+    await ensureServerDirectories();
+    await connectDB(mongoUri);
+    await performAssetCleanup();
+    await checkRagService(pythonRagUrl);
 
-        const server = app.listen(port, '0.0.0.0', () => {
-            console.log('\n=== Node.js Server Ready ===');
-            console.log(`🚀 Server listening on port ${port}`);
-            getLocalIPs().forEach(ip => {
-                 console.log(`   - http://${ip}:${port}`);
-            });
-            console.log('============================\n');
+    const server = app.listen(port, "0.0.0.0", () => {
+      console.log("\n=== Node.js Server Ready ===");
+      console.log(`🚀 Server listening on port ${port}`);
+      getLocalIPs().forEach((ip) => {
+        console.log(`   - http://${ip}:${port}`);
+      });
+      console.log("============================\n");
+    });
+
+    const gracefulShutdown = (signal) => {
+      console.log(`\n${signal} received. Shutting down...`);
+      server.close(() => {
+        mongoose.connection.close(false, () => {
+          console.log("MongoDB connection closed.");
+          process.exit(0);
         });
-        
-        const gracefulShutdown = (signal) => {
-            console.log(`\n${signal} received. Shutting down...`);
-            server.close(() => {
-                mongoose.connection.close(false, () => {
-                    console.log('MongoDB connection closed.');
-                    process.exit(0);
-                });
-            });
-        };
-        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-    } catch (error) {
-        console.error("!!! Failed to start Node.js server:", error.message);
-        process.exit(1);
-    }
+      });
+    };
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  } catch (error) {
+    console.error("!!! Failed to start Node.js server:", error.message);
+    process.exit(1);
+  }
 }
 
 // Helper functions
@@ -132,17 +135,22 @@ async function ensureServerDirectories() {
   }
 }
 async function checkRagService(url) {
-    if(!url) { console.warn('! Python RAG service URL not configured.'); return; }
-    try {
-        const response = await axios.get(`${url}/health`, { timeout: 7000 });
-        if (response.data.status === 'ok') {
-            console.log('✓ Python RAG service is available.');
-        } else {
-            console.warn(`! Python RAG service responded but is not healthy. Status: ${response.data.status}`);
-        }
-    } catch (error) {
-        console.warn('! Python RAG service is not reachable.');
+  if (!url) {
+    console.warn("! Python RAG service URL not configured.");
+    return;
+  }
+  try {
+    const response = await axios.get(`${url}/health`, { timeout: 7000 });
+    if (response.data.status === "ok") {
+      console.log("✓ Python RAG service is available.");
+    } else {
+      console.warn(
+        `! Python RAG service responded but is not healthy. Status: ${response.data.status}`
+      );
     }
+  } catch (error) {
+    console.warn("! Python RAG service is not reachable.");
+  }
 }
 
 startServer();
