@@ -3,11 +3,23 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
+const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
 const { createOrUpdateSummary } = require('../services/summarizationService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const router = express.Router();
+
+
+function streamEvent(res, eventData) {
+    if (res.writableEnded) {
+        console.warn('[Chat Route Stream] Attempted to write to an already closed stream.');
+        return;
+    }
+    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+}
+
+
 
 function doesQuerySuggestRecall(query) {
     const lowerCaseQuery = query.toLowerCase();
@@ -22,6 +34,7 @@ function doesQuerySuggestRecall(query) {
     ];
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
+
 
 router.post('/message', async (req, res) => {
     const {
@@ -40,7 +53,8 @@ router.post('/message', async (req, res) => {
     }
 
     const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
-    console.log(`>>> POST /api/chat/message (AGENTIC): User=${userId}, Session=${sessionId}, Query: "${query.substring(0, 50)}..."`);
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, CriticalThinking=${criticalThinkingEnabled}, Query: "${query.substring(0, 50)}..."`);
+
     try {
         const [chatSession, user] = await Promise.all([
             ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
@@ -72,73 +86,97 @@ router.post('/message', async (req, res) => {
         historyForLlm.push(...formattedDbMessages);
         
         const requestContext = {
-            documentContextName,
-            criticalThinkingEnabled,
-            filter,
-            llmProvider,
-            ollamaModel,
-            isWebSearchEnabled: !!useWebSearch,
-            isAcademicSearchEnabled: !!useAcademicSearch,
-            userId: userId.toString(),
-            ollamaUrl: user.ollamaUrl
+            documentContextName, criticalThinkingEnabled, filter,
+            llmProvider, ollamaModel,
+            isWebSearchEnabled: !!useWebSearch, isAcademicSearchEnabled: !!useAcademicSearch,
+            userId: userId.toString(), ollamaUrl: user.ollamaUrl,
+            systemPrompt: clientProvidedSystemInstruction
         };
 
         if (llmProvider === 'gemini') {
-            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-            requestContext.apiKey = userApiKey;
+            requestContext.apiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
         }
 
-        const agentResponse = await processAgenticRequest(
-            query.trim(),
-            historyForLlm,
-            clientProvidedSystemInstruction,
-            requestContext
-        );
+        if (criticalThinkingEnabled) {
+            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
+            
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
 
-        const aiMessageForDbAndClient = {
-            sender: 'bot', role: 'model',
-            parts: [{ text: agentResponse.finalAnswer }],
-            text: agentResponse.finalAnswer,
-            timestamp: new Date(),
-            thinking: null,
-            references: agentResponse.references || [],
-            source_pipeline: agentResponse.sourcePipeline,
-        };
+            const accumulatedThoughts = [];
 
-        await ChatHistory.findOneAndUpdate(
-            { sessionId: sessionId, userId: userId },
-            { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } }, $set: { updatedAt: new Date() } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-        if (redisClient && redisClient.isOpen) {
-            const cacheKey = `session:${sessionId}`;
-            await redisClient.del(cacheKey);
-        }
-        console.log(`<<< POST /api/chat/message (AGENTIC) successful for Session ${sessionId}.`);
-        res.status(200).json({ reply: aiMessageForDbAndClient });
+            const interceptingStreamCallback = (eventData) => {
+                if (eventData.type === 'thought' || eventData.type === 'error') {
+                    if (eventData.type === 'thought') {
+                        accumulatedThoughts.push(eventData.content);
+                    }
+                    streamEvent(res, eventData);
+                }
+            };
 
-    } catch (error) {
-        console.error(`!!! Error processing agentic chat message for Session ${sessionId}:`, error);
-        const statusCode = error.status || 500;
-        const clientMessage = error.message || "Failed to get response from AI service.";
-        
-        const errorMessageForChat = {
-            sender: 'bot', role: 'model',
-            parts: [{ text: `Error: ${clientMessage}` }], text: `Error: ${clientMessage}`,
-            timestamp: new Date(), thinking: `Agentic flow error: ${error.message}`,
-            references: [], source_pipeline: 'error-agent-pipeline'
-        };
-        
-        try {
+            const totResult = await processQueryWithToT_Streaming(
+                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
+            );
+
+            const aiMessageForDbAndClient = {
+                sender: 'bot', role: 'model',
+                parts: [{ text: totResult.finalAnswer }],
+                text: totResult.finalAnswer,
+                timestamp: new Date(),
+                thinking: accumulatedThoughts.join(''),
+                references: totResult.references || [],
+                source_pipeline: totResult.sourcePipeline,
+            };
+
+            streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
+            
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, errorMessageForChat] } }, $set: { updatedAt: new Date() } },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { upsert: true, new: true }
             );
-        } catch (dbError) {
-            console.error(`!!! CRITICAL: Failed to save error message to chat history for Session ${sessionId}:`, dbError);
+            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
+            res.end();
+
+        } else {
+            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
+
+            const agentResponse = await processAgenticRequest(
+                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
+            );
+
+            const aiMessageForDbAndClient = {
+                sender: 'bot', role: 'model',
+                parts: [{ text: agentResponse.finalAnswer }],
+                text: agentResponse.finalAnswer,
+                timestamp: new Date(),
+                thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [],
+                source_pipeline: agentResponse.sourcePipeline,
+            };
+
+            await ChatHistory.findOneAndUpdate(
+                { sessionId: sessionId, userId: userId },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { upsert: true, new: true }
+            );
+
+            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
+            res.status(200).json({ reply: aiMessageForDbAndClient });
         }
-        res.status(statusCode).json({ message: clientMessage, reply: errorMessageForChat });
+
+    } catch (error) {
+        console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
+        const clientMessage = error.message || "Failed to get response from AI service.";
+        
+        if (res.headersSent && !res.writableEnded) {
+            streamEvent(res, { type: 'error', content: clientMessage });
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(error.status || 500).json({ message: clientMessage });
+        }
     }
 });
 
