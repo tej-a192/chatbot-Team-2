@@ -27,7 +27,7 @@ neo4j
 sentence_transformers
 spacy
 opencv-python
-duckduckgo-search
+ddgs
 python-pptx
 python-docx
 reportlab

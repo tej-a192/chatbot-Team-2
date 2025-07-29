@@ -13,9 +13,8 @@ import json
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
->>>>>>> origin/skms
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -109,7 +108,6 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
-<<<<<<< HEAD
 # --- THIS IS THE CORRECTED /query ENDPOINT ---
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
@@ -156,7 +154,7 @@ def search_qdrant_documents():
         return create_error_response(f"Query failed: {str(e)}", 500)
 
 # All other endpoints remain unchanged and are included for completeness
-=======
+
 @app.route('/health', methods=['GET'])
 def health_check():
     status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
@@ -198,18 +196,18 @@ def add_document_qdrant():
         return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
     except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
 
-@app.route('/query', methods=['POST'])
-def search_qdrant_documents():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    query_text, user_id, k, doc_name = data.get('query'), data.get('user_id'), data.get('k', 5), data.get('documentContextName')
-    if not query_text or not user_id: return create_error_response("Missing 'query' or 'user_id'", 400)
-    try:
-        must_conditions = [qdrant_models.FieldCondition(key="file_name", match=qdrant_models.MatchValue(value=doc_name))] if doc_name else []
-        qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-        retrieved, snippet, docs_map = vector_service.search_documents(query=query_text, k=k, filter_conditions=qdrant_filters)
-        return jsonify({"retrieved_documents_list": [d.to_dict() for d in retrieved], "formatted_context_snippet": snippet, "retrieved_documents_map": docs_map}), 200
-    except Exception as e: return create_error_response(f"Query failed: {str(e)}", 500)
+# @app.route('/query', methods=['POST'])
+# def search_qdrant_documents():
+#     data = request.get_json()
+#     if not data: return create_error_response("Request must be JSON", 400)
+#     query_text, user_id, k, doc_name = data.get('query'), data.get('user_id'), data.get('k', 5), data.get('documentContextName')
+#     if not query_text or not user_id: return create_error_response("Missing 'query' or 'user_id'", 400)
+#     try:
+#         must_conditions = [qdrant_models.FieldCondition(key="file_name", match=qdrant_models.MatchValue(value=doc_name))] if doc_name else []
+#         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
+#         retrieved, snippet, docs_map = vector_service.search_documents(query=query_text, k=k, filter_conditions=qdrant_filters)
+#         return jsonify({"retrieved_documents_list": [d.to_dict() for d in retrieved], "formatted_context_snippet": snippet, "retrieved_documents_map": docs_map}), 200
+#     except Exception as e: return create_error_response(f"Query failed: {str(e)}", 500)
 
 @app.route('/academic_search', methods=['POST'])
 def academic_search_route():

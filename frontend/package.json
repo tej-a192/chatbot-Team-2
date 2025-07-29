@@ -34,7 +34,7 @@
     "react-vis-network-graph": "^3.0.1",
     "save-svg-as-png": "^1.4.17",
     "svg-pan-zoom": "^3.6.2",
-    "uuid": "^11.1.0",
+    "uuid": "^9.0.1",
     "vis-network": "^9.1.12"
   },
   "devDependencies": {
