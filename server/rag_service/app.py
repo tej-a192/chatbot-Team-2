@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import shutil
 import json
-
+import re
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
@@ -35,6 +35,11 @@ try:
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
+    from prompts import (
+        CODE_ANALYSIS_PROMPT_TEMPLATE,
+        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
+        EXPLAIN_ERROR_PROMPT_TEMPLATE
+    )
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -45,6 +50,29 @@ app = Flask(__name__)
 GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "script.py",
+        "compile_cmd": None,
+        "run_cmd": ["python", "script.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "program.c",
+        "compile_cmd": ["gcc", "program.c", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    },
+    "cpp": {
+        "filename": "program.cpp",
+        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    }
+}
 
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
@@ -108,7 +136,138 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/execute_code', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+
+    code = data.get('code')
+    language = data.get('language', '').lower()
+    test_cases = data.get('testCases', [])
+
+    if not code or not language:
+        return create_error_response("Missing 'code' or 'language'", 400)
+
+    lang_config = LANGUAGE_CONFIG.get(language)
+    if not lang_config:
+        unsupported_message = f"Language '{language}' is not currently supported for execution."
+        return jsonify({"compilationError": unsupported_message}), 200
+
+    results = []
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        source_path = os.path.join(temp_dir, lang_config["filename"])
+        with open(source_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        if lang_config["compile_cmd"]:
+            compile_process = subprocess.run(
+                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                text=True, timeout=10, encoding='utf-8'
+            )
+            if compile_process.returncode != 0:
+                error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
+                logger.warning(f"Compilation failed for {language}. Error: {error_output}")
+                return jsonify({"compilationError": error_output}), 200
+
+        for i, case in enumerate(test_cases):
+            case_input = case.get('input', '')
+            expected_output = str(case.get('expectedOutput', '')).strip()
+            
+            case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
+
+            try:
+                run_process = subprocess.run(
+                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
+                    capture_output=True, text=True, timeout=5, encoding='utf-8'
+                )
+                stdout = run_process.stdout.strip().replace('\r\n', '\n')
+                stderr = run_process.stderr.strip()
+                case_result["output"] = stdout
+
+                if run_process.returncode != 0:
+                    case_result["status"] = "error"
+                    case_result["error"] = stderr or "Script failed with a non-zero exit code."
+                elif stderr:
+                     case_result["error"] = f"Warning (stderr):\n{stderr}"
+                
+                if case_result["status"] != "error":
+                    if stdout == expected_output:
+                        case_result["status"] = "pass"
+                    else:
+                        case_result["status"] = "fail"
+                
+            except subprocess.TimeoutExpired:
+                case_result["status"] = "error"
+                case_result["error"] = "Execution timed out after 5 seconds."
+            except Exception as exec_err:
+                case_result["status"] = "error"
+                case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
+            results.append(case_result)
+    finally:
+        shutil.rmtree(temp_dir)
+
+    return jsonify({"results": results}), 200
+
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+        
+    try:
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis = llm_wrapper(prompt, api_key)
+        return jsonify({"analysis": analysis}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
+
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+
+    try:
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for test cases.")
+        
+        test_cases = json.loads(json_match.group(0))
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+@app.route('/explain_error', methods=['POST'])
+def explain_error_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
+    
+    if not all([code, language, error_message, api_key]):
+        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+        
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation = llm_wrapper(prompt, api_key)
+        return jsonify({"explanation": explanation}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
     current_app.logger.info("--- /query Request (RAG Search Only) ---")
@@ -129,11 +288,10 @@ def search_qdrant_documents():
         if document_context_name:
             current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
             ))
         
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
         retrieved_docs, snippet, docs_map = vector_service.search_documents(
@@ -196,18 +354,6 @@ def add_document_qdrant():
         return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
     except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
 
-# @app.route('/query', methods=['POST'])
-# def search_qdrant_documents():
-#     data = request.get_json()
-#     if not data: return create_error_response("Request must be JSON", 400)
-#     query_text, user_id, k, doc_name = data.get('query'), data.get('user_id'), data.get('k', 5), data.get('documentContextName')
-#     if not query_text or not user_id: return create_error_response("Missing 'query' or 'user_id'", 400)
-#     try:
-#         must_conditions = [qdrant_models.FieldCondition(key="file_name", match=qdrant_models.MatchValue(value=doc_name))] if doc_name else []
-#         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-#         retrieved, snippet, docs_map = vector_service.search_documents(query=query_text, k=k, filter_conditions=qdrant_filters)
-#         return jsonify({"retrieved_documents_list": [d.to_dict() for d in retrieved], "formatted_context_snippet": snippet, "retrieved_documents_map": docs_map}), 200
-#     except Exception as e: return create_error_response(f"Query failed: {str(e)}", 500)
 
 @app.route('/academic_search', methods=['POST'])
 def academic_search_route():

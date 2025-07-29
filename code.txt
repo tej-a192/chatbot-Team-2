@@ -16924,7 +16924,7 @@ import json
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
 # --- Add server directory to sys.path ---
@@ -17018,6 +17018,101 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+@app.route('/execute_code', methods=['POST'])
+def execute_code():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+
+    code = data.get('code')
+    language = data.get('language', '').lower()
+    test_cases = data.get('testCases', [])
+
+    if not code or not language:
+        return create_error_response("Missing 'code' or 'language'", 400)
+
+    lang_config = LANGUAGE_CONFIG.get(language)
+    if not lang_config:
+        unsupported_message = f"Language '{language}' is not currently supported for execution."
+        return jsonify({"compilationError": unsupported_message}), 200
+
+    results = []
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        source_path = os.path.join(temp_dir, lang_config["filename"])
+        with open(source_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        # --- Compilation Step ---
+        if lang_config["compile_cmd"]:
+            compile_process = subprocess.run(
+                lang_config["compile_cmd"],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=10, # 10-second timeout for compilation
+                encoding='utf-8'
+            )
+            if compile_process.returncode != 0:
+                error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
+                logger.warning(f"Compilation failed for {language}. Error: {error_output}")
+                return jsonify({"compilationError": error_output}), 200
+
+        # --- Execution Step ---
+        for i, case in enumerate(test_cases):
+            case_input = case.get('input', '')
+            expected_output = str(case.get('expectedOutput', '')).strip()
+            
+            case_result = {
+                "input": case_input,
+                "expected": expected_output,
+                "output": "",
+                "error": None,
+                "status": "fail"
+            }
+
+            try:
+                run_process = subprocess.run(
+                    lang_config["run_cmd"],
+                    cwd=temp_dir,
+                    input=case_input,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    encoding='utf-8'
+                )
+
+                stdout = run_process.stdout.strip()
+                stderr = run_process.stderr.strip()
+                case_result["output"] = stdout
+
+                if run_process.returncode != 0:
+                    case_result["status"] = "error"
+                    case_result["error"] = stderr or "Script failed with a non-zero exit code."
+                elif stderr:
+                     case_result["error"] = f"Warning (stderr):\n{stderr}"
+                
+                if case_result["status"] != "error":
+                    if stdout == expected_output:
+                        case_result["status"] = "pass"
+                    else:
+                        case_result["status"] = "fail"
+                
+            except subprocess.TimeoutExpired:
+                case_result["status"] = "error"
+                case_result["error"] = "Execution timed out after 5 seconds."
+            except Exception as exec_err:
+                case_result["status"] = "error"
+                case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
+
+            results.append(case_result)
+
+    finally:
+        shutil.rmtree(temp_dir)
+
+    return jsonify({"results": results}), 200
+
 
 # --- THIS IS THE CORRECTED /query ENDPOINT ---
 @app.route('/query', methods=['POST'])
@@ -17107,18 +17202,6 @@ def add_document_qdrant():
         return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
     except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
 
-# @app.route('/query', methods=['POST'])
-# def search_qdrant_documents():
-#     data = request.get_json()
-#     if not data: return create_error_response("Request must be JSON", 400)
-#     query_text, user_id, k, doc_name = data.get('query'), data.get('user_id'), data.get('k', 5), data.get('documentContextName')
-#     if not query_text or not user_id: return create_error_response("Missing 'query' or 'user_id'", 400)
-#     try:
-#         must_conditions = [qdrant_models.FieldCondition(key="file_name", match=qdrant_models.MatchValue(value=doc_name))] if doc_name else []
-#         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-#         retrieved, snippet, docs_map = vector_service.search_documents(query=query_text, k=k, filter_conditions=qdrant_filters)
-#         return jsonify({"retrieved_documents_list": [d.to_dict() for d in retrieved], "formatted_context_snippet": snippet, "retrieved_documents_map": docs_map}), 200
-#     except Exception as e: return create_error_response(f"Query failed: {str(e)}", 500)
 
 @app.route('/academic_search', methods=['POST'])
 def academic_search_route():
@@ -17278,7 +17361,6 @@ def delete_kg_route(user_id, document_name):
 if __name__ == '__main__':
     logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
     app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
-
 ```
 
 `server/rag_service/config.py`
@@ -18290,7 +18372,7 @@ neo4j
 sentence_transformers
 spacy
 opencv-python
-duckduckgo-search
+ddgs
 python-pptx
 python-docx
 reportlab
@@ -22631,7 +22713,6 @@ async function performWebSearch(query) {
 
     if (!pythonServiceUrl) {
         console.warn("[WebSearch Service] PYTHON_RAG_SERVICE_URL is not set. Web search is disabled.");
-        // Throw an error so the agent knows the tool is unavailable
         throw new Error("Web search tool is not configured on the server.");
     }
 
@@ -22643,18 +22724,33 @@ async function performWebSearch(query) {
 
         if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             const topResults = response.data;
-            
-            const formattedResults = topResults.map((result, index) => {
+
+            // 1. Create the `references` array for the UI
+            const references = topResults.map((result, index) => ({
+                number: index + 1,
+                source: result.title || 'Untitled Web Page',
+                url: result.url || '#',
+                content_preview: (result.content || "").substring(0, 150) + "..."
+            }));
+
+            // 2. Format the `toolOutput` string for the synthesizer prompt
+            const toolOutput = "[WEB SEARCH RESULTS]\n" + topResults.map((result, index) => {
                 const title = result.title || 'No Title';
                 const url = result.url || '#';
                 const content = result.content ? result.content.replace(/[\n\r]+/g, ' ').trim() : 'No content preview.';
                 return `[${index + 1}] Title: ${title}\nSource: ${url}\nContent: ${content}`;
             }).join('\n\n');
-
-            return `[WEB SEARCH RESULTS]\n${formattedResults}`;
+            
+            // 3. Return the object with both properties
+            return { toolOutput, references };
+            
         } else {
             console.log(`[WebSearch Service] Python service returned no results for query: "${query}"`);
-            return "Web search did not return any results for this query.";
+            // Return the correct object structure even on no results
+            return { 
+                toolOutput: "Web search did not return any results for this query.",
+                references: []
+            };
         }
     } catch (error) {
         let errorMessage = `Error calling Python service for query "${query}": `;
@@ -22666,7 +22762,7 @@ async function performWebSearch(query) {
             errorMessage += error.message;
         }
         console.error(errorMessage);
-        // --- FIX: Throw the error to be caught by the agent service ---
+        // Throw the error to be caught by the agent service
         throw new Error(error.message);
     }
 }
