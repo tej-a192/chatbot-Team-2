@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const { redisClient } = require('../config/redisClient');
 
 // Note: The main 'authMiddleware' will be applied in server.js before this router is used,
 // so we don't need to add it to each route here. req.user will be available.
@@ -51,7 +52,11 @@ router.put('/profile', async (req, res) => {
         };
 
         await user.save();
-
+        if (redisClient && redisClient.isOpen) {
+            const cacheKey = `user:${req.user._id}`;
+            await redisClient.del(cacheKey);
+            console.log(`[Cache Invalidation] Deleted cache for user ${req.user._id} due to profile update.`);
+        }
         res.json({
             message: 'Profile updated successfully!',
             profile: user.profile

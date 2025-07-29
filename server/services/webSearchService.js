@@ -6,7 +6,6 @@ async function performWebSearch(query) {
 
     if (!pythonServiceUrl) {
         console.warn("[WebSearch Service] PYTHON_RAG_SERVICE_URL is not set. Web search is disabled.");
-        // Throw an error so the agent knows the tool is unavailable
         throw new Error("Web search tool is not configured on the server.");
     }
 
@@ -18,18 +17,33 @@ async function performWebSearch(query) {
 
         if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             const topResults = response.data;
-            
-            const formattedResults = topResults.map((result, index) => {
+
+            // 1. Create the `references` array for the UI
+            const references = topResults.map((result, index) => ({
+                number: index + 1,
+                source: result.title || 'Untitled Web Page',
+                url: result.url || '#',
+                content_preview: (result.content || "").substring(0, 150) + "..."
+            }));
+
+            // 2. Format the `toolOutput` string for the synthesizer prompt
+            const toolOutput = "[WEB SEARCH RESULTS]\n" + topResults.map((result, index) => {
                 const title = result.title || 'No Title';
                 const url = result.url || '#';
                 const content = result.content ? result.content.replace(/[\n\r]+/g, ' ').trim() : 'No content preview.';
                 return `[${index + 1}] Title: ${title}\nSource: ${url}\nContent: ${content}`;
             }).join('\n\n');
-
-            return `[WEB SEARCH RESULTS]\n${formattedResults}`;
+            
+            // 3. Return the object with both properties
+            return { toolOutput, references };
+            
         } else {
             console.log(`[WebSearch Service] Python service returned no results for query: "${query}"`);
-            return "Web search did not return any results for this query.";
+            // Return the correct object structure even on no results
+            return { 
+                toolOutput: "Web search did not return any results for this query.",
+                references: []
+            };
         }
     } catch (error) {
         let errorMessage = `Error calling Python service for query "${query}": `;
@@ -41,7 +55,7 @@ async function performWebSearch(query) {
             errorMessage += error.message;
         }
         console.error(errorMessage);
-        // --- FIX: Throw the error to be caught by the agent service ---
+        // Throw the error to be caught by the agent service
         throw new Error(error.message);
     }
 }

@@ -2,7 +2,6 @@
 import os
 import sys
 import traceback
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 import logging
 import atexit
 import uuid
@@ -10,15 +9,12 @@ import subprocess
 import tempfile
 import shutil
 import json
+import re
 
-
-from duckduckgo_search import DDGS
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
+from pydub import AudioSegment
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
-import subprocess
-import tempfile
-import shutil
-import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,41 +32,14 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
+    import academic_search
+    import knowledge_graph_generator
     import google.generativeai as genai
-    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
-
-
-    if config.GEMINI_API_KEY:
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
-    else:
-        LLM_MODEL = None
-        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
-
-    def llm_wrapper(prompt):
-        if not LLM_MODEL:
-            raise ConnectionError("Gemini API Key is not configured in the Python service.")
-        for attempt in range(3):
-            try:
-                response = LLM_MODEL.generate_content(prompt)
-                if response.parts:
-                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
-                elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
-                else:
-                    logger.warning("LLM returned empty response without explicit block reason.")
-                    return ""
-            except Exception as e:
-                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
-                if attempt == 2: raise
-        return ""
-
+    from prompts import (
+        CODE_ANALYSIS_PROMPT_TEMPLATE,
+        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
+        EXPLAIN_ERROR_PROMPT_TEMPLATE
+    )
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -82,7 +51,67 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-# Initialize services
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "script.py",
+        "compile_cmd": None,
+        "run_cmd": ["python", "script.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "program.c",
+        "compile_cmd": ["gcc", "program.c", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    },
+    "cpp": {
+        "filename": "program.cpp",
+        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    }
+}
+
+# --- Dynamic LLM Initialization & Wrapper ---
+def get_llm_model(api_key: str):
+    """Dynamically creates a GenerativeModel instance with the provided API key."""
+    if not api_key:
+        raise ValueError("An API key is required to initialize the LLM for this request.")
+    
+    genai.configure(api_key=api_key)
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+    return genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+
+def llm_wrapper(prompt: str, api_key: str):
+    """Wrapper that takes an api_key to initialize the model for each call."""
+    if not api_key:
+        raise ConnectionError("Gemini API Key was not provided for this operation.")
+    
+    llm_model = get_llm_model(api_key)
+    
+    for attempt in range(3):
+        try:
+            response = llm_model.generate_content(prompt)
+            if response.parts:
+                return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+            elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                 raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+            else:
+                logger.warning("LLM returned empty response without explicit block reason.")
+                return ""
+        except Exception as e:
+            logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+            if attempt == 2: raise
+    return ""
+
+# --- Initialize other services ---
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -106,70 +135,6 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
-@app.route('/analyze_code', methods=['POST'])
-def analyze_code():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    code, language = data.get('code'), data.get('language')
-    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-    try:
-        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
-        analysis_text = llm_wrapper(prompt)
-        return jsonify({"analysis": analysis_text}), 200
-    except Exception as e:
-        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
-
-@app.route('/generate_test_cases', methods=['POST'])
-def generate_test_cases():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    code, language = data.get('code'), data.get('language')
-    if not all([code, language]): return create_error_response("Missing 'code' or 'language'", 400)
-    try:
-        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
-        response_text = llm_wrapper(prompt)
-        cleaned_json = response_text[response_text.find('['):response_text.rfind(']')+1]
-        test_cases = json.loads(cleaned_json)
-        return jsonify({"testCases": test_cases}), 200
-    except Exception as e:
-        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
-
-@app.route('/explain_error', methods=['POST'])
-def explain_error():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    code, language, error_message = data.get('code'), data.get('language'), data.get('errorMessage')
-    if not all([code, language, error_message]):
-        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
-    try:
-        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
-        explanation_text = llm_wrapper(prompt)
-        return jsonify({"explanation": explanation_text}), 200
-    except Exception as e:
-        return create_error_response(f"Failed to explain error: {str(e)}", 500)
-
-LANGUAGE_CONFIG = {
-    "python": {
-        "filename": "main.py",
-        "compile_cmd": None,
-        "run_cmd": [sys.executable, "main.py"]
-    },
-    "java": {
-        "filename": "Main.java",
-        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
-        "run_cmd": ["java", "Main"]
-    },
-    "c": {
-        "filename": "main.c",
-        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
-        "run_cmd": ["./main"]
-    },
-    "cpp": {
-        "filename": "main.cpp",
-        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
-        "run_cmd": ["./main"]
-    }
-}
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
@@ -197,46 +162,28 @@ def execute_code():
         with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
-        # --- Compilation Step ---
         if lang_config["compile_cmd"]:
             compile_process = subprocess.run(
-                lang_config["compile_cmd"],
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=10, # 10-second timeout for compilation
-                encoding='utf-8'
+                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                text=True, timeout=10, encoding='utf-8'
             )
             if compile_process.returncode != 0:
                 error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
                 logger.warning(f"Compilation failed for {language}. Error: {error_output}")
                 return jsonify({"compilationError": error_output}), 200
 
-        # --- Execution Step ---
         for i, case in enumerate(test_cases):
             case_input = case.get('input', '')
             expected_output = str(case.get('expectedOutput', '')).strip()
             
-            case_result = {
-                "input": case_input,
-                "expected": expected_output,
-                "output": "",
-                "error": None,
-                "status": "fail"
-            }
+            case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
 
             try:
                 run_process = subprocess.run(
-                    lang_config["run_cmd"],
-                    cwd=temp_dir,
-                    input=case_input,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    encoding='utf-8'
+                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
+                    capture_output=True, text=True, timeout=5, encoding='utf-8'
                 )
-
-                stdout = run_process.stdout.strip()
+                stdout = run_process.stdout.strip().replace('\r\n', '\n')
                 stderr = run_process.stderr.strip()
                 case_result["output"] = stdout
 
@@ -258,15 +205,69 @@ def execute_code():
             except Exception as exec_err:
                 case_result["status"] = "error"
                 case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
-
             results.append(case_result)
-
     finally:
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
 
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+        
+    try:
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis = llm_wrapper(prompt, api_key)
+        return jsonify({"analysis": analysis}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
+
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+
+    try:
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for test cases.")
+        
+        test_cases = json.loads(json_match.group(0))
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+@app.route('/explain_error', methods=['POST'])
+def explain_error_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
+    
+    if not all([code, language, error_message, api_key]):
+        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+        
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation = llm_wrapper(prompt, api_key)
+        return jsonify({"explanation": explanation}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
     current_app.logger.info("--- /query Request (RAG Search Only) ---")
@@ -287,11 +288,10 @@ def search_qdrant_documents():
         if document_context_name:
             current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
             ))
         
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
         retrieved_docs, snippet, docs_map = vector_service.search_documents(
@@ -312,6 +312,59 @@ def search_qdrant_documents():
         return create_error_response(f"Query failed: {str(e)}", 500)
 
 # All other endpoints remain unchanged and are included for completeness
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
+    http_status_code = 503
+    if not vector_service:
+        status_details["qdrant_service"] = "failed_to_initialize"
+    else:
+        status_details["qdrant_service"] = "initialized"
+        try:
+            vector_service.client.get_collection(collection_name=vector_service.collection_name)
+            status_details["qdrant_collection_status"] = "exists_and_accessible"
+        except Exception as e:
+            status_details["qdrant_collection_status"] = f"error: {str(e)}"
+    
+    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
+    if neo4j_ok:
+        status_details["neo4j_service"], status_details["neo4j_connection"] = "initialized_via_handler", "connected"
+    else:
+        status_details["neo4j_service"], status_details["neo4j_connection"] = "initialization_failed_or_handler_error", neo4j_conn_status
+    
+    if status_details["qdrant_service"] == "initialized" and status_details.get("qdrant_collection_status") == "exists_and_accessible" and neo4j_ok:
+        status_details["status"], http_status_code = "ok", 200
+    
+    return jsonify(status_details), http_status_code
+
+@app.route('/add_document', methods=['POST'])
+def add_document_qdrant():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
+    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
+    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
+    try:
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
+        num_added, status = 0, "processed_no_content"
+        if processed_chunks:
+            num_added = app.vector_service.add_processed_chunks(processed_chunks)
+            if num_added > 0: status = "added_to_qdrant"
+        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
+    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
+
+
+@app.route('/academic_search', methods=['POST'])
+def academic_search_route():
+    data = request.get_json()
+    if not data or 'query' not in data: return create_error_response("Missing 'query'", 400)
+    try:
+        results = academic_search.search_all_apis(data['query'], max_results_per_api=data.get('max_results', 3))
+        return jsonify({"success": True, "results": results}), 200
+    except Exception as e:
+        return create_error_response(f"Academic search failed: {str(e)}", 500)
+
 @app.route('/web_search', methods=['POST'])
 def web_search_route():
     data = request.get_json()
@@ -324,44 +377,90 @@ def web_search_route():
 
 @app.route('/export_podcast', methods=['POST'])
 def export_podcast_route():
+    current_app.logger.info("--- /export_podcast Request (gTTS + Speed-Up) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-    source_document_text, outline_content = data.get('sourceDocumentText'), data.get('outlineContent')
-    if not all([source_document_text, outline_content]): return create_error_response("Missing required fields", 400)
+    
+    source_document_text = data.get('sourceDocumentText')
+    analysis_content = data.get('analysisContent')
+    podcast_options = data.get('podcastOptions', {})
+    api_key = data.get('api_key')
+    
+    if not all([source_document_text, analysis_content, api_key]):
+        return create_error_response("Missing 'sourceDocumentText', 'analysisContent', or 'api_key'", 400)
+
     try:
-        script = podcast_generator.generate_podcast_script(source_document_text, outline_content, llm_wrapper)
-        dialogue = podcast_generator.parse_script_into_dialogue(script)
-        if not dialogue: raise ValueError("Failed to parse the generated script.")
-        filename = f"podcast_{uuid.uuid4()}.mp3"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        podcast_generator.synthesize_dual_speaker_audio(dialogue, output_path)
+        script = podcast_generator.generate_podcast_script(
+            source_document_text, 
+            analysis_content,
+            podcast_options,
+            lambda p: llm_wrapper(p, api_key)
+        )
+        
+        temp_gtts_filename = f"podcast_gtts_{uuid.uuid4()}.mp3"
+        temp_gtts_path = os.path.join(app.config['GENERATED_DOCS_DIR'], temp_gtts_filename)
+        podcast_generator.synthesize_audio_with_gtts(script, temp_gtts_path)
+
+        sound = AudioSegment.from_mp3(temp_gtts_path)
+        sped_up_sound = sound.speedup(playback_speed=1.20)
+        
+        final_mp3_filename = f"podcast_final_{uuid.uuid4()}.mp3"
+        final_mp3_path = os.path.join(app.config['GENERATED_DOCS_DIR'], final_mp3_filename)
+        
+        sped_up_sound.export(final_mp3_path, format="mp3")
+        os.remove(temp_gtts_path)
+
         @after_this_request
         def cleanup(response):
-            try: os.remove(output_path)
-            except OSError as e: logger.error(f"Error deleting temp podcast file {output_path}: {e}")
+            try: os.remove(final_mp3_path)
+            except OSError as e: logger.error(f"Error deleting temp podcast MP3 file {final_mp3_path}: {e}")
             return response
-        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-    except Exception as e: return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
+            
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], final_mp3_filename, as_attachment=True)
+    except Exception as e:
+        logger.error(f"Failed to generate podcast: {e}", exc_info=True)
+        return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
+
+@app.route('/generate_kg_from_text', methods=['POST'])
+def generate_kg_from_text_route():
+    current_app.logger.info("--- /generate_kg_from_text Request ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    document_text = data.get('document_text')
+    api_key = data.get('api_key')
+    
+    if not document_text or not api_key:
+        return create_error_response("Missing 'document_text' or 'api_key' in request body", 400)
+    
+    try:
+        graph_data = knowledge_graph_generator.generate_graph_from_text(
+            document_text, 
+            lambda p: llm_wrapper(p, api_key)
+        )
+        return jsonify({"success": True, "graph_data": graph_data}), 200
+    except Exception as e:
+        logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
+        return create_error_response(f"KG Generation failed: {str(e)}", 500)
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-    outline_content, doc_type, source_document_text = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText')
-    if not all([outline_content, doc_type, source_document_text]): return create_error_response("Missing required fields", 400)
+    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
+    if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
     try:
-        expanded_content = document_generator.expand_content_with_llm(outline_content, source_document_text, doc_type, llm_wrapper)
-        slides_data = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename = f"generated_doc_{uuid.uuid4()}.{doc_type}"
-        output_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        if doc_type == 'pptx': document_generator.create_ppt(slides_data, output_path)
-        else: document_generator.create_doc(slides_data, output_path, "text_content")
+        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
+        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
+        filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
+        if doc_type == 'pptx': document_generator.create_ppt(slides, path)
+        else: document_generator.create_doc(slides, path, "text_content")
         return jsonify({"success": True, "filename": filename}), 201
     except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
-    if '..' in filename or filename.startswith('/'): return create_error_response("Invalid filename.", 400)
+    if '..' in filename: return create_error_response("Invalid filename.", 400)
     try:
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
         if not os.path.exists(file_path): return create_error_response("File not found.", 404)
@@ -371,53 +470,10 @@ def download_document_route(filename):
             except OSError as e: logger.error(f"Error deleting temp file {file_path}: {e}")
             return response
         return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
-    except Exception as e: return create_error_response("Could not process download request.", 500)
+    except Exception as e:
+        return create_error_response("Could not process download request.", 500)
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    status_details = { "status": "error", "qdrant_service": "not_initialized", "neo4j_service": "not_initialized_via_handler", "neo4j_connection": "unknown"}
-    http_status_code = 503
-    if not vector_service: status_details["qdrant_service"] = "failed_to_initialize"
-    else:
-        status_details["qdrant_service"] = "initialized"
-        try:
-            vector_service.client.get_collection(collection_name=vector_service.collection_name)
-            status_details["qdrant_collection_status"] = "exists_and_accessible"
-        except Exception as e: status_details["qdrant_collection_status"] = f"error: {str(e)}"
-    neo4j_ok, neo4j_conn_status = neo4j_handler.check_neo4j_connectivity()
-    if neo4j_ok: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialized_via_handler", "connected"
-    else: status_details["neo4j_service"], status_details["neo4j_connection"] = "initialization_failed_or_handler_error", neo4j_conn_status
-    if status_details["qdrant_service"] == "initialized" and status_details.get("qdrant_collection_status") == "exists_and_accessible" and neo4j_ok:
-        status_details["status"], http_status_code = "ok", 200
-    return jsonify(status_details), http_status_code
-
-@app.route('/add_document', methods=['POST'])
-def add_document_qdrant():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_chunks_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_chunks_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_chunks_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_chunks_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
-
-@app.route('/query_kg', methods=['POST'])
-def query_kg_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    user_id, document_name, query_text = data.get('user_id'), data.get('document_name'), data.get('query')
-    if not all([user_id, document_name, query_text]): return create_error_response("Missing fields", 400)
-    try:
-        facts_summary = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
-        return jsonify({"success": True, "facts": facts_summary}), 200
-    except Exception as e: return create_error_response(f"Failed to query KG: {str(e)}", 500)
-
+# KG & DB Management Routes
 @app.route('/delete_qdrant_document_data', methods=['DELETE'])
 def delete_qdrant_data_route():
     data = request.get_json()
@@ -456,4 +512,4 @@ def delete_kg_route(user_id, document_name):
 
 if __name__ == '__main__':
     logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=True)
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)

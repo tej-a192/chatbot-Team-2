@@ -26,7 +26,7 @@ const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
 const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/adminDocuments");
+const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generation");
 const exportRoutes = require("./routes/export");
@@ -77,6 +77,7 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
+app.use("/api/admin", adminApiRoutes);
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {

@@ -1,30 +1,57 @@
-// server/routes/adminDocuments.js
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+// server/routes/admin.js
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const fsPromises = fs.promises;
-const AdminDocument = require("../models/AdminDocument");
-const axios = require("axios");
-const User = require("../models/User");
-const { encrypt } = require("../utils/crypto");
+const AdminDocument = require('../models/AdminDocument');
+const axios = require('axios');
+const User = require('../models/User');
+const ChatHistory = require('../models/ChatHistory');
+const { cacheMiddleware } = require('../middleware/cacheMiddleware');
+const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
+const CACHE_DURATION_SECONDS = 30; 
+// --- NEW Dashboard Stats Route ---
+// @route   GET /api/admin/dashboard-stats
+// @desc    Get key statistics for the admin dashboard
+router.get('/dashboard-stats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
+    try {
+        const [totalUsers, totalAdminDocs, totalSessions, pendingApiKeys] = await Promise.all([
+            User.countDocuments(),
+            AdminDocument.countDocuments(),
+            ChatHistory.countDocuments(),
+            User.countDocuments({ apiKeyRequestStatus: 'pending' })
+        ]);
+
+        res.json({
+            totalUsers,
+            totalAdminDocs,
+            totalSessions,
+            pendingApiKeys
+        });
+    } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+        res.status(500).json({ message: 'Server error while fetching dashboard stats.' });
+    }
+});
+
 
 // --- API Key Management Routes ---
 
 // @route   GET /api/admin/key-requests
 // @desc    Get all users with a pending API key request
-router.get("/key-requests", async (req, res) => {
-  try {
-    const requests = await User.find({ apiKeyRequestStatus: "pending" })
-      .select("email profile createdAt")
-      .sort({ createdAt: -1 });
-    res.json(requests);
-  } catch (error) {
-    console.error("Error fetching API key requests:", error);
-    res.status(500).json({ message: "Server error while fetching requests." });
-  }
+router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
+    try {
+        const requests = await User.find({ apiKeyRequestStatus: 'pending' })
+            .select('email profile createdAt')
+            .sort({ createdAt: -1 });
+        res.json(requests);
+    } catch (error) {
+        console.error('Error fetching API key requests:', error);
+        res.status(500).json({ message: 'Server error while fetching requests.' });
+    }
 });
 
 // @route   POST /api/admin/key-requests/approve
@@ -303,26 +330,21 @@ router.post(
 );
 
 // @route   GET /api/admin/documents
-router.get("/documents", async (req, res) => {
-  try {
-    const adminDocs = await AdminDocument.find()
-      .sort({ uploadedAt: -1 })
-      .select(
-        "originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap"
-      );
-    const documentsList = adminDocs.map((doc) => ({
-      originalName: doc.originalName,
-      serverFilename: doc.filename,
-      uploadedAt: doc.uploadedAt,
-      analysisUpdatedAt: doc.analysisUpdatedAt,
-      hasFaq: !!doc.analysis?.faq?.trim(),
-      hasTopics: !!doc.analysis?.topics?.trim(),
-      hasMindmap: !!doc.analysis?.mindmap?.trim(),
-    }));
-    res.json({ documents: documentsList });
-  } catch (error) {
-    res.status(500).json({ message: "Server error fetching admin documents." });
-  }
+router.get('/documents',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
+    try {
+        const adminDocs = await AdminDocument.find().sort({ uploadedAt: -1 })
+            .select('originalName filename uploadedAt analysisUpdatedAt analysis.faq analysis.topics analysis.mindmap');
+        const documentsList = adminDocs.map(doc => ({
+            originalName: doc.originalName, serverFilename: doc.filename, uploadedAt: doc.uploadedAt,
+            analysisUpdatedAt: doc.analysisUpdatedAt,
+            hasFaq: !!(doc.analysis?.faq?.trim()),
+            hasTopics: !!(doc.analysis?.topics?.trim()),
+            hasMindmap: !!(doc.analysis?.mindmap?.trim()),
+        }));
+        res.json({ documents: documentsList });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error fetching admin documents.' });
+    }
 });
 
 // @route   DELETE /api/admin/documents/:serverFilename
@@ -433,5 +455,52 @@ router.get(
     }
   }
 );
+
+// --- User & Chat Management Routes ---
+
+// @route   GET /api/admin/users-with-chats
+// @desc    Get all users and their chat session summaries
+router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, res) => {
+    try {
+        const allHistories = await ChatHistory.find({})
+            .populate('userId', 'email profile.name')
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        const usersMap = new Map();
+
+        for (const session of allHistories) {
+            if (!session.userId) continue;
+
+            const userId = session.userId._id.toString();
+
+            if (!usersMap.has(userId)) {
+                usersMap.set(userId, {
+                    user: {
+                        _id: userId,
+                        email: session.userId.email,
+                        name: session.userId.profile?.name || 'N/A'
+                    },
+                    sessions: []
+                });
+            }
+
+            const userEntry = usersMap.get(userId);
+            userEntry.sessions.push({
+                sessionId: session.sessionId,
+                updatedAt: session.updatedAt,
+                summary: session.summary || 'No summary available.',
+                messageCount: session.messages?.length || 0
+            });
+        }
+
+        res.json(Array.from(usersMap.values()));
+
+    } catch (error) {
+        console.error('Error fetching users with chat summaries:', error);
+        res.status(500).json({ message: 'Server error while fetching user chat data.' });
+    }
+});
+
 
 module.exports = router;

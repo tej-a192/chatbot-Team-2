@@ -228,11 +228,7 @@
 }
 
 @layer components {
-  /* ... your existing btn, input-field, form-checkbox, card styles ... */
-  /* The li:has(> input[type="checkbox"]) from your paste was misplaced, it should be within .prose */
-
-  /* I will keep your existing .form-checkbox rules here as they might be used by other non-prose forms */
-  .btn {
+    .btn {
     @apply font-semibold py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-opacity-75 transition-all duration-150 ease-in-out flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed;
   }
 
@@ -287,17 +283,41 @@
     @apply px-4 py-3 text-sm font-semibold border-b;
     @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
   }
-
-  .panel-resize-handle {
-    @apply relative bg-transparent;
-  }
-
-  .panel-resize-handle::after {
-    content: '';
-    @apply absolute inset-0 transition-colors duration-200;
-  }
-
-  .panel-resize-handle[data-active='true']::after {
-    @apply bg-primary/50;
-  }
 }
+  /* --- ADDED THIS SECTION --- */
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .shimmer-text {
+    /* Set the gradient that will shimmer through the text */
+    background: linear-gradient(
+      90deg,
+      theme('colors.transparent') 25%,
+      theme('colors.gray.400 / 0.5') 50%,
+      theme('colors.transparent') 75%
+    );
+    background-size: 200% 100%;
+    
+    animation: shimmer 1.5s linear infinite;
+
+    -webkit-background-clip: text;
+    background-clip: text;
+    
+    color: transparent;
+  }
+
+  html.dark .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      theme('colors.transparent') 25%,
+      theme('colors.gray.500 / 0.6') 50%,
+      theme('colors.transparent') 75%
+    );
+    background-size: 200% 100%;
+  }
