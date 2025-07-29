@@ -2,8 +2,23 @@
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+const User = require('../models/User'); // Import User model
+const { decrypt } = require('../utils/crypto'); // Import decrypt function
 
 // This entire router will be protected by the main authMiddleware in server.js
+async function getApiKeyForUser(userId) {
+    const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider');
+    if (!user) {
+        throw new Error("User not found.");
+    }
+    if (user.preferredLlmProvider === 'gemini') {
+        if (!user.encryptedApiKey) {
+            throw new Error("User has selected Gemini but has no API key configured.");
+        }
+        return decrypt(user.encryptedApiKey);
+    }
+    return null; 
+}
 
 // @route   POST /api/tools/execute
 // @desc    Execute code by proxying to the Python service
@@ -64,11 +79,12 @@ router.post("/analyze-code", async (req, res) => {
 
   const analysisUrl = `${pythonServiceUrl}/analyze_code`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       analysisUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -90,11 +106,12 @@ router.post("/generate-test-cases", async (req, res) => {
 
   const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       generationUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -118,9 +135,10 @@ router.post("/explain-error", async (req, res) => {
 
   const explanationUrl = `${pythonServiceUrl}/explain_error`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       explanationUrl,
-      { language, code, errorMessage },
+      { language, code, errorMessage, apiKey }, // Pass apiKey
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
