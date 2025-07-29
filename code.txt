@@ -4,17 +4,6 @@
 
 ```
 
-`frontend/.env`
-
-```
-#REACT_APP_API_BASE_URL=http://localhost:5001/api
-# OR for Vite:
-VITE_API_BASE_URL=http://localhost:5001/api
-VITE_ADMIN_USERNAME=admin@admin.com
-VITE_ADMIN_PASSWORD=admin123
-
-```
-
 `frontend/code.txt`
 
 ```
@@ -7461,14 +7450,14 @@ import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
-import AdminInsights from './AdminInsights.jsx'; // <<< NEW IMPORT
+import AdminInsights from './AdminInsights.jsx';
 import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-// Helper functions (same as before)
+// Helper functions
 const localParseAnalysisOutput = (rawOutput) => { 
     if (!rawOutput || typeof rawOutput !== 'string') return { content: '' };
     const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
@@ -7485,7 +7474,7 @@ const createMarkup = (markdownText) => {
     return { __html: cleanHtml };
 };
 
-// AdminDocumentUpload Component (no changes)
+// AdminDocumentUpload Component
 function AdminDocumentUpload({ onUploadSuccess }) {
     const [selectedFile, setSelectedFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
@@ -7527,17 +7516,12 @@ function AdminDashboardPage() {
     const { setIsAdminSessionActive } = useAppState();
     const navigate = useNavigate();
 
-    // Data states
     const [documents, setDocuments] = useState([]);
     const [keyRequests, setKeyRequests] = useState([]);
     const [usersWithChats, setUsersWithChats] = useState([]);
     const [dashboardStats, setDashboardStats] = useState({});
-
-    // Loading states
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [loadingError, setLoadingError] = useState('');
-
-    // Modal states
     const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
     const [currentDocForModal, setCurrentDocForModal] = useState(null);
     const [analysisContent, setAnalysisContent] = useState(null);
@@ -7566,13 +7550,13 @@ function AdminDashboardPage() {
                 adminApi.getAdminDocuments(authHeaders),
                 adminApi.getApiKeyRequests(authHeaders),
                 adminApi.getUsersAndChats(authHeaders),
-                adminApi.getDashboardStats(authHeaders) // <<< NEW API CALL
+                adminApi.getDashboardStats(authHeaders)
             ]);
 
             setDocuments(Array.isArray(docsResponse.documents) ? docsResponse.documents : []);
             setKeyRequests(Array.isArray(requestsResponse) ? requestsResponse : []);
             setUsersWithChats(Array.isArray(usersResponse) ? usersResponse : []);
-            setDashboardStats(statsResponse || {}); // <<< SET STATS
+            setDashboardStats(statsResponse || {});
 
             if (isRefresh) toast.success("Admin data refreshed.", { id: toastId });
         } catch (err) {
@@ -7594,7 +7578,7 @@ function AdminDashboardPage() {
             const authHeaders = adminApi.getFixedAdminAuthHeaders();
             await adminApi.deleteAdminDocument(serverFilename, authHeaders);
             toast.success(`Document "${originalName}" deleted.`, { id: toastId });
-            fetchAdminData(true); // Refresh all data after delete
+            fetchAdminData(true);
             if (isAnalysisModalOpen && currentDocForModal?.serverFilename === serverFilename) {
                 setIsAnalysisModalOpen(false);
             }
@@ -7603,7 +7587,7 @@ function AdminDashboardPage() {
         }
     };
     
-    const handleViewAnalysis = async (doc) => { /* ...no changes... */ 
+    const handleViewAnalysis = async (doc) => {
         setCurrentDocForModal(doc);
         setAnalysisContent(null);
         setIsAnalysisModalOpen(true);
@@ -7620,7 +7604,7 @@ function AdminDashboardPage() {
         }
     };
     
-    const renderAnalysisModalContent = () => { /* ...no changes... */ 
+    const renderAnalysisModalContent = () => {
         if (isLoadingAnalysis) {
             return (
                 <div className="flex justify-center items-center h-48">
@@ -7660,7 +7644,6 @@ function AdminDashboardPage() {
             <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* --- Column 1: Content Management --- */}
                 <div className="space-y-6">
                     <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
 
@@ -7699,7 +7682,6 @@ function AdminDashboardPage() {
                     </div>
                 </div>
 
-                {/* --- Column 2: Insights & Enhancement Tools --- */}
                 <div className="space-y-6">
                     <div className="card-base p-4">
                         <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
@@ -7985,9 +7967,6 @@ function UserChatManager({ usersWithChats }) {
             ) : (
                 <div className="space-y-3">
                     {filteredUsers.map(({ user, sessions }) => {
-                        // Don't filter here anymore, we want to show all sessions
-                        // const sessionsWithSummary = sessions.filter(s => s.summary && s.summary.trim() !== '' && s.summary !== 'No summary available.');
-                        
                         return (
                             <details key={user._id} className="group bg-surface-light dark:bg-gray-800/50 border border-border-light dark:border-border-dark rounded-lg overflow-hidden transition-all duration-200 open:shadow-lg open:ring-1 open:ring-primary/50">
                                 <summary className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
@@ -8005,8 +7984,6 @@ function UserChatManager({ usersWithChats }) {
                                 </summary>
                                 <div className="border-t border-border-light dark:border-border-dark p-3 space-y-2 bg-white dark:bg-gray-800">
                                     {sessions.length > 0 ? sessions.map(session => {
-                                        // --- THIS IS THE FIX ---
-                                        // Check if the summary is an error message or empty
                                         const hasValidSummary = session.summary && !session.summary.startsWith('Summary generation failed:');
                                         const isErrorSummary = session.summary && session.summary.startsWith('Summary generation failed:');
 
@@ -10259,13 +10236,16 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     <details className="group/details text-xs" open>
-                        <summary className="flex items-center gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                            <LinkIcon size={14} /> References
+                     <details className="group/details text-xs">
+                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
+                            <span className="flex items-center gap-1">
+                                <LinkIcon size={14} /> References
+                            </span>
+                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
                         </summary>
                         <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
                             {references.map((ref, index) => (
-                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source || '')}`}>
+                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
                                     <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
                                 </li>
                             ))}
@@ -12675,6 +12655,7 @@ const CodeExecutorPage = () => {
     const [results, setResults] = useState([]);
     const [compilationError, setCompilationError] = useState(null);
     const [isExecuting, setIsExecuting] = useState(false);
+    const [executionId, setExecutionId] = useState(0); // <<< FIX: Add execution ID state
 
     const handleLanguageChange = (newLanguage) => {
         setLanguage(newLanguage);
@@ -12682,6 +12663,7 @@ const CodeExecutorPage = () => {
     };
 
     const handleExecute = async () => {
+        setExecutionId(prevId => prevId + 1); // <<< FIX: Increment ID to force re-render
         setIsExecuting(true);
         setResults([]);
         setCompilationError(null);
@@ -12738,6 +12720,7 @@ const CodeExecutorPage = () => {
                             <PanelResizeHandle className="h-2 panel-resize-handle" />
                             <Panel defaultSize={40} minSize={20}>
                                 <OutputDisplay
+                                    key={executionId} // <<< FIX: Pass the key here
                                     results={results}
                                     compilationError={compilationError}
                                     code={code}
@@ -16931,7 +16914,7 @@ import subprocess
 import tempfile
 import shutil
 import json
-
+import re
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
@@ -16957,6 +16940,11 @@ try:
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
+    from prompts import (
+        CODE_ANALYSIS_PROMPT_TEMPLATE,
+        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
+        EXPLAIN_ERROR_PROMPT_TEMPLATE
+    )
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -16967,6 +16955,29 @@ app = Flask(__name__)
 GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "script.py",
+        "compile_cmd": None,
+        "run_cmd": ["python", "script.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "program.c",
+        "compile_cmd": ["gcc", "program.c", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    },
+    "cpp": {
+        "filename": "program.cpp",
+        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    }
+}
 
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
@@ -17029,6 +17040,7 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
     data = request.get_json()
@@ -17055,46 +17067,28 @@ def execute_code():
         with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
-        # --- Compilation Step ---
         if lang_config["compile_cmd"]:
             compile_process = subprocess.run(
-                lang_config["compile_cmd"],
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=10, # 10-second timeout for compilation
-                encoding='utf-8'
+                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                text=True, timeout=10, encoding='utf-8'
             )
             if compile_process.returncode != 0:
                 error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
                 logger.warning(f"Compilation failed for {language}. Error: {error_output}")
                 return jsonify({"compilationError": error_output}), 200
 
-        # --- Execution Step ---
         for i, case in enumerate(test_cases):
             case_input = case.get('input', '')
             expected_output = str(case.get('expectedOutput', '')).strip()
             
-            case_result = {
-                "input": case_input,
-                "expected": expected_output,
-                "output": "",
-                "error": None,
-                "status": "fail"
-            }
+            case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
 
             try:
                 run_process = subprocess.run(
-                    lang_config["run_cmd"],
-                    cwd=temp_dir,
-                    input=case_input,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    encoding='utf-8'
+                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
+                    capture_output=True, text=True, timeout=5, encoding='utf-8'
                 )
-
-                stdout = run_process.stdout.strip()
+                stdout = run_process.stdout.strip().replace('\r\n', '\n')
                 stderr = run_process.stderr.strip()
                 case_result["output"] = stdout
 
@@ -17116,16 +17110,69 @@ def execute_code():
             except Exception as exec_err:
                 case_result["status"] = "error"
                 case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
-
             results.append(case_result)
-
     finally:
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
 
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+        
+    try:
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis = llm_wrapper(prompt, api_key)
+        return jsonify({"analysis": analysis}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
 
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+
+    try:
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for test cases.")
+        
+        test_cases = json.loads(json_match.group(0))
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+@app.route('/explain_error', methods=['POST'])
+def explain_error_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
+    
+    if not all([code, language, error_message, api_key]):
+        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+        
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation = llm_wrapper(prompt, api_key)
+        return jsonify({"explanation": explanation}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
     current_app.logger.info("--- /query Request (RAG Search Only) ---")
@@ -17146,11 +17193,10 @@ def search_qdrant_documents():
         if document_context_name:
             current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
             ))
         
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
         retrieved_docs, snippet, docs_map = vector_service.search_documents(
@@ -19324,7 +19370,6 @@ router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (r
 
 
 module.exports = router;
-
 ```
 
 `server/routes/analysis.js`
@@ -20928,8 +20973,23 @@ module.exports = router;
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+const User = require('../models/User'); // Import User model
+const { decrypt } = require('../utils/crypto'); // Import decrypt function
 
 // This entire router will be protected by the main authMiddleware in server.js
+async function getApiKeyForUser(userId) {
+    const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider');
+    if (!user) {
+        throw new Error("User not found.");
+    }
+    if (user.preferredLlmProvider === 'gemini') {
+        if (!user.encryptedApiKey) {
+            throw new Error("User has selected Gemini but has no API key configured.");
+        }
+        return decrypt(user.encryptedApiKey);
+    }
+    return null; 
+}
 
 // @route   POST /api/tools/execute
 // @desc    Execute code by proxying to the Python service
@@ -20990,11 +21050,12 @@ router.post("/analyze-code", async (req, res) => {
 
   const analysisUrl = `${pythonServiceUrl}/analyze_code`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       analysisUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -21016,11 +21077,12 @@ router.post("/generate-test-cases", async (req, res) => {
 
   const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       generationUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -21044,9 +21106,10 @@ router.post("/explain-error", async (req, res) => {
 
   const explanationUrl = `${pythonServiceUrl}/explain_error`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       explanationUrl,
-      { language, code, errorMessage },
+      { language, code, errorMessage, apiKey }, // Pass apiKey
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
@@ -21057,7 +21120,6 @@ router.post("/explain-error", async (req, res) => {
 });
 
 module.exports = router;
-
 ```
 
 `server/routes/upload.js`

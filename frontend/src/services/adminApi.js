@@ -1,74 +1,76 @@
 // frontend/src/services/adminApi.js
 import axios from 'axios';
 
+// --- CONFIGURATION ---
 const ADMIN_API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/admin`;
-
-const ADMIN_USERNAME_FRONTEND = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
+const ADMIN_USERNAME_FRONTEND = import.meta.env.VITE_ADMIN_USERNAME || 'admin@admin.com';
 const ADMIN_PASSWORD_FRONTEND = import.meta.env.VITE_ADMIN_PASSWORD || 'admin123';
 
+// --- DEDICATED AXIOS INSTANCE FOR ADMIN CALLS ---
+// This creates a separate client specifically for admin routes, preventing any conflicts
+// with the main app's interceptors or default settings.
 const adminApiClient = axios.create({
     baseURL: ADMIN_API_BASE_URL,
 });
 
+// --- HELPER FUNCTIONS ---
+
 export const getFixedAdminAuthHeaders = () => {
     if (!ADMIN_USERNAME_FRONTEND || !ADMIN_PASSWORD_FRONTEND) {
-        console.error("Admin credentials not found in VITE_ADMIN_USERNAME or VITE_ADMIN_PASSWORD .env variables for frontend.");
+        console.error("Admin credentials not found in .env variables (VITE_ADMIN_USERNAME, VITE_ADMIN_PASSWORD).");
         return {};
     }
     const basicAuthToken = btoa(`${ADMIN_USERNAME_FRONTEND}:${ADMIN_PASSWORD_FRONTEND}`);
     return { 'Authorization': `Basic ${basicAuthToken}` };
 };
 
-const makeAdminApiRequest = async (method, endpoint, data = null, authHeaders = {}) => {
-    if (!authHeaders.Authorization) {
-        const errorMsg = "Admin authentication headers are missing. Cannot make admin API request.";
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-    }
+// --- THIS IS THE REFINED AND SIMPLIFIED REQUEST HANDLER ---
+// It now uses the dedicated `adminApiClient` instance.
+const makeAdminApiRequest = async (method, endpoint, data = null, customHeaders = {}) => {
     try {
         const config = {
             method,
-            url: endpoint,
+            url: endpoint, // The URL is relative to the `baseURL` of `adminApiClient`
             headers: {
-                ...authHeaders,
-                'Content-Type': data instanceof FormData ? 'multipart/form-data' : 'application/json',
+                ...getFixedAdminAuthHeaders(), // Always include fresh auth headers
+                ...customHeaders,
             },
         };
         if (data) {
             config.data = data;
         }
+        if (data instanceof FormData) {
+            config.headers['Content-Type'] = 'multipart/form-data';
+        }
+
         const response = await adminApiClient(config);
         return response.data;
     } catch (error) {
         let errorMessage = 'Admin API request failed.';
         if (error.response) {
-            errorMessage = error.response.data?.message || error.response.statusText || `Server error: ${error.response.status}`;
+            errorMessage = error.response.data?.message || `Server error: ${error.response.status}`;
             console.error(`Admin API Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}): Status ${error.response.status}`, error.response.data);
         } else if (error.request) {
             errorMessage = 'No response from admin API server. Check network or server status.';
-            console.error(`Admin API Network Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}):`, error.request);
         } else {
             errorMessage = error.message || 'Error setting up admin API request.';
-            console.error(`Admin API Setup Error (${method.toUpperCase()} ${ADMIN_API_BASE_URL}${endpoint}):`, error.message);
         }
         throw new Error(errorMessage);
     }
 };
 
-// --- NEW FUNCTION for Dashboard Stats ---
-export const getDashboardStats = (adminAuthHeaders) => makeAdminApiRequest('get', '/dashboard-stats', null, adminAuthHeaders);
+// --- EXPORTED API FUNCTIONS (Now using the reliable handler) ---
 
-// Document-related admin functions
-export const uploadAdminDocument = (formData, adminAuthHeaders) => makeAdminApiRequest('post', '/documents/upload', formData, adminAuthHeaders);
-export const getAdminDocuments = (adminAuthHeaders) => makeAdminApiRequest('get', '/documents', null, adminAuthHeaders);
-export const deleteAdminDocument = (serverFilename, adminAuthHeaders) => makeAdminApiRequest('delete', `/documents/${serverFilename}`, null, adminAuthHeaders);
-export const getAdminDocumentAnalysis = (serverFilename, adminAuthHeaders) => makeAdminApiRequest('get', `/documents/${serverFilename}/analysis`, null, adminAuthHeaders);
-export const getAdminDocumentAnalysisByOriginalName = (originalName, adminAuthHeaders) => makeAdminApiRequest('get', `/documents/by-original-name/${encodeURIComponent(originalName)}/analysis`, null, adminAuthHeaders);
+export const getDashboardStats = () => makeAdminApiRequest('get', '/dashboard-stats');
 
-// API Key request functions
-export const getApiKeyRequests = (adminAuthHeaders) => makeAdminApiRequest('get', '/key-requests', null, adminAuthHeaders);
-export const approveApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/approve', { userId }, adminAuthHeaders);
-export const rejectApiKeyRequest = (userId, adminAuthHeaders) => makeAdminApiRequest('post', '/key-requests/reject', { userId }, adminAuthHeaders);
+export const uploadAdminDocument = (formData) => makeAdminApiRequest('post', '/documents/upload', formData);
+export const getAdminDocuments = () => makeAdminApiRequest('get', '/documents');
+export const deleteAdminDocument = (serverFilename) => makeAdminApiRequest('delete', `/documents/${serverFilename}`);
+export const getAdminDocumentAnalysis = (serverFilename) => makeAdminApiRequest('get', `/documents/${serverFilename}/analysis`);
+export const getAdminDocumentAnalysisByOriginalName = (originalName) => makeAdminApiRequest('get', `/documents/by-original-name/${encodeURIComponent(originalName)}/analysis`);
 
-// User and Chat Management
-export const getUsersAndChats = (adminAuthHeaders) => makeAdminApiRequest('get', '/users-with-chats', null, adminAuthHeaders);
+export const getApiKeyRequests = () => makeAdminApiRequest('get', '/key-requests');
+export const approveApiKeyRequest = (userId) => makeAdminApiRequest('post', '/key-requests/approve', { userId });
+export const rejectApiKeyRequest = (userId) => makeAdminApiRequest('post', '/key-requests/reject', { userId });
+
+export const getUsersAndChats = () => makeAdminApiRequest('get', '/users-with-chats');

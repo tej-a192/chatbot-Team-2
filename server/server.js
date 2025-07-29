@@ -77,6 +77,7 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
+app.use("/api/admin", adminApiRoutes);
 
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
