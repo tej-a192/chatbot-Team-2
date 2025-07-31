@@ -11,7 +11,8 @@ import tempfile
 import shutil
 import json
 import re
-
+import knowledge_engine
+import media_processor
 
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
@@ -39,6 +40,11 @@ try:
     import podcast_generator
     import google.generativeai as genai
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
+    # --- ADDED MISSING IMPORTS ---
+    import academic_search
+    from pydub import AudioSegment
+    import knowledge_graph_generator
+    # --- END ADDED IMPORTS ---
 
 
     if config.GEMINI_API_KEY:
@@ -59,8 +65,12 @@ try:
         if not key_to_use:
             raise ConnectionError("Gemini API Key is not configured for this request.")
         
-        temp_genai = genai.GoogleGenerativeAI(api_key=key_to_use)
-        model_instance = temp_genai.get_generative_model(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+        # --- THIS IS THE FIX for AttributeError ---
+        # The Python SDK uses genai.configure() to set the key, then you create a model.
+        # There is no 'GoogleGenerativeAI' class to instantiate.
+        genai.configure(api_key=key_to_use)
+        model_instance = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+        # --- END OF FIX ---
 
         for attempt in range(3):
             try:
@@ -163,10 +173,19 @@ def execute_code():
             f.write(code)
 
         if lang_config["compile_cmd"]:
-            compile_process = subprocess.run(
-                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
-                text=True, timeout=10, encoding='utf-8'
-            )
+            # --- THIS IS THE FIX for FileNotFoundError ---
+            try:
+                compile_process = subprocess.run(
+                    lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                    text=True, timeout=10, encoding='utf-8', check=False
+                )
+            except FileNotFoundError:
+                compiler_name = lang_config["compile_cmd"][0]
+                error_msg = f"Compiler Error: The '{compiler_name}' command was not found. Please ensure the required compiler for '{language}' is installed and that its 'bin' directory is in your system's PATH environment variable."
+                logger.error(error_msg)
+                return jsonify({"compilationError": error_msg}), 200
+            # --- END OF FIX ---
+                
             if compile_process.returncode != 0:
                 error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
                 logger.warning(f"Compilation failed for {language}. Error: {error_output}")
@@ -511,5 +530,74 @@ def delete_kg_route(user_id, document_name):
     except Exception as e: return create_error_response(f"KG deletion failed: {str(e)}", 500)
 
 if __name__ == '__main__':
-    logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
+    @app.route('/process_media_file', methods=['POST'])
+    def process_media_file_route():
+        """Handles direct file uploads of audio, video, or images for transcription/OCR."""
+        current_app.logger.info("--- /process_media_file Request ---")
+        data = request.get_json()
+        if not data:
+            return create_error_response("Request must be JSON", 400)
+
+        file_path = data.get('file_path')
+        media_type = data.get('media_type')  # Expected: 'audio', 'video', or 'image'
+
+        if not file_path or not media_type:
+            return create_error_response("Missing 'file_path' or 'media_type'", 400)
+        if not os.path.exists(file_path):
+            return create_error_response(f"File not found at path: {file_path}", 404)
+
+        try:
+            text_content = None
+            if media_type == 'audio':
+                text_content = media_processor.process_uploaded_audio(file_path)
+            elif media_type == 'video':
+                text_content = media_processor.process_uploaded_video(file_path)
+            elif media_type == 'image':
+                text_content = media_processor.process_uploaded_image(file_path)
+            else:
+                return create_error_response(f"Unsupported media_type: {media_type}", 400)
+            
+            if not text_content or not text_content.strip():
+                return create_error_response(f"Failed to extract meaningful text from the {media_type} file.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {media_type} file.",
+                "text_content": text_content,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_media_file for type '{media_type}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process {media_type} file: {str(e)}", 500)
+
+    @app.route('/process_url', methods=['POST'])
+    def process_url_source_route():
+        """Handles YouTube and generic web URLs."""
+        current_app.logger.info("--- /process_url Request ---")
+        data = request.get_json()
+        if not data: return create_error_response("Request must be JSON", 400)
+        
+        url = data.get('url')
+        user_id = data.get('user_id')
+
+        if not url or not user_id: return create_error_response("Missing 'url' or 'user_id'", 400)
+        
+        try:
+            # Delegate to the knowledge engine
+            extracted_text, final_title, source_type = knowledge_engine.process_url_source(url, user_id)
+            if not extracted_text:
+                return create_error_response(f"Failed to extract meaningful text from the {source_type}.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {source_type}.",
+                "text_content": extracted_text,
+                "title": final_title,
+                "source_type": source_type,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_url for URL '{url}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process URL: {str(e)}", 500)
+
+    logger.info(f"--- Starting RAG & Knowledge API Service on port {config.API_PORT} ---")
+    # Using threaded=False for stability with external processes like ffmpeg/tesseract
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=False)
