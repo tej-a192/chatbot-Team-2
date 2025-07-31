@@ -17,40 +17,32 @@ You are an expert software engineer and code reviewer. Your task is to provide a
 {language}
 ---
 **CODE TO ANALYZE:**
-```{language}
-{code}```
----
-
+{code}
 **ANALYSIS REPORT:**
 """
 
 TEST_CASE_GENERATION_PROMPT_TEMPLATE = """
 You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a comprehensive set of test cases for the given code.
-
-**Instructions:**
-1.  Analyze the code to understand its logic, inputs, and outputs.
-2.  Create a diverse set of test cases that cover:
-    -   **Standard Cases:** Common, expected inputs.
-    -   **Edge Cases:** Boundary values, empty inputs, zeros, negative numbers, etc.
-    -   **Error Cases:** Invalid inputs that should cause the program to handle an error gracefully (if applicable).
-3.  Your entire output **MUST** be a single, valid JSON array of objects.
-4.  Each object in the array must have two keys: `input` (a string) and `expectedOutput` (a string).
-5.  For inputs that require multiple lines, use the newline character `\\n`.
-
-**Example Output Format:**
+Instructions:
+Analyze the code to understand its logic, inputs, and outputs.
+Create a diverse set of test cases that cover:
+Standard Cases: Common, expected inputs.
+Edge Cases: Boundary values, empty inputs, zeros, negative numbers, etc.
+Error Cases: Invalid inputs that should cause the program to handle an error gracefully (if applicable).
+Your entire output MUST be a single, valid JSON array of objects.
+Each object in the array must have two keys: input (a string) and expectedOutput (a string).
+For inputs that require multiple lines, use the newline character \\n.
+Example Output Format:
 [
-  {{ "input": "5\\n10", "expectedOutput": "15" }},
-  {{ "input": "0\\n0", "expectedOutput": "0" }},
-  {{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{ "input": "5\n10", "expectedOutput": "15" }},
+{{ "input": "0\n0", "expectedOutput": "0" }},
+{{ "input": "-5\n5", "expectedOutput": "0" }}
 ]
-
----
-**LANGUAGE:**
+LANGUAGE:
 {language}
----
-**CODE TO ANALYZE:**
-```{language}
+CODE TO ANALYZE:
 {code}
+FINAL JSON TEST CASE ARRAY:
 """
 
 
@@ -67,14 +59,10 @@ Use clear Markdown headings for each section (e.g., ## What Went Wrong, ## How t
 Use fenced code blocks for all code snippets.
 LANGUAGE:
 {language}
+
 CODE WITH THE ERROR:
-Generated {language}
 {code}
-Use code with caution.
-{language}
 ERROR MESSAGE:
-Generated code
 {error_message}
-Use code with caution.
 ERROR EXPLANATION:
 """

@@ -2,6 +2,7 @@
 import os
 import sys
 import traceback
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 import logging
 import atexit
 import uuid
@@ -11,10 +12,14 @@ import shutil
 import json
 import re
 
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
-from pydub import AudioSegment
-from ddgs import DDGS
+
+from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,14 +37,46 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
-    import academic_search
-    import knowledge_graph_generator
     import google.generativeai as genai
-    from prompts import (
-        CODE_ANALYSIS_PROMPT_TEMPLATE,
-        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
-        EXPLAIN_ERROR_PROMPT_TEMPLATE
-    )
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE
+
+
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+    else:
+        LLM_MODEL = None
+        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
+
+    def llm_wrapper(prompt, api_key=None):
+        key_to_use = api_key or config.GEMINI_API_KEY
+        if not key_to_use:
+            raise ConnectionError("Gemini API Key is not configured for this request.")
+        
+        temp_genai = genai.GoogleGenerativeAI(api_key=key_to_use)
+        model_instance = temp_genai.get_generative_model(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+
+        for attempt in range(3):
+            try:
+                response = model_instance.generate_content(prompt)
+                if response.parts:
+                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+                elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+                else:
+                    logger.warning("LLM returned empty response without explicit block reason.")
+                    return ""
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                if attempt == 2: raise
+        return ""
+
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -51,67 +88,7 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-LANGUAGE_CONFIG = {
-    "python": {
-        "filename": "script.py",
-        "compile_cmd": None,
-        "run_cmd": ["python", "script.py"]
-    },
-    "java": {
-        "filename": "Main.java",
-        "compile_cmd": ["javac", "Main.java"],
-        "run_cmd": ["java", "Main"]
-    },
-    "c": {
-        "filename": "program.c",
-        "compile_cmd": ["gcc", "program.c", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    },
-    "cpp": {
-        "filename": "program.cpp",
-        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    }
-}
-
-# --- Dynamic LLM Initialization & Wrapper ---
-def get_llm_model(api_key: str):
-    """Dynamically creates a GenerativeModel instance with the provided API key."""
-    if not api_key:
-        raise ValueError("An API key is required to initialize the LLM for this request.")
-    
-    genai.configure(api_key=api_key)
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
-    return genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
-
-def llm_wrapper(prompt: str, api_key: str):
-    """Wrapper that takes an api_key to initialize the model for each call."""
-    if not api_key:
-        raise ConnectionError("Gemini API Key was not provided for this operation.")
-    
-    llm_model = get_llm_model(api_key)
-    
-    for attempt in range(3):
-        try:
-            response = llm_model.generate_content(prompt)
-            if response.parts:
-                return "".join(part.text for part in response.parts if hasattr(part, 'text'))
-            elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                 raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
-            else:
-                logger.warning("LLM returned empty response without explicit block reason.")
-                return ""
-        except Exception as e:
-            logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
-            if attempt == 2: raise
-    return ""
-
-# --- Initialize other services ---
+# Initialize services
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -135,6 +112,29 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"] if os.name != 'nt' else ["main.exe"]
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"] if os.name != 'nt' else ["main.exe"]
+    }
+}
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
