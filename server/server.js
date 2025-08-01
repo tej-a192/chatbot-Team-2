@@ -33,7 +33,7 @@ const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
-
+const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
 const mongoUri = process.env.MONGO_URI;
@@ -78,7 +78,7 @@ app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
-
+app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);

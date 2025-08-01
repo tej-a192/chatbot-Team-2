@@ -16937,7 +16937,8 @@ import tempfile
 import shutil
 import json
 import re
-
+import knowledge_engine
+import media_processor
 
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
@@ -17455,8 +17456,78 @@ def delete_kg_route(user_id, document_name):
     except Exception as e: return create_error_response(f"KG deletion failed: {str(e)}", 500)
 
 if __name__ == '__main__':
-    logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
+    @app.route('/process_media_file', methods=['POST'])
+    def process_media_file_route():
+        """Handles direct file uploads of audio, video, or images for transcription/OCR."""
+        current_app.logger.info("--- /process_media_file Request ---")
+        data = request.get_json()
+        if not data:
+            return create_error_response("Request must be JSON", 400)
+
+        file_path = data.get('file_path')
+        media_type = data.get('media_type')  # Expected: 'audio', 'video', or 'image'
+
+        if not file_path or not media_type:
+            return create_error_response("Missing 'file_path' or 'media_type'", 400)
+        if not os.path.exists(file_path):
+            return create_error_response(f"File not found at path: {file_path}", 404)
+
+        try:
+            text_content = None
+            if media_type == 'audio':
+                text_content = media_processor.process_uploaded_audio(file_path)
+            elif media_type == 'video':
+                text_content = media_processor.process_uploaded_video(file_path)
+            elif media_type == 'image':
+                text_content = media_processor.process_uploaded_image(file_path)
+            else:
+                return create_error_response(f"Unsupported media_type: {media_type}", 400)
+            
+            if not text_content or not text_content.strip():
+                return create_error_response(f"Failed to extract meaningful text from the {media_type} file.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {media_type} file.",
+                "text_content": text_content,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_media_file for type '{media_type}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process {media_type} file: {str(e)}", 500)
+
+    @app.route('/process_url', methods=['POST'])
+    def process_url_source_route():
+        """Handles YouTube and generic web URLs."""
+        current_app.logger.info("--- /process_url Request ---")
+        data = request.get_json()
+        if not data: return create_error_response("Request must be JSON", 400)
+        
+        url = data.get('url')
+        user_id = data.get('user_id')
+
+        if not url or not user_id: return create_error_response("Missing 'url' or 'user_id'", 400)
+        
+        try:
+            # Delegate to the knowledge engine
+            extracted_text, final_title, source_type = knowledge_engine.process_url_source(url, user_id)
+            if not extracted_text:
+                return create_error_response(f"Failed to extract meaningful text from the {source_type}.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {source_type}.",
+                "text_content": extracted_text,
+                "title": final_title,
+                "source_type": source_type,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_url for URL '{url}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process URL: {str(e)}", 500)
+
+    logger.info(f"--- Starting RAG & Knowledge API Service on port {config.API_PORT} ---")
+    # Using threaded=False for stability with external processes like ffmpeg/tesseract
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=False)
+
 ```
 
 `server/rag_service/config.py`
@@ -18027,6 +18098,151 @@ def chunk_text(text, file_name, user_id):
 
 ```
 
+`server/rag_service/knowledge_engine.py`
+
+```python
+# server/rag_service/knowledge_engine.py
+import os
+import re
+import tempfile
+import shutil
+import logging
+from typing import Tuple, Optional
+
+# --- Tool Imports ---
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE = False
+
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+# --- YouTube Processing ---
+def _extract_youtube_text(url: str) -> Tuple[Optional[str], Optional[str]]:
+    if not YTDLP_AVAILABLE or not WHISPER_AVAILABLE:
+        raise ImportError("YouTube processing requires 'yt-dlp' and 'openai-whisper'.")
+    
+    logger.info(f"Processing YouTube URL: {url}")
+    temp_dir = tempfile.mkdtemp()
+    try:
+        ydl_opts = {
+            'format': 'm4a/bestaudio/best',
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'noplaylist': True,
+            'quiet': True,
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'wav'}],
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            video_title = info_dict.get('title', 'YouTube Video')
+            # yt-dlp might change the extension, find the resulting file
+            base_filename = ydl.prepare_filename(info_dict)
+            audio_file_path = os.path.splitext(base_filename)[0] + '.wav'
+            
+            if not os.path.exists(audio_file_path):
+                 # Fallback if ffmpeg didn't produce wav
+                 audio_file_path = base_filename
+
+        logger.info(f"Transcribing audio for '{video_title}' with Whisper...")
+        model = whisper.load_model("base")
+        result = model.transcribe(audio_file_path, fp16=False)
+        transcribed_text = result['text']
+        
+        logger.info(f"Transcription complete for '{video_title}'. Text length: {len(transcribed_text)}")
+        return transcribed_text, video_title
+    except Exception as e:
+        logger.error(f"yt-dlp/whisper error processing URL {url}: {e}")
+        raise ConnectionError(f"Failed to process YouTube video: {e}")
+    finally:
+        shutil.rmtree(temp_dir)
+
+# --- Webpage Content Processing ---
+def _extract_webpage_text(url: str) -> Tuple[Optional[str], Optional[str]]:
+    if not PLAYWRIGHT_AVAILABLE or not BS4_AVAILABLE:
+        raise ImportError("Webpage processing requires 'playwright' and 'beautifulsoup4'.")
+
+    logger.info(f"Processing webpage URL: {url}")
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            page_title = page.title() or url
+            html_content = page.content()
+            browser.close()
+
+            logger.info(f"Successfully fetched content for '{page_title}'")
+            
+            soup = BeautifulSoup(html_content, "html.parser")
+            for element in soup(["script", "style", "nav", "footer", "aside", "header", "form"]):
+                element.decompose()
+            
+            body = soup.find('body')
+            if body:
+                text = body.get_text(separator='\n', strip=True)
+                cleaned_text = re.sub(r'\n{3,}', '\n\n', text)
+            else:
+                cleaned_text = ""
+            
+            logger.info(f"Extracted and cleaned text from '{page_title}'. Length: {len(cleaned_text)}")
+            return cleaned_text, page_title
+        except Exception as e:
+            logger.error(f"Playwright/BS4 error processing URL {url}: {e}")
+            raise ConnectionError(f"Failed to scrape webpage: {e}")
+
+# --- Main Orchestrator for URLs ---
+def process_url_source(url: str, user_id: str) -> Tuple[Optional[str], str, str]:
+    """
+    Orchestrates processing for any URL, dispatching to the correct handler.
+    Returns: (extracted_text, final_title, source_type)
+    """
+    logger.info(f"Knowledge Engine: Orchestrating URL processing for '{url}'")
+    
+    raw_text, final_title, source_type = None, url, 'webpage'
+
+    youtube_regex = (
+        r'(https?://)?(www\.)?'
+        '(youtube|youtu|youtube-nocookie)\.(com|be)/'
+        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
+    
+    is_youtube = re.match(youtube_regex, url)
+
+    if is_youtube:
+        source_type = 'youtube'
+        raw_text, final_title = _extract_youtube_text(url)
+    else:
+        source_type = 'webpage'
+        raw_text, final_title = _extract_webpage_text(url)
+
+    if not raw_text:
+        return None, final_title, source_type
+
+    cleaned_text = re.sub(r'\s+', ' ', raw_text).strip()
+    
+    logger.info(f"Successfully processed URL '{url}'. Title: '{final_title}'. Type: '{source_type}'.")
+    return cleaned_text, final_title, source_type
+```
+
 `server/rag_service/knowledge_graph_generator.py`
 
 ```python
@@ -18087,6 +18303,120 @@ def generate_graph_from_text(document_text: str, llm_function) -> Dict[str, Any]
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON from LLM response for KG: {e}")
         raise ValueError("LLM returned invalid JSON format for the knowledge graph.") from e
+```
+
+`server/rag_service/media_processor.py`
+
+```python
+# server/rag_service/media_processor.py
+import os
+import tempfile
+import shutil
+import logging
+from typing import Optional
+
+# --- Tool Imports ---
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+
+# --- THIS IS THE NEW IMPORT ---
+try:
+    import ffmpeg
+    FFMPEG_PYTHON_AVAILABLE = True
+except ImportError:
+    FFMPEG_PYTHON_AVAILABLE = False
+
+try:
+    from PIL import Image
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
+
+import config
+
+logger = logging.getLogger(__name__)
+
+if PYTESSERACT_AVAILABLE and config.TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
+
+def process_uploaded_audio(file_path: str) -> Optional[str]:
+    """Transcribes audio content from a given file path."""
+    if not WHISPER_AVAILABLE:
+        raise ImportError("Audio processing requires 'openai-whisper'.")
+    
+    logger.info(f"Transcribing audio file: {os.path.basename(file_path)}")
+    try:
+        model = whisper.load_model("base")
+        result = model.transcribe(file_path, fp16=False)
+        transcribed_text = result['text']
+        logger.info(f"Transcription complete for audio file. Text length: {len(transcribed_text)}")
+        return transcribed_text
+    except Exception as e:
+        logger.error(f"Whisper error processing audio file {file_path}: {e}")
+        raise IOError(f"Failed to transcribe audio file: {e}")
+
+# --- THIS FUNCTION IS RE-ENGINEERED ---
+def process_uploaded_video(file_path: str) -> Optional[str]:
+    """Extracts audio from a video file and transcribes it using ffmpeg-python."""
+    if not FFMPEG_PYTHON_AVAILABLE:
+        raise ImportError("Video processing requires 'ffmpeg-python'.")
+
+    logger.info(f"Processing video file for audio extraction: {os.path.basename(file_path)}")
+    temp_dir = tempfile.mkdtemp()
+    # Use .wav format for high compatibility with whisper
+    temp_audio_path = os.path.join(temp_dir, "extracted_audio.wav")
+    try:
+        # Use ffmpeg-python to create and run the command
+        # This is equivalent to: ffmpeg -i "input_video.mp4" -vn -acodec pcm_s16le -ar 16000 -ac 1 "output_audio.wav"
+        (
+            ffmpeg
+            .input(file_path)
+            .output(
+                temp_audio_path,
+                acodec='pcm_s16le', # Use WAV codec
+                ar=16000,          # Set audio rate to 16kHz (recommended for whisper)
+                ac=1               # Set to mono audio
+            )
+            .run(cmd=['ffmpeg', '-nostdin'], capture_stdout=True, capture_stderr=True, quiet=True)
+        )
+        
+        logger.info(f"Audio extracted to temporary file. Now transcribing.")
+        return process_uploaded_audio(temp_audio_path)
+    except ffmpeg.Error as e:
+        # This will capture errors from the ffmpeg command itself
+        logger.error(f"FFmpeg error processing video file {file_path}:")
+        # The error output from the command is in stderr
+        logger.error(e.stderr.decode())
+        raise IOError(f"Failed to extract audio from video using FFmpeg.")
+    except Exception as e:
+        logger.error(f"General error processing video file {file_path}: {e}")
+        raise IOError(f"An unexpected error occurred during video processing: {e}")
+    finally:
+        shutil.rmtree(temp_dir)
+# --- END OF RE-ENGINEERED FUNCTION ---
+
+def process_uploaded_image(file_path: str) -> Optional[str]:
+    """Performs OCR on an image file to extract text."""
+    if not PYTESSERACT_AVAILABLE:
+        raise ImportError("Image processing requires 'pytesseract' and 'Pillow'.")
+    
+    logger.info(f"Performing OCR on image file: {os.path.basename(file_path)}")
+    try:
+        img = Image.open(file_path)
+        processed_img = img.convert('L')
+        text = pytesseract.image_to_string(processed_img)
+        logger.info(f"OCR complete for image file. Text length: {len(text)}")
+        return text
+    except pytesseract.TesseractNotFoundError:
+        logger.critical("Tesseract executable not found or not configured correctly in config.py.")
+        raise
+    except Exception as e:
+        logger.error(f"Pytesseract error processing image file {file_path}: {e}")
+        raise IOError(f"Failed to perform OCR on image: {e}")
 ```
 
 `server/rag_service/neo4j_handler.py`
@@ -18390,9 +18720,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\n10", "expectedOutput": "15" }},
-{{ "input": "0\n0", "expectedOutput": "0" }},
-{{ "input": "-5\n5", "expectedOutput": "0" }}
+{{ "input": "5\\n10", "expectedOutput": "15" }},
+{{ "input": "0\\n0", "expectedOutput": "0" }},
+{{ "input": "-5\\n5", "expectedOutput": "0" }}
 ]
 LANGUAGE:
 {language}
@@ -18462,9 +18792,11 @@ python-docx
 reportlab
 google-generativeai
 gTTS
-
-
-
+yt-dlp
+openai-whisper
+beautifulsoup4
+playwright
+moviepy
 ```
 
 `server/rag_service/speech_enhancer.py`
