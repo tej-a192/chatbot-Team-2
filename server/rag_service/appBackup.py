@@ -40,7 +40,6 @@ try:
     import google.generativeai as genai
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
-    from academic_search import search_all_apis as academic_search
 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -125,7 +124,6 @@ def create_error_response(message, status_code=500, details=None):
 
 # === API Endpoints ===
 
-# This config is now cleaner. The platform-specific logic is handled in the route.
 LANGUAGE_CONFIG = {
     "python": {
         "filename": "main.py",
@@ -140,15 +138,14 @@ LANGUAGE_CONFIG = {
     "c": {
         "filename": "main.c",
         "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
-        "run_cmd": ["main"] # Just the base name
+        "run_cmd": ["./main"] if os.name != 'nt' else [".\\main.exe"]
     },
     "cpp": {
         "filename": "main.cpp",
         "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
-        "run_cmd": ["main"] # Just the base name
+        "run_cmd": ["./main"] if os.name != 'nt' else [".\\main.exe"]
     }
 }
-
 
 # --- (START) Code Executor End Points ---
 
@@ -195,23 +192,8 @@ def execute_code():
             case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
 
             try:
-                # --- THIS IS THE FIX ---
-                # Dynamically build the command with an absolute path for compiled languages
-                run_command = lang_config["run_cmd"][:] # Make a copy
-
-                if language in ["c", "cpp"]:
-                    executable_name = run_command[0]
-                    if os.name == 'nt':
-                        executable_name += '.exe'
-                    # Create the full, unambiguous path to the executable
-                    absolute_executable_path = os.path.join(temp_dir, executable_name)
-                    run_command[0] = absolute_executable_path
-                # --- END OF FIX ---
-
                 run_process = subprocess.run(
-                    run_command, # Use the potentially modified command
-                    cwd=temp_dir,
-                    input=case_input,
+                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
                     capture_output=True, text=True, timeout=5, encoding='utf-8'
                 )
                 stdout = run_process.stdout.strip().replace('\r\n', '\n')
@@ -241,8 +223,6 @@ def execute_code():
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
-
-# ... (the rest of the file remains unchanged) ...
 
 @app.route('/analyze_code', methods=['POST'])
 def analyze_code_route():
@@ -310,6 +290,8 @@ def generate_quiz_route():
         return create_error_response("No file part in the request", 400)
     
     file = request.files['file']
+    # --- THIS IS THE FIX ---
+    # Map the descriptive string from the frontend to a number of questions
     quiz_option = request.form.get('quizOption', 'standard')
     api_key = request.form.get('api_key')
     
@@ -320,6 +302,7 @@ def generate_quiz_route():
         'comprehensive': 20
     }
     num_questions = quiz_option_map.get(quiz_option, 10) # Default to 10
+    # --- END OF FIX ---
 
     if file.filename == '':
         return create_error_response("No selected file", 400)
@@ -362,6 +345,8 @@ def generate_quiz_route():
         shutil.rmtree(temp_dir)
 
 # --- (END) Quiz Generator End Points ---
+
+
 
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
@@ -455,7 +440,7 @@ def academic_search_route():
     data = request.get_json()
     if not data or 'query' not in data: return create_error_response("Missing 'query'", 400)
     try:
-        results = academic_search(data['query'], max_results_per_api=data.get('max_results', 3))
+        results = academic_search.search_all_apis(data['query'], max_results_per_api=data.get('max_results', 3))
         return jsonify({"success": True, "results": results}), 200
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
@@ -515,6 +500,28 @@ def export_podcast_route():
     except Exception as e:
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
+
+@app.route('/generate_kg_from_text', methods=['POST'])
+def generate_kg_from_text_route():
+    current_app.logger.info("--- /generate_kg_from_text Request ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    document_text = data.get('document_text')
+    api_key = data.get('api_key')
+    
+    if not document_text or not api_key:
+        return create_error_response("Missing 'document_text' or 'api_key' in request body", 400)
+    
+    try:
+        graph_data = knowledge_graph_generator.generate_graph_from_text(
+            document_text, 
+            lambda p: llm_wrapper(p, api_key)
+        )
+        return jsonify({"success": True, "graph_data": graph_data}), 200
+    except Exception as e:
+        logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
+        return create_error_response(f"KG Generation failed: {str(e)}", 500)
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():
