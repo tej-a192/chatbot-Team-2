@@ -7231,6 +7231,7 @@ import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
 import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+import QuizGeneratorPage from './components/tools/QuizGeneratorPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7416,9 +7417,15 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
+                
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+                    <QuizGeneratorPage /> : <Navigate to="/" />} 
+                />
+
+
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
             </Routes>
@@ -12655,7 +12662,7 @@ const CodeExecutorPage = () => {
     const [results, setResults] = useState([]);
     const [compilationError, setCompilationError] = useState(null);
     const [isExecuting, setIsExecuting] = useState(false);
-    const [executionId, setExecutionId] = useState(0); // <<< FIX: Add execution ID state
+    const [executionId, setExecutionId] = useState(0); // State to force re-render of output
 
     const handleLanguageChange = (newLanguage) => {
         setLanguage(newLanguage);
@@ -12663,7 +12670,7 @@ const CodeExecutorPage = () => {
     };
 
     const handleExecute = async () => {
-        setExecutionId(prevId => prevId + 1); // <<< FIX: Increment ID to force re-render
+        setExecutionId(prevId => prevId + 1); // Increment to reset child state
         setIsExecuting(true);
         setResults([]);
         setCompilationError(null);
@@ -12720,7 +12727,7 @@ const CodeExecutorPage = () => {
                             <PanelResizeHandle className="h-2 panel-resize-handle" />
                             <Panel defaultSize={40} minSize={20}>
                                 <OutputDisplay
-                                    key={executionId} // <<< FIX: Pass the key here
+                                    key={executionId} // Using key to force re-mount and state reset
                                     results={results}
                                     compilationError={compilationError}
                                     code={code}
@@ -12770,26 +12777,45 @@ const createMarkup = (markdownText) => {
 
 
 const OutputDisplay = ({ results, compilationError, code, language }) => {
-    const [explanations, setExplanations] = useState({});
-    const [isLoadingExplanation, setIsLoadingExplanation] = useState(null); // Tracks index
+    const [explanation, setExplanation] = useState(null);
+    const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+    const [explanationFor, setExplanationFor] = useState(null); // 'compilation' or test case index
 
-    const handleExplainError = async (index, errorMessage) => {
-        setIsLoadingExplanation(index);
+    const handleExplainError = async (errorContext, errorMessage) => {
+        setIsLoadingExplanation(true);
+        setExplanation(null);
+        setExplanationFor(errorContext);
         try {
             const response = await api.explainError({ code, language, errorMessage });
-            setExplanations(prev => ({ ...prev, [index]: response.explanation }));
+            setExplanation(response.explanation);
         } catch (err) {
             toast.error(err.response?.data?.message || "Failed to get explanation.");
         } finally {
-            setIsLoadingExplanation(null);
+            setIsLoadingExplanation(false);
         }
     };
 
     if (compilationError) {
         return (
             <div className="p-4 bg-red-900/10 text-red-400 border-t border-red-500/30 h-full flex flex-col">
-                <h3 className="text-lg font-semibold mb-2 flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
+                <div className="flex justify-between items-center mb-2 flex-shrink-0">
+                    <h3 className="text-lg font-semibold flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
+                    {!explanation && (
+                        <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError('compilation', compilationError)} isLoading={isLoadingExplanation && explanationFor === 'compilation'}>
+                            Explain Error
+                        </Button>
+                    )}
+                </div>
                 <pre className="flex-grow bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono overflow-auto custom-scrollbar">{compilationError}</pre>
+                {isLoadingExplanation && explanationFor === 'compilation' && (
+                    <div className="mt-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
+                )}
+                {explanation && explanationFor === 'compilation' && (
+                    <div className="mt-2 p-3 bg-primary/10 rounded-md border border-primary/30 flex-shrink-0">
+                        <h5 className="font-bold text-sm mb-1 text-primary dark:text-primary-light flex items-center gap-1.5"><Sparkles size={14}/> AI Explanation</h5>
+                        <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanation)} />
+                    </div>
+                )}
             </div>
         );
     }
@@ -12837,8 +12863,8 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                                 <div className="md:col-span-2">
                                     <div className="flex justify-between items-center">
                                         <strong className="block mb-1 text-red-500 dark:text-red-400">Error:</strong>
-                                        {!explanations[index] && (
-                                            <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError(index, res.error)} isLoading={isLoadingExplanation === index}>
+                                        {explanationFor !== index && (
+                                            <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError(index, res.error)} isLoading={isLoadingExplanation && explanationFor === index}>
                                                 Explain Error
                                             </Button>
                                         )}
@@ -12846,13 +12872,13 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                                     <pre className="bg-red-900/20 p-2 rounded text-red-400 whitespace-pre-wrap font-mono">{res.error}</pre>
                                 </div>
                             )}
-                            {isLoadingExplanation === index && (
+                            {isLoadingExplanation && explanationFor === index && (
                                 <div className="md:col-span-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
                             )}
-                            {explanations[index] && (
+                            {explanation && explanationFor === index && (
                                 <div className="md:col-span-2 mt-2 p-3 bg-primary/10 rounded-md border border-primary/30">
                                     <h5 className="font-bold text-sm mb-1 text-primary dark:text-primary-light flex items-center gap-1.5"><Sparkles size={14}/> AI Explanation</h5>
-                                    <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanations[index])} />
+                                    <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanation)} />
                                 </div>
                             )}
                         </div>
@@ -12864,6 +12890,348 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
 };
 
 export default OutputDisplay;
+```
+
+`frontend/src/components/tools/QuizGeneratorPage.jsx`
+
+```javascript
+// frontend/src/components/tools/QuizGeneratorPage.jsx
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Home, Loader2, AlertTriangle } from 'lucide-react';
+import QuizSetup from './QuizSetup';
+import QuizInProgress from './QuizInProgress';
+import QuizResults from './QuizResults';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+
+const QuizGeneratorPage = () => {
+    const [quizState, setQuizState] = useState('setup'); // 'setup', 'generating', 'in_progress', 'finished'
+    const [quizData, setQuizData] = useState([]);
+    const [userAnswers, setUserAnswers] = useState([]);
+    const [error, setError] = useState('');
+
+    const handleGenerateQuiz = async (file, numQuestions) => {
+        if (!file) {
+            toast.error("Please select a file to generate the quiz from.");
+            return;
+        }
+        setQuizState('generating');
+        setError('');
+        try {
+            const data = await api.generateQuiz(file, numQuestions);
+            if (!data.quiz || data.quiz.length === 0) {
+                throw new Error("The AI was unable to generate a quiz from this document.");
+            }
+            setQuizData(data.quiz);
+            setUserAnswers(new Array(data.quiz.length).fill(null));
+            setQuizState('in_progress');
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message;
+            setError(errorMessage);
+            setQuizState('setup');
+            toast.error(errorMessage);
+        }
+    };
+
+    const handleQuizSubmit = (finalAnswers) => {
+        setUserAnswers(finalAnswers);
+        setQuizState('finished');
+    };
+
+    const handleRestart = () => {
+        setQuizState('setup');
+        setQuizData([]);
+        setUserAnswers([]);
+        setError('');
+    };
+
+    const renderContent = () => {
+        switch (quizState) {
+            case 'generating':
+                return (
+                    <div className="flex flex-col items-center justify-center text-center p-8">
+                        <Loader2 size={48} className="animate-spin text-primary mb-4" />
+                        <h2 className="text-xl font-semibold">Generating Your Quiz...</h2>
+                        <p className="text-text-muted-light dark:text-text-muted-dark">The AI is analyzing your document. This may take a moment.</p>
+                    </div>
+                );
+            case 'in_progress':
+                return <QuizInProgress quizData={quizData} onSubmit={handleQuizSubmit} />;
+            case 'finished':
+                return <QuizResults quizData={quizData} userAnswers={userAnswers} onRestart={handleRestart} />;
+            case 'setup':
+            default:
+                return <QuizSetup onGenerate={handleGenerateQuiz} />;
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
+                <h1 className="text-xl font-bold">AI Quiz Generator</h1>
+                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
+                    <Home size={16} />
+                    Back to Main App
+                </Link>
+            </header>
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+                <div className="max-w-4xl mx-auto">
+                    {renderContent()}
+                </div>
+            </main>
+        </div>
+    );
+};
+
+export default QuizGeneratorPage;
+```
+
+`frontend/src/components/tools/QuizInProgress.jsx`
+
+```javascript
+// frontend/src/components/tools/QuizInProgress.jsx
+import React, { useState, useEffect } from 'react';
+import Button from '../core/Button';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const QuizInProgress = ({ quizData, onSubmit }) => {
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+    const [answers, setAnswers] = useState(new Array(quizData.length).fill(null));
+
+    const currentQuestion = quizData[currentQuestionIndex];
+    const totalQuestions = quizData.length;
+
+    const handleSelectOption = (option) => {
+        const newAnswers = [...answers];
+        newAnswers[currentQuestionIndex] = option;
+        setAnswers(newAnswers);
+    };
+
+    const goToNext = () => {
+        if (currentQuestionIndex < totalQuestions - 1) {
+            setCurrentQuestionIndex(prev => prev + 1);
+        }
+    };
+
+    const goToPrevious = () => {
+        if (currentQuestionIndex > 0) {
+            setCurrentQuestionIndex(prev => prev - 1);
+        }
+    };
+    
+    const handleSubmit = () => {
+        if (window.confirm("Are you sure you want to submit your answers?")) {
+            onSubmit(answers);
+        }
+    };
+    
+    return (
+        <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-lg shadow-panel border border-border-light dark:border-border-dark">
+            <div className="mb-4">
+                <p className="text-sm font-semibold text-primary">Question {currentQuestionIndex + 1} of {totalQuestions}</p>
+                <h3 className="text-xl font-bold mt-1">{currentQuestion.question}</h3>
+            </div>
+
+            <div className="space-y-3 my-6">
+                {currentQuestion.options.map((option, index) => (
+                    <button
+                        key={index}
+                        onClick={() => handleSelectOption(option)}
+                        className={`w-full text-left p-4 border rounded-lg transition-all duration-150 flex items-center
+                            ${answers[currentQuestionIndex] === option
+                                ? 'bg-primary/20 border-primary ring-2 ring-primary'
+                                : 'bg-gray-50 dark:bg-gray-800 border-border-light dark:border-border-dark hover:bg-primary/10 hover:border-primary/50'
+                            }`}
+                    >
+                        <span className="font-bold mr-3 text-primary">{(index + 10).toString(36).toUpperCase()}</span>
+                        <span>{option}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="flex justify-between items-center mt-6 pt-4 border-t border-border-light dark:border-border-dark">
+                <Button onClick={goToPrevious} disabled={currentQuestionIndex === 0} variant="outline" leftIcon={<ChevronLeft />}>
+                    Previous
+                </Button>
+
+                {currentQuestionIndex === totalQuestions - 1 ? (
+                    <Button onClick={handleSubmit} disabled={answers.some(a => a === null)}>
+                        Submit Answers
+                    </Button>
+                ) : (
+                    <Button onClick={goToNext} disabled={currentQuestionIndex === totalQuestions - 1} rightIcon={<ChevronRight />}>
+                        Next
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default QuizInProgress;
+```
+
+`frontend/src/components/tools/QuizResults.jsx`
+
+```javascript
+// frontend/src/components/tools/QuizResults.jsx
+import React, { useMemo } from 'react';
+import { CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import Button from '../core/Button';
+
+const QuizResults = ({ quizData, userAnswers, onRestart }) => {
+    const score = useMemo(() => {
+        return userAnswers.reduce((acc, answer, index) => {
+            return acc + (answer === quizData[index].correctAnswer ? 1 : 0);
+        }, 0);
+    }, [quizData, userAnswers]);
+
+    const totalQuestions = quizData.length;
+    const percentage = Math.round((score / totalQuestions) * 100);
+
+    return (
+        <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-lg shadow-panel border border-border-light dark:border-border-dark">
+            <h2 className="text-2xl font-bold text-center mb-2">Quiz Results</h2>
+            <div className="text-center p-6 bg-primary/10 rounded-lg mb-6">
+                <p className="text-lg">You Scored</p>
+                <p className="text-6xl font-bold my-2 text-primary">{percentage}%</p>
+                <p className="text-text-muted-light dark:text-text-muted-dark">{score} out of {totalQuestions} correct</p>
+            </div>
+            
+            <h3 className="text-xl font-semibold mb-4">Review Your Answers</h3>
+            <div className="space-y-4">
+                {quizData.map((questionData, index) => {
+                    const userAnswer = userAnswers[index];
+                    const isCorrect = userAnswer === questionData.correctAnswer;
+                    
+                    return (
+                        <div key={index} className={`p-4 border rounded-lg ${isCorrect ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/50 bg-red-500/5'}`}>
+                            <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0 mt-1">
+                                    {isCorrect ? <CheckCircle className="text-green-500" /> : <XCircle className="text-red-500" />}
+                                </div>
+                                <div>
+                                    <p className="font-semibold">{index + 1}. {questionData.question}</p>
+                                    <p className={`text-sm mt-2 ${isCorrect ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                                        Your answer: <span className="font-semibold">{userAnswer}</span>
+                                    </p>
+                                    {!isCorrect && (
+                                        <p className="text-sm mt-1 text-green-700 dark:text-green-400">
+                                            Correct answer: <span className="font-semibold">{questionData.correctAnswer}</span>
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="mt-8 text-center">
+                <Button onClick={onRestart} variant="outline" leftIcon={<RefreshCw />}>
+                    Create a New Quiz
+                </Button>
+            </div>
+        </div>
+    );
+};
+
+export default QuizResults;
+```
+
+`frontend/src/components/tools/QuizSetup.jsx`
+
+```javascript
+// frontend/src/components/tools/QuizSetup.jsx
+import React, { useState, useRef } from 'react';
+import { UploadCloud, FileText, XCircle } from 'lucide-react';
+import Button from '../core/Button';
+
+const QuizSetup = ({ onGenerate }) => {
+    const [file, setFile] = useState(null);
+    const [numQuestions, setNumQuestions] = useState(10);
+    const fileInputRef = useRef(null);
+
+    const handleFileChange = (e) => {
+        const selectedFile = e.target.files?.[0];
+        if (selectedFile) {
+            setFile(selectedFile);
+        }
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onGenerate(file, numQuestions);
+    };
+
+    return (
+        <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-lg shadow-panel border border-border-light dark:border-border-dark">
+            <h2 className="text-2xl font-bold text-center mb-2">Create a Quiz from Your Document</h2>
+            <p className="text-center text-text-muted-light dark:text-text-muted-dark mb-6">Upload a document, and let our AI generate a multiple-choice quiz to test your knowledge.</p>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                    <label className="block text-sm font-medium mb-2">1. Upload Document</label>
+                    <div
+                        className="flex justify-center items-center w-full h-32 px-6 transition bg-white dark:bg-gray-800 border-2 border-border-light dark:border-border-dark border-dashed rounded-md appearance-none cursor-pointer hover:border-primary/70"
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                        <span className="flex items-center space-x-2">
+                            <UploadCloud className="text-gray-400" />
+                            <span className="font-medium text-gray-500 dark:text-gray-400">
+                                {file ? 'File selected' : 'Drop file or click to upload'}
+                            </span>
+                        </span>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            name="file-upload"
+                            className="hidden"
+                            onChange={handleFileChange}
+                            accept=".pdf,.doc,.docx,.txt,.md"
+                        />
+                    </div>
+                    {file && (
+                        <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 truncate">
+                                <FileText size={18} className="text-primary flex-shrink-0" />
+                                <span className="truncate" title={file.name}>{file.name}</span>
+                            </div>
+                            <button onClick={() => setFile(null)} type="button" className="text-red-500 hover:text-red-700">
+                                <XCircle size={18} />
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div>
+                    <label htmlFor="numQuestions" className="block text-sm font-medium mb-2">2. Number of Questions</label>
+                    <select
+                        id="numQuestions"
+                        value={numQuestions}
+                        onChange={(e) => setNumQuestions(Number(e.target.value))}
+                        className="input-field w-full sm:w-48"
+                    >
+                        <option value={5}>5 Questions</option>
+                        <option value={10}>10 Questions</option>
+                        <option value={15}>15 Questions</option>
+                        <option value={20}>20 Questions</option>
+                    </select>
+                </div>
+
+                <div className="pt-2">
+                    <Button type="submit" fullWidth disabled={!file}>
+                        Generate Quiz
+                    </Button>
+                </div>
+            </form>
+        </div>
+    );
+};
+
+export default QuizSetup;
 ```
 
 `frontend/src/components/tools/TestCaseManager.jsx`
@@ -12984,7 +13352,7 @@ export default TestCaseManager;
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../core/Modal';
-import { Code, TestTubeDiagonal } from 'lucide-react'; // Add more icons as you add tools
+import { Code, FileQuestion } from 'lucide-react';
 const availableTools = [
     {
     title: 'Secure Code Executor',
@@ -12993,14 +13361,14 @@ const availableTools = [
     path: '/tools/code-executor',
     status: 'active'
     },
-    {
-    title: 'API Endpoint Tester',
-    description: 'A tool for testing and validating API endpoints will be available soon.',
-    icon: TestTubeDiagonal,
-    path: '#',
-    status: 'soon'
+     {
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
+        icon: FileQuestion,
+        path: '/tools/quiz-generator',
+        status: 'active'
     },
-// Add more tools here in the future
+
 ];
 const ToolsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
@@ -14341,6 +14709,19 @@ const api = {
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
     return response.data; // Should be { explanation: "..." }
+  },
+  generateQuiz: async (file, numQuestions) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("numQuestions", numQuestions);
+
+    const response = await apiClient.post("/tools/generate-quiz", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 300000, 
+    });
+    return response.data; // Should be { quiz: [...] }
   },
 };
 
@@ -16909,6 +17290,7 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
 import os
 import sys
 import traceback
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 import logging
 import atexit
 import uuid
@@ -16917,11 +17299,15 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils 
 
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
-from pydub import AudioSegment
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16939,14 +17325,57 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
-    import academic_search
-    import knowledge_graph_generator
     import google.generativeai as genai
-    from prompts import (
-        CODE_ANALYSIS_PROMPT_TEMPLATE,
-        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
-        EXPLAIN_ERROR_PROMPT_TEMPLATE
-    )
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
+    import quiz_utils
+
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+    else:
+        LLM_MODEL = None
+        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
+
+    def llm_wrapper(prompt, api_key=None):
+        """
+        A flexible wrapper for the Gemini API that can use a provided per-request API key
+        or fall back to the server's global key.
+        """
+        key_to_use = api_key or config.GEMINI_API_KEY
+        if not key_to_use:
+            raise ConnectionError("Gemini API Key is not configured for this request.")
+
+        genai.configure(api_key=key_to_use)
+        
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        model_instance = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+
+        for attempt in range(3):
+            try:
+                response = model_instance.generate_content(prompt)
+                if response.parts:
+                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+                elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+                else:
+                    logger.warning("LLM returned empty response without explicit block reason.")
+                    return ""
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                if attempt == 2: raise
+        return ""
+
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -16958,67 +17387,7 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-LANGUAGE_CONFIG = {
-    "python": {
-        "filename": "script.py",
-        "compile_cmd": None,
-        "run_cmd": ["python", "script.py"]
-    },
-    "java": {
-        "filename": "Main.java",
-        "compile_cmd": ["javac", "Main.java"],
-        "run_cmd": ["java", "Main"]
-    },
-    "c": {
-        "filename": "program.c",
-        "compile_cmd": ["gcc", "program.c", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    },
-    "cpp": {
-        "filename": "program.cpp",
-        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    }
-}
-
-# --- Dynamic LLM Initialization & Wrapper ---
-def get_llm_model(api_key: str):
-    """Dynamically creates a GenerativeModel instance with the provided API key."""
-    if not api_key:
-        raise ValueError("An API key is required to initialize the LLM for this request.")
-    
-    genai.configure(api_key=api_key)
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
-    return genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
-
-def llm_wrapper(prompt: str, api_key: str):
-    """Wrapper that takes an api_key to initialize the model for each call."""
-    if not api_key:
-        raise ConnectionError("Gemini API Key was not provided for this operation.")
-    
-    llm_model = get_llm_model(api_key)
-    
-    for attempt in range(3):
-        try:
-            response = llm_model.generate_content(prompt)
-            if response.parts:
-                return "".join(part.text for part in response.parts if hasattr(part, 'text'))
-            elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                 raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
-            else:
-                logger.warning("LLM returned empty response without explicit block reason.")
-                return ""
-        except Exception as e:
-            logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
-            if attempt == 2: raise
-    return ""
-
-# --- Initialize other services ---
+# Initialize services
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -17042,6 +17411,31 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"] if os.name != 'nt' else ["main.exe"]
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["./main"] if os.name != 'nt' else ["main.exe"]
+    }
+}
+
+# --- (START) Code Executor End Points ---
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
@@ -17125,8 +17519,8 @@ def analyze_code_route():
     
     code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
     
-    if not all([code, language, api_key]):
-        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+    if not all([code, language]):
+        return create_error_response("Missing 'code' or 'language'", 400)
         
     try:
         prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
@@ -17142,8 +17536,8 @@ def generate_test_cases_route():
     
     code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
     
-    if not all([code, language, api_key]):
-        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+    if not all([code, language]):
+        return create_error_response("Missing 'code' or 'language'", 400)
 
     try:
         prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
@@ -17165,8 +17559,8 @@ def explain_error_route():
     
     code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
     
-    if not all([code, language, error_message, api_key]):
-        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+    if not all([code, language, error_message]):
+        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
         
     try:
         prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
@@ -17174,6 +17568,60 @@ def explain_error_route():
         return jsonify({"explanation": explanation}), 200
     except Exception as e:
         return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
+# --- (END) Code Executor End Points ---
+
+# --- (START) Quiz Generator End Points ---
+@app.route('/generate_quiz', methods=['POST'])
+def generate_quiz_route():
+    if 'file' not in request.files:
+        return create_error_response("No file part in the request", 400)
+    
+    file = request.files['file']
+    num_questions = request.form.get('num_questions', 10)
+    api_key = request.form.get('api_key')
+
+    if file.filename == '':
+        return create_error_response("No selected file", 400)
+    if not api_key:
+        return create_error_response("API Key is required for quiz generation", 400)
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        filename = werkzeug_utils.secure_filename(file.filename)
+        file_path = os.path.join(temp_dir, filename)
+        file.save(file_path)
+
+        logger.info(f"Quiz Gen: Processing uploaded file '{filename}' for text extraction.")
+        document_text = quiz_utils.extract_text_for_quiz(file_path)
+
+        if not document_text or not document_text.strip():
+            return create_error_response("Could not extract any text from the provided document.", 422)
+
+        prompt = QUIZ_GENERATION_PROMPT_TEMPLATE.format(
+            num_questions=num_questions,
+            document_text=document_text
+        )
+        
+        logger.info(f"Quiz Gen: Sending prompt to LLM for {num_questions} questions.")
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for the quiz.")
+        
+        quiz_data = json.loads(json_match.group(0))
+        logger.info(f"Quiz Gen: Successfully generated and parsed {len(quiz_data)} questions.")
+        
+        return jsonify({"quiz": quiz_data}), 200
+
+    except Exception as e:
+        logger.error(f"Error during quiz generation: {e}", exc_info=True)
+        return create_error_response(f"Quiz Generation failed: {str(e)}", 500)
+    finally:
+        shutil.rmtree(temp_dir)
+
+# --- (END) Quiz Generator End Points ---
 
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
@@ -18336,40 +18784,32 @@ You are an expert software engineer and code reviewer. Your task is to provide a
 {language}
 ---
 **CODE TO ANALYZE:**
-```{language}
-{code}```
----
-
+{code}
 **ANALYSIS REPORT:**
 """
 
 TEST_CASE_GENERATION_PROMPT_TEMPLATE = """
 You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a comprehensive set of test cases for the given code.
-
-**Instructions:**
-1.  Analyze the code to understand its logic, inputs, and outputs.
-2.  Create a diverse set of test cases that cover:
-    -   **Standard Cases:** Common, expected inputs.
-    -   **Edge Cases:** Boundary values, empty inputs, zeros, negative numbers, etc.
-    -   **Error Cases:** Invalid inputs that should cause the program to handle an error gracefully (if applicable).
-3.  Your entire output **MUST** be a single, valid JSON array of objects.
-4.  Each object in the array must have two keys: `input` (a string) and `expectedOutput` (a string).
-5.  For inputs that require multiple lines, use the newline character `\\n`.
-
-**Example Output Format:**
+Instructions:
+Analyze the code to understand its logic, inputs, and outputs.
+Create a diverse set of test cases that cover:
+Standard Cases: Common, expected inputs.
+Edge Cases: Boundary values, empty inputs, zeros, negative numbers, etc.
+Error Cases: Invalid inputs that should cause the program to handle an error gracefully (if applicable).
+Your entire output MUST be a single, valid JSON array of objects.
+Each object in the array must have two keys: input (a string) and expectedOutput (a string).
+For inputs that require multiple lines, use the newline character \\n.
+Example Output Format:
 [
-  {{ "input": "5\\n10", "expectedOutput": "15" }},
-  {{ "input": "0\\n0", "expectedOutput": "0" }},
-  {{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{ "input": "5\n10", "expectedOutput": "15" }},
+{{ "input": "0\n0", "expectedOutput": "0" }},
+{{ "input": "-5\n5", "expectedOutput": "0" }}
 ]
-
----
-**LANGUAGE:**
+LANGUAGE:
 {language}
----
-**CODE TO ANALYZE:**
-```{language}
+CODE TO ANALYZE:
 {code}
+FINAL JSON TEST CASE ARRAY:
 """
 
 
@@ -18386,26 +18826,101 @@ Use clear Markdown headings for each section (e.g., ## What Went Wrong, ## How t
 Use fenced code blocks for all code snippets.
 LANGUAGE:
 {language}
+
 CODE WITH THE ERROR:
-Generated {language}
 {code}
-Use code with caution.
-{language}
 ERROR MESSAGE:
-Generated code
 {error_message}
-Use code with caution.
 ERROR EXPLANATION:
 """
+
+QUIZ_GENERATION_PROMPT_TEMPLATE = """
+You are an expert educator and assessment creator. Your task is to generate a multiple-choice quiz based SOLELY on the provided document text.
+
+**CRITICAL INSTRUCTIONS (MUST FOLLOW):**
+1.  **Strictly Adhere to Context:** Every question, option, and correct answer MUST be directly derived from the information present in the "DOCUMENT TEXT TO ANALYZE" section. Do NOT use any outside knowledge or make assumptions beyond the text.
+2.  **Generate Questions:** Create exactly {num_questions} high-quality multiple-choice questions.
+3.  **Create Plausible Options:** For each question, provide 4 distinct options. One must be the correct answer from the text, and the other three must be plausible but incorrect distractors.
+4.  **Strict JSON Output:** Your entire output **MUST** be a single, valid JSON array of objects. Do NOT include any introductory text, explanations, or markdown fences like ```json ... ```. Your response must begin with `[` and end with `]`.
+
+**JSON SCHEMA PER QUESTION (STRICT):**
+{{
+    "question": "The full text of the question.",
+    "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+    "correctAnswer": "The exact text of the correct answer, which MUST match one of the four options."
+}}
+
+---
+**DOCUMENT TEXT TO ANALYZE:**
+{document_text}
+---
+
+**FINAL QUIZ JSON ARRAY (start immediately with `[`):**
+"""
+
+```
+
+`server/rag_service/quiz_utils.py`
+
+```python
+# server/rag_service/quiz_utils.py
+import os
+import logging
+import config  # Use relative import
+
+logger = logging.getLogger(__name__)
+
+def extract_text_for_quiz(file_path: str) -> str:
+    """
+    A lightweight, fast text extractor for quiz generation.
+    It supports PDF, DOCX, and TXT files.
+    Bypasses heavy processing like OCR, embedding, etc. for speed.
+    """
+    _, ext = os.path.splitext(file_path)
+    ext = ext.lower()
+    text_content = ""
+    
+    logger.info(f"Quiz Utils: Extracting text from '{os.path.basename(file_path)}' (type: {ext})")
+
+    try:
+        if ext == '.pdf':
+            if config.PYPDF_AVAILABLE and config.pypdf:
+                reader = config.pypdf.PdfReader(file_path)
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_content += page_text + "\n"
+            else:
+                logger.warning("pypdf library not available for PDF parsing in quiz utility.")
+        
+        elif ext == '.docx':
+            if config.DOCX_AVAILABLE and config.DocxDocument:
+                doc = config.DocxDocument(file_path)
+                text_content = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+            else:
+                logger.warning("python-docx library not available for DOCX parsing in quiz utility.")
+
+        elif ext in ['.txt', '.md']:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text_content = f.read()
+        
+        else:
+            logger.warning(f"Unsupported file type for quick quiz extraction: {ext}. Returning empty text.")
+            return ""
+
+        logger.info(f"Quiz Utils: Successfully extracted {len(text_content)} characters.")
+        return text_content.strip()
+
+    except Exception as e:
+        logger.error(f"Quiz Utils: Failed to extract text from '{os.path.basename(file_path)}': {e}", exc_info=True)
+        return "" # Return empty string on failure
 ```
 
 `server/rag_service/requirements.txt`
 
 ```
-# server/rag_service/requirements.txt
 flask
 requests
-# faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
 pypdf
@@ -18437,7 +18952,7 @@ python-docx
 reportlab
 google-generativeai
 gTTS
-
+Werkzeug
 
 
 ```
@@ -20973,88 +21488,93 @@ module.exports = router;
 // server/routes/tools.js
 const express = require("express");
 const axios = require("axios");
+const multer = require("multer");
+const fs = require("fs"); // <<< FIX: Import the whole 'fs' module
+const path = require("path");
+const FormData = require("form-data");
 const router = express.Router();
-const User = require('../models/User'); // Import User model
-const { decrypt } = require('../utils/crypto'); // Import decrypt function
+const User = require("../models/User");
+const { decrypt } = require("../utils/crypto");
 
-// This entire router will be protected by the main authMiddleware in server.js
-async function getApiKeyForUser(userId) {
-    const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider');
-    if (!user) {
-        throw new Error("User not found.");
+// --- MULTER SETUP FOR QUIZ ---
+const quizUpload = multer({
+  dest: path.join(__dirname, "..", "temp_uploads"), // Temporary storage for quiz files
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB limit
+});
+
+async function getApiKeyForRequest(userId) {
+  try {
+    const user = await User.findById(userId).select(
+      "+encryptedApiKey preferredLlmProvider"
+    );
+    if (
+      user &&
+      user.preferredLlmProvider === "gemini" &&
+      user.encryptedApiKey
+    ) {
+      const decryptedKey = decrypt(user.encryptedApiKey);
+      if (decryptedKey) {
+        return decryptedKey;
+      }
     }
-    if (user.preferredLlmProvider === 'gemini') {
-        if (!user.encryptedApiKey) {
-            throw new Error("User has selected Gemini but has no API key configured.");
-        }
-        return decrypt(user.encryptedApiKey);
-    }
-    return null; 
+  } catch (e) {
+    console.error(
+      `Failed to get or decrypt user-specific API key for ${userId}, falling back to server key. Error: ${e.message}`
+    );
+  }
+
+  const serverKey = process.env.GEMINI_API_KEY;
+  if (serverKey) {
+    return serverKey;
+  }
+
+  throw new Error(
+    "No valid API key is configured for this AI feature on the server, and the user has not provided one."
+  );
 }
 
-// @route   POST /api/tools/execute
-// @desc    Execute code by proxying to the Python service
-// @access  Private
+// ... (existing tool routes like /execute, /analyze-code, etc. remain the same) ...
 router.post("/execute", async (req, res) => {
   const { language, code, testCases } = req.body;
-
   if (!code || !language) {
     return res.status(400).json({ message: "Code and language are required." });
   }
-
   const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
   if (!pythonServiceUrl) {
-    console.error("[Code Executor] PYTHON_RAG_SERVICE_URL is not set.");
     return res
       .status(500)
       .json({ message: "Code execution service is not configured." });
   }
-
   const executionUrl = `${pythonServiceUrl}/execute_code`;
-  console.log(
-    `[Node Tools] Forwarding code execution request to: ${executionUrl}`
-  );
-
   try {
     const pythonResponse = await axios.post(
       executionUrl,
-      {
-        language,
-        code,
-        testCases,
-      },
+      { language, code, testCases },
       { timeout: 15000 }
-    ); // 15-second timeout for the entire execution process
-
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg =
       error.response?.data?.error || error.message || "Failed to execute code.";
-    console.error(
-      `[Node Tools] Error calling Python execution service: ${errorMsg}`
-    );
     res.status(error.response?.status || 500).json({ message: errorMsg });
   }
 });
 
-// @route   POST /api/tools/analyze-code
 router.post("/analyze-code", async (req, res) => {
   const { language, code } = req.body;
   if (!code || !language) {
     return res.status(400).json({ message: "Code and language are required." });
   }
-
   const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
   if (!pythonServiceUrl) {
     return res.status(500).json({ message: "AI service is not configured." });
   }
-
   const analysisUrl = `${pythonServiceUrl}/analyze_code`;
   try {
-    const apiKey = await getApiKeyForUser(req.user._id);
+    const apiKey = await getApiKeyForRequest(req.user._id);
     const pythonResponse = await axios.post(
       analysisUrl,
-      { language, code, apiKey }, // Pass apiKey
+      { language, code, apiKey },
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
@@ -21064,24 +21584,21 @@ router.post("/analyze-code", async (req, res) => {
   }
 });
 
-// @route   POST /api/tools/generate-test-cases
 router.post("/generate-test-cases", async (req, res) => {
   const { language, code } = req.body;
   if (!code || !language) {
     return res.status(400).json({ message: "Code and language are required." });
   }
-
   const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
   if (!pythonServiceUrl) {
     return res.status(500).json({ message: "AI service is not configured." });
   }
-
   const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
   try {
-    const apiKey = await getApiKeyForUser(req.user._id);
+    const apiKey = await getApiKeyForRequest(req.user._id);
     const pythonResponse = await axios.post(
       generationUrl,
-      { language, code, apiKey }, // Pass apiKey
+      { language, code, apiKey },
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
@@ -21091,7 +21608,6 @@ router.post("/generate-test-cases", async (req, res) => {
   }
 });
 
-// @route   POST /api/tools/explain-error
 router.post("/explain-error", async (req, res) => {
   const { language, code, errorMessage } = req.body;
   if (!code || !language || !errorMessage) {
@@ -21099,18 +21615,16 @@ router.post("/explain-error", async (req, res) => {
       .status(400)
       .json({ message: "Code, language, and errorMessage are required." });
   }
-
   const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
   if (!pythonServiceUrl) {
     return res.status(500).json({ message: "AI service is not configured." });
   }
-
   const explanationUrl = `${pythonServiceUrl}/explain_error`;
   try {
-    const apiKey = await getApiKeyForUser(req.user._id);
+    const apiKey = await getApiKeyForRequest(req.user._id);
     const pythonResponse = await axios.post(
       explanationUrl,
-      { language, code, errorMessage, apiKey }, // Pass apiKey
+      { language, code, errorMessage, apiKey },
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
@@ -21120,7 +21634,70 @@ router.post("/explain-error", async (req, res) => {
   }
 });
 
+// @route   POST /api/tools/generate-quiz
+// @desc    Generate a quiz from an uploaded document
+// @access  Private
+router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
+  const { numQuestions } = req.body;
+  const file = req.file;
+
+  if (!file) {
+    return res
+      .status(400)
+      .json({ message: "A file is required to generate a quiz." });
+  }
+  if (!numQuestions) {
+    await fs.promises.unlink(file.path);
+    return res
+      .status(400)
+      .json({ message: "Number of questions is required." });
+  }
+
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    await fs.promises.unlink(file.path);
+    return res
+      .status(500)
+      .json({ message: "Quiz generation service is not configured." });
+  }
+
+  const generationUrl = `${pythonServiceUrl}/generate_quiz`;
+  const form = new FormData();
+  form.append("file", fs.createReadStream(file.path));
+  form.append("num_questions", numQuestions);
+
+  try {
+    const apiKey = await getApiKeyForRequest(req.user._id);
+    form.append("api_key", apiKey);
+
+    console.log(
+      `[Node Quiz] Forwarding quiz generation request to Python service.`
+    );
+    const pythonResponse = await axios.post(generationUrl, form, {
+      headers: form.getHeaders(),
+      timeout: 300000,
+    });
+
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg =
+      error.response?.data?.error ||
+      error.message ||
+      "Failed to generate quiz.";
+    console.error(`[Node Quiz] Error calling Python service: ${errorMsg}`);
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  } finally {
+    await fs.promises
+      .unlink(file.path)
+      .catch((err) =>
+        console.error(`Failed to delete temp quiz file: ${err.message}`)
+      );
+  }
+});
+
+
 module.exports = router;
+
 ```
 
 `server/routes/upload.js`

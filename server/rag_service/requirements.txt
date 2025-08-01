@@ -1,7 +1,5 @@
-# server/rag_service/requirements.txt
 flask
 requests
-# faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
 pypdf
@@ -33,5 +31,5 @@ python-docx
 reportlab
 google-generativeai
 gTTS
-
+Werkzeug
 
