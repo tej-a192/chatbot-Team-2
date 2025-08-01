@@ -17,6 +17,8 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
+const { connectRedis } = require('./config/redisClient');
+
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -33,6 +35,7 @@ const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
+const learningRoutes = require("./routes/learning");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -68,6 +71,7 @@ app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
 app.use(authMiddleware);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/learning", learningRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
@@ -96,7 +100,8 @@ async function startServer() {
     await connectDB(mongoUri);
     await performAssetCleanup();
     await checkRagService(pythonRagUrl);
-
+    await connectRedis();
+    
     const server = app.listen(port, "0.0.0.0", () => {
       console.log("\n=== Node.js Server Ready ===");
       console.log(`🚀 Server listening on port ${port}`);

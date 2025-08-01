@@ -18,6 +18,28 @@ import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
+function SessionLoadingModal() {
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]">
+            <motion.div
+                key="session-loading-modal"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl p-8 w-full max-w-md text-center"
+            >
+                <div className="flex justify-center items-center mb-4">
+                    <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-b-4 border-primary"></div>
+                </div>
+                <h2 className="text-xl font-bold text-text-light dark:text-text-dark mb-2">Finalizing Session...</h2>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                    Summarizing key points and identifying topics for your future recommendations.
+                </p>
+            </motion.div>
+        </div>
+    );
+}
+
 function MainAppLayout({ orchestratorStatus }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
@@ -29,7 +51,8 @@ function MainAppLayout({ orchestratorStatus }) {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
-
+    const [isSessionLoading, setIsSessionLoading] = useState(false);
+    
     const handleChatProcessingStatusChange = (isLoading) => {
         setIsChatProcessing(isLoading);
     };
@@ -40,18 +63,24 @@ function MainAppLayout({ orchestratorStatus }) {
     };
 
     const handleNewChat = async () => {
-        try {
-            const data = await api.startNewSession(currentSessionId); 
-            if (data && data.newSessionId) {
-                setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-            } else {
-                toast.error("Could not start new chat session.");
-            }
-        } catch (error) {
-            toast.error(`Failed to start new chat: ${error.message}`);
+    setIsSessionLoading(true); // Show the loading modal immediately
+    try {
+        // The API call is now awaited, blocking further execution until it's done
+        const data = await api.startNewSession(currentSessionId);
+        
+        if (data && data.newSessionId) {
+            setGlobalSessionId(data.newSessionId);
+            toast.success("New chat started!");
+        } else {
+            toast.error(data.message || "Could not start new chat session.");
         }
+    } catch (error) {
+        toast.error(`Failed to start new chat: ${error.message}`);
+    } finally {
+        setIsSessionLoading(false); // Hide the loading modal in all cases (success or failure)
+    }
     };
+
 
     const handleSelectSessionFromHistory = (sessionId) => {
         if (sessionId && sessionId !== currentSessionId) {
@@ -91,42 +120,47 @@ function MainAppLayout({ orchestratorStatus }) {
     }, [currentSessionId, regularUserTokenValue, fetchChatHistory]);
 
     return (
-        <>
-            <TopNav 
-                user={regularUser} 
-                onLogout={handleRegularUserLogout} 
-                onNewChat={handleNewChat} 
-                onHistoryClick={() => setIsHistoryModalOpen(true)} 
-                orchestratorStatus={orchestratorStatus}
-                isChatProcessing={isChatProcessing}
-            />
-            <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
-                <AnimatePresence mode="wait">
-                    {isLeftPanelOpen ? (
-                        <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <LeftPanel />
-                        </motion.aside>
-                    ) : ( <LeftCollapsedNav /> )}
-                </AnimatePresence>
-                <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
-                    <CenterPanel 
-                        messages={appStateMessages} 
-                        setMessages={setAppStateMessages} 
-                        currentSessionId={currentSessionId}
-                        onChatProcessingChange={handleChatProcessingStatusChange}
-                    />
-                </main>
-                <AnimatePresence mode="wait">
-                    {isRightPanelOpen ? (
-                        <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <RightPanel />
-                        </motion.aside>
-                    ) : ( <RightCollapsedNav /> )}
-                </AnimatePresence>
-            </div>
-            <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
-        </>
+    <>
+        <AnimatePresence>
+            {isSessionLoading && <SessionLoadingModal />}
+        </AnimatePresence>
+
+        <TopNav 
+            user={regularUser} 
+            onLogout={handleRegularUserLogout} 
+            onNewChat={handleNewChat} 
+            onHistoryClick={() => setIsHistoryModalOpen(true)} 
+            orchestratorStatus={orchestratorStatus}
+            isChatProcessing={isChatProcessing}
+        />
+        <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+            <AnimatePresence mode="wait">
+                {isLeftPanelOpen ? (
+                    <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <LeftPanel />
+                    </motion.aside>
+                ) : ( <LeftCollapsedNav /> )}
+            </AnimatePresence>
+            <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+                <CenterPanel 
+                    messages={appStateMessages} 
+                    setMessages={setAppStateMessages} 
+                    currentSessionId={currentSessionId}
+                    onChatProcessingChange={handleChatProcessingStatusChange}
+                />
+            </main>
+            <AnimatePresence mode="wait">
+                {isRightPanelOpen ? (
+                    <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <RightPanel />
+                    </motion.aside>
+                ) : ( <RightCollapsedNav /> )}
+            </AnimatePresence>
+        </div>
+        <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
+    </>
     );
+
 }
 
 function App() {

@@ -4,7 +4,18 @@ import api from '../../services/api';
 import toast from 'react-hot-toast';
 import Modal from '../core/Modal.jsx';
 import Button from '../core/Button.jsx';
-import { Save, User, School, Hash, Award, Wrench, Calendar } from 'lucide-react';
+import { Save, User, School, Hash, Award, Wrench, Calendar, Lightbulb, Goal, ChevronDown } from 'lucide-react';
+
+const yearOptions = {
+    "Bachelor's": ["1st Year", "2nd Year", "3rd Year", "4th Year"],
+    "Master's": ["1st Year", "2nd Year"],
+    "PhD": ["Coursework", "Research Phase", "Writing Phase"],
+    "Diploma": ["1st Year", "2nd Year", "3rd Year"]
+};
+
+const getYearOptions = (degree) => {
+    return yearOptions[degree] || ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"];
+};
 
 const ProfileSettingsModal = ({ isOpen, onClose }) => {
     const [profile, setProfile] = useState({
@@ -30,9 +41,11 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
                         name: data.name || '',
                         college: data.college || '',
                         universityNumber: data.universityNumber || '',
-                        degreeType: data.degreeType || 'Bachelors', // Default value
-                        branch: data.branch || 'Computer Science', // Default value
-                        year: data.year || '1st Year' // Default value
+                        degreeType: data.degreeType || "Bachelor's",
+                        branch: data.branch || 'Computer Science',
+                        year: data.year || '1st Year',
+                        learningStyle: data.learningStyle || 'Visual', // Add new field with default
+                        currentGoals: data.currentGoals || '' // Add new field with default
                     });
                 } catch (err) {
                     toast.error('Failed to load profile data.');
@@ -47,8 +60,16 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setProfile(prev => ({ ...prev, [name]: value }));
+        setProfile(prev => {
+            const newState = { ...prev, [name]: value };
+            if (name === 'degreeType') {
+                const newYearOptions = getYearOptions(value);
+                newState.year = newYearOptions[0];
+            }
+            return newState;
+        });
     };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -87,7 +108,7 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
             size="lg"
             footerContent={
                 <>
-                    <Button variant="ghost" onClick={onClose} disabled={isLoading}>Cancel</Button>
+                    <Button variant="secondary" onClick={onClose} disabled={isLoading}>Cancel</Button>
                     <Button onClick={handleSubmit} isLoading={isLoading} leftIcon={<Save size={16} />}>
                         Save Changes
                     </Button>
@@ -97,54 +118,71 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
             <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 
+                {/* --- Academic Details Section --- */}
+                <h3 className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark border-b border-border-light dark:border-border-dark pb-2">Academic Profile</h3>
                 <div className={inputWrapperClass}>
                     <User className={inputIconClass} />
                     <input type="text" name="name" value={profile.name} onChange={handleChange} placeholder="Full Name" className={inputFieldStyledClass} required />
                 </div>
-
-                <div className={inputWrapperClass}>
-                    <School className={inputIconClass} />
-                    <input type="text" name="college" value={profile.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={inputWrapperClass}>
+                        <School className={inputIconClass} />
+                        <input type="text" name="college" value={profile.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+                    </div>
+                    <div className={inputWrapperClass}>
+                        <Hash className={inputIconClass} />
+                        <input type="text" name="universityNumber" value={profile.universityNumber} onChange={handleChange} placeholder="University Number" className={inputFieldStyledClass} required />
+                    </div>
                 </div>
-                
-                <div className={inputWrapperClass}>
-                    <Hash className={inputIconClass} />
-                    <input type="text" name="universityNumber" value={profile.universityNumber} onChange={handleChange} placeholder="Registered University Number" className={inputFieldStyledClass} required />
-                </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className={inputWrapperClass}>
                         <Award className={inputIconClass} />
-                        <select name="degreeType" value={profile.degreeType} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="Bachelors">Bachelor's</option>
-                            <option value="Masters">Master's</option>
-                            <option value="PhD">PhD</option>
-                            <option value="Diploma">Diploma</option>
+                        <select name="degreeType" value={profile.degreeType} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                            <option>Bachelor's</option><option>Master's</option><option>PhD</option><option>Diploma</option>
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
                     </div>
-                    
                     <div className={inputWrapperClass}>
                         <Wrench className={inputIconClass} />
-                        <select name="branch" value={profile.branch} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="Computer Science">Computer Science</option>
-                            <option value="Mechanical Engineering">Mechanical</option>
-                            <option value="Electrical Engineering">Electrical</option>
-                            <option value="Civil Engineering">Civil</option>
-                            <option value="Electronics & Communication">Electronics & Comm.</option>
-                            <option value="Other">Other</option>
+                        <select name="branch" value={profile.branch} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Computer Science</option><option>Mechanical</option><option>Electrical</option><option>Civil</option><option>Electronics</option><option>Other</option>
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
                     </div>
-
                     <div className={inputWrapperClass}>
                         <Calendar className={inputIconClass} />
-                        <select name="year" value={profile.year} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="1st Year">1st Year</option>
-                            <option value="2nd Year">2nd Year</option>
-                            <option value="3rd Year">3rd Year</option>
-                            <option value="4th Year">4th Year</option>
-                            <option value="Final Year">Final Year</option>
-                            <option value="Graduated">Graduated</option>
+                        <select name="year" value={profile.year} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                            {getYearOptions(profile.degreeType).map(option => (
+                                <option key={option} value={option}>{option}</option>
+                            ))}
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                    </div>
+
+                </div>
+
+                {/* --- Learning Preferences Section --- */}
+                <h3 className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark border-b border-border-light dark:border-border-dark pb-2 pt-4">Learning Preferences</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                    <div className="space-y-1">
+                        <label className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Preferred Learning Style</label>
+                        <div className={inputWrapperClass}>
+                            <Lightbulb className={inputIconClass} />
+                            <select name="learningStyle" value={profile.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                                <option>Visual</option>
+                                <option>Auditory</option>
+                                <option>Reading/Writing</option>
+                                <option>Kinesthetic</option>
+                            </select>
+                            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                        </div>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Current Learning Goals (Optional)</label>
+                        <div className={inputWrapperClass}>
+                            <Goal className={inputIconClass} />
+                            <textarea name="currentGoals" value={profile.currentGoals} onChange={handleChange} placeholder="e.g., Prepare for my AI exam..." className={`${inputFieldStyledClass} !h-[42px] resize-none`} maxLength="500"></textarea>
+                        </div>
                     </div>
                 </div>
             </form>

@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const { encrypt } = require("../utils/crypto");
 
+// server/models/User.js
+
 const ProfileSchema = new mongoose.Schema(
   {
     name: { type: String, default: "", trim: true },
@@ -11,6 +13,24 @@ const ProfileSchema = new mongoose.Schema(
     degreeType: { type: String, default: "", trim: true },
     branch: { type: String, default: "", trim: true },
     year: { type: String, default: "", trim: true },
+    // --- NEW FIELDS START HERE ---
+    learningStyle: {
+      type: String,
+      enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
+      default: 'Not Specified'
+    },
+    currentGoals: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 500 // Prevent excessively long inputs
+    },
+    performanceMetrics: {
+      type: Map,
+      of: Number, // Stores topic proficiency, e.g., { "Calculus": 0.8 }
+      default: () => new Map()
+    }
+    // --- NEW FIELDS END HERE ---
   },
   { _id: false }
 );

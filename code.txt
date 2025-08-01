@@ -7246,6 +7246,28 @@ import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
+function SessionLoadingModal() {
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]">
+            <motion.div
+                key="session-loading-modal"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl p-8 w-full max-w-md text-center"
+            >
+                <div className="flex justify-center items-center mb-4">
+                    <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-b-4 border-primary"></div>
+                </div>
+                <h2 className="text-xl font-bold text-text-light dark:text-text-dark mb-2">Finalizing Session...</h2>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                    Summarizing key points and identifying topics for your future recommendations.
+                </p>
+            </motion.div>
+        </div>
+    );
+}
+
 function MainAppLayout({ orchestratorStatus }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
@@ -7257,7 +7279,8 @@ function MainAppLayout({ orchestratorStatus }) {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
-
+    const [isSessionLoading, setIsSessionLoading] = useState(false);
+    
     const handleChatProcessingStatusChange = (isLoading) => {
         setIsChatProcessing(isLoading);
     };
@@ -7268,18 +7291,24 @@ function MainAppLayout({ orchestratorStatus }) {
     };
 
     const handleNewChat = async () => {
-        try {
-            const data = await api.startNewSession(currentSessionId); 
-            if (data && data.newSessionId) {
-                setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-            } else {
-                toast.error("Could not start new chat session.");
-            }
-        } catch (error) {
-            toast.error(`Failed to start new chat: ${error.message}`);
+    setIsSessionLoading(true); // Show the loading modal immediately
+    try {
+        // The API call is now awaited, blocking further execution until it's done
+        const data = await api.startNewSession(currentSessionId);
+        
+        if (data && data.newSessionId) {
+            setGlobalSessionId(data.newSessionId);
+            toast.success("New chat started!");
+        } else {
+            toast.error(data.message || "Could not start new chat session.");
         }
+    } catch (error) {
+        toast.error(`Failed to start new chat: ${error.message}`);
+    } finally {
+        setIsSessionLoading(false); // Hide the loading modal in all cases (success or failure)
+    }
     };
+
 
     const handleSelectSessionFromHistory = (sessionId) => {
         if (sessionId && sessionId !== currentSessionId) {
@@ -7319,42 +7348,47 @@ function MainAppLayout({ orchestratorStatus }) {
     }, [currentSessionId, regularUserTokenValue, fetchChatHistory]);
 
     return (
-        <>
-            <TopNav 
-                user={regularUser} 
-                onLogout={handleRegularUserLogout} 
-                onNewChat={handleNewChat} 
-                onHistoryClick={() => setIsHistoryModalOpen(true)} 
-                orchestratorStatus={orchestratorStatus}
-                isChatProcessing={isChatProcessing}
-            />
-            <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
-                <AnimatePresence mode="wait">
-                    {isLeftPanelOpen ? (
-                        <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <LeftPanel />
-                        </motion.aside>
-                    ) : ( <LeftCollapsedNav /> )}
-                </AnimatePresence>
-                <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
-                    <CenterPanel 
-                        messages={appStateMessages} 
-                        setMessages={setAppStateMessages} 
-                        currentSessionId={currentSessionId}
-                        onChatProcessingChange={handleChatProcessingStatusChange}
-                    />
-                </main>
-                <AnimatePresence mode="wait">
-                    {isRightPanelOpen ? (
-                        <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <RightPanel />
-                        </motion.aside>
-                    ) : ( <RightCollapsedNav /> )}
-                </AnimatePresence>
-            </div>
-            <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
-        </>
+    <>
+        <AnimatePresence>
+            {isSessionLoading && <SessionLoadingModal />}
+        </AnimatePresence>
+
+        <TopNav 
+            user={regularUser} 
+            onLogout={handleRegularUserLogout} 
+            onNewChat={handleNewChat} 
+            onHistoryClick={() => setIsHistoryModalOpen(true)} 
+            orchestratorStatus={orchestratorStatus}
+            isChatProcessing={isChatProcessing}
+        />
+        <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+            <AnimatePresence mode="wait">
+                {isLeftPanelOpen ? (
+                    <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <LeftPanel />
+                    </motion.aside>
+                ) : ( <LeftCollapsedNav /> )}
+            </AnimatePresence>
+            <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+                <CenterPanel 
+                    messages={appStateMessages} 
+                    setMessages={setAppStateMessages} 
+                    currentSessionId={currentSessionId}
+                    onChatProcessingChange={handleChatProcessingStatusChange}
+                />
+            </main>
+            <AnimatePresence mode="wait">
+                {isRightPanelOpen ? (
+                    <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <RightPanel />
+                    </motion.aside>
+                ) : ( <RightCollapsedNav /> )}
+            </AnimatePresence>
+        </div>
+        <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
+    </>
     );
+
 }
 
 function App() {
@@ -9402,108 +9436,286 @@ import { useAuth } from '../../hooks/useAuth.jsx';
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import LLMSelection from './LLMSelection.jsx';
 import toast from 'react-hot-toast';
-import { LogIn, UserPlus, X, KeyRound, AtSign, AlertCircle, HardDrive, CheckSquare, Square } from 'lucide-react';
+import { LogIn, UserPlus, X, KeyRound, AtSign, AlertCircle, HardDrive, CheckSquare, Square, User, School, Hash, Award, Wrench, Calendar, Lightbulb, Goal, ChevronDown } from 'lucide-react';
 import Button from '../core/Button.jsx';
 import IconButton from '../core/IconButton.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
+
+const yearOptions = {
+    "Bachelor's": ["1st Year", "2nd Year", "3rd Year", "4th Year"],
+    "Master's": ["1st Year", "2nd Year"],
+    "PhD": ["Coursework", "Research Phase", "Writing Phase"],
+    "Diploma": ["1st Year", "2nd Year", "3rd Year"]
+};
+
+const getYearOptions = (degree) => {
+    return yearOptions[degree] || ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"];
+};
+
+
 function AuthModal({ isOpen, onClose }) {
     const { login, signup } = useAuth();
-    const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
+const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
 
-    const [isLoginView, setIsLoginView] = useState(true);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [localSelectedLLM, setLocalSelectedLLM] = useState('gemini');
-    const [apiKey, setApiKey] = useState('');
-    const [ollamaUrl, setOllamaUrl] = useState('');
+const [isLoginView, setIsLoginView] = useState(true);
+    const [step, setStep] = useState(1); // For signup pagination
+    const [formData, setFormData] = useState({
+        email: '',
+        password: '',
+        localSelectedLLM: 'gemini',
+        apiKey: '',
+        ollamaUrl: '',
+        requestKeyFromAdmin: false,
+        name: '',
+        college: '',
+        universityNumber: '',
+        degreeType: 'Bachelors',
+        branch: 'Computer Science',
+        year: '1st Year',
+        learningStyle: 'Visual',
+        currentGoals: ''
+    });
+
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [requestKeyFromAdmin, setRequestKeyFromAdmin] = useState(false); // New state for checkbox
-    
+
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
 
     useEffect(() => {
         if (isOpen) {
             setError('');
-            setEmail('');
-            setPassword('');
-            setApiKey('');
-            setOllamaUrl('');
-            setRequestKeyFromAdmin(false); // Reset checkbox
-            setLocalSelectedLLM(selectedLLM || 'gemini');
+            setStep(1); // Reset to first step on open
+            setFormData({ // Reset all form data
+                email: '',
+                password: '',
+                localSelectedLLM: selectedLLM || 'gemini',
+                apiKey: '',
+                ollamaUrl: '',
+                requestKeyFromAdmin: false,
+                name: '',
+                college: '',
+                universityNumber: '',
+                degreeType: 'Bachelors',
+                branch: 'Computer Science',
+                year: '1st Year',
+                learningStyle: 'Visual',
+                currentGoals: ''
+            });
         } else {
             setIsLoginView(true);
         }
     }, [isOpen, selectedLLM]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
 
-        if (!emailRegex.test(email) && !(isLoginView && email === (process.env.VITE_ADMIN_USERNAME || 'admin@admin.com'))) {
+
+const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => {
+        const newState = { ...prev, [name]: type === 'checkbox' ? checked : value };
+        if (name === 'degreeType') {
+            const newYearOptions = getYearOptions(value);
+            newState.year = newYearOptions[0];
+        }
+        return newState;
+    });
+};
+
+
+const handleNext = () => {
+    setError('');
+    // --- Step 1 Validation ---
+    if (step === 1) {
+        if (!emailRegex.test(formData.email)) {
             return setError("Please enter a valid email address.");
         }
-        if (password.length < 6) {
+        if (formData.password.length < 6) {
             return setError("Password must be at least 6 characters long.");
         }
-        if (!isLoginView && localSelectedLLM === 'gemini' && !apiKey.trim() && !requestKeyFromAdmin) {
-            return setError("Gemini API Key is required, or request one from the admin.");
-        }
-        if (!isLoginView && localSelectedLLM === 'ollama' && !ollamaUrl.trim()) {
-            return setError("Ollama URL is required.");
-        }
-        
-        setLoading(true);
-        const toastId = toast.loading(isLoginView ? 'Logging in...' : 'Creating account...');
+    }
+    // --- Step 2 Validation (can be expanded) ---
+    if (step === 2) {
+         if (!formData.name.trim() || !formData.college.trim() || !formData.universityNumber.trim()) {
+            return setError("Please fill out all academic profile fields.");
+         }
+    }
+    setStep(prev => prev + 1);
+};
 
-        try {
-            if (isLoginView) {
-                const authDataResponse = await login({ email, password });
-                if (authDataResponse.isAdminLogin) {
-                    toast.dismiss(toastId);
-                    toast.success("Admin login successful!");
-                    setIsAdminSessionActive(true); 
-                    onClose({ isAdminLogin: true });
-                } else {
-                    toast.dismiss(toastId);
-                    toast.success(authDataResponse.message || 'Login Successful!');
-                    onClose(authDataResponse);
-                }
-            } else { // Signup logic
-                const signupData = {
-                    email, password,
-                    preferredLlmProvider: localSelectedLLM,
-                };
+const handleBack = () => {
+    setError('');
+    setStep(prev => prev - 1);
+};
 
-                if (localSelectedLLM === 'gemini') {
-                    if (requestKeyFromAdmin) {
-                        signupData.requestAdminKey = true;
-                    } else {
-                        signupData.apiKey = apiKey;
-                    }
-                } else if (localSelectedLLM === 'ollama') {
-                    signupData.ollamaUrl = ollamaUrl;
-                }
-
-                const authDataResponse = await signup(signupData);
-                setGlobalLLM(localSelectedLLM);
-                toast.dismiss(toastId);
-                toast.success(authDataResponse.message || 'Signup Successful!');
-                onClose(authDataResponse);
-            }
-        } catch (err) {
-            toast.dismiss(toastId);
-            const errorMessage = err.response?.data?.message || err.message || `An error occurred.`;
-            setError(errorMessage);
-        } finally {
-            setLoading(false);
-        }
-    };
-
+// --- Helper for consistent input styling ---
     const inputWrapperClass = "relative";
     const inputIconClass = "absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted-light dark:text-text-muted-dark";
     const inputFieldStyledClass = "input-field pl-10 py-2.5 text-sm w-full";
+    const selectFieldStyledClass = "input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none";
+
+    // --- Renders content for Step 1: Account Credentials ---
+    const renderStep1 = () => (
+        <div className="space-y-5">
+            <div className={inputWrapperClass}>
+                <AtSign className={inputIconClass} />
+                <input type="text" name="email" className={inputFieldStyledClass} placeholder="Email Address" value={formData.email} onChange={handleChange} required disabled={loading} />
+            </div>
+            <div className={inputWrapperClass}>
+                <KeyRound className={inputIconClass} />
+                <input type="password" name="password" className={inputFieldStyledClass} placeholder="Password (min. 6 characters)" value={formData.password} onChange={handleChange} required minLength="6" disabled={loading} />
+            </div>
+        </div>
+    );
+
+    // --- Renders content for Step 2: Academic Profile ---
+    const renderStep2 = () => (
+        <div className="space-y-4">
+            <p className="text-sm text-center text-text-muted-light dark:text-text-muted-dark">Tell us a bit about your academic background.</p>
+            <div className={inputWrapperClass}>
+                <User className={inputIconClass} />
+                <input type="text" name="name" value={formData.name} onChange={handleChange} placeholder="Full Name" className={inputFieldStyledClass} required />
+            </div>
+            <div className={inputWrapperClass}>
+                <School className={inputIconClass} />
+                <input type="text" name="college" value={formData.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+            </div>
+            <div className={inputWrapperClass}>
+                <Hash className={inputIconClass} />
+                <input type="text" name="universityNumber" value={formData.universityNumber} onChange={handleChange} placeholder="University Number" className={inputFieldStyledClass} required />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className={inputWrapperClass}>
+                    <Award className={inputIconClass} />
+                    <select name="degreeType" value={formData.degreeType} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Bachelor's</option><option>Master's</option><option>PhD</option><option>Diploma</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                </div>
+                <div className={inputWrapperClass}>
+                    <Wrench className={inputIconClass} />
+                    <select name="branch" value={formData.branch} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Computer Science</option><option>Mechanical</option><option>Electrical</option><option>Civil</option><option>Electronics</option><option>Other</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                </div>
+                <div className={inputWrapperClass}>
+                    <Calendar className={inputIconClass} />
+                    <select name="year" value={formData.year} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        {getYearOptions(formData.degreeType).map(option => (
+                            <option key={option} value={option}>{option}</option>
+                        ))}
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                </div>
+            </div>
+        </div>
+    );
+
+    // --- Renders content for Step 3: Learning & AI Preferences ---
+    const renderStep3 = () => (
+        <div className="space-y-4">
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-text-light dark:text-text-dark">How do you learn best?</label>
+                <div className={inputWrapperClass}>
+                    <Lightbulb className={inputIconClass} />
+                    <select name="learningStyle" value={formData.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Visual (diagrams, mind maps)</option>
+                        <option>Auditory (podcasts, explanations)</option>
+                        <option>Reading/Writing (detailed text)</option>
+                        <option>Kinesthetic (hands-on examples, code)</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-text-light dark:text-text-dark">What are your current learning goals? (Optional)</label>
+                <div className={inputWrapperClass}>
+                    <Goal className={inputIconClass} />
+                    <textarea name="currentGoals" value={formData.currentGoals} onChange={handleChange} placeholder="e.g., 'Prepare for my AI exam', 'Understand thermodynamics basics'" className={`${inputFieldStyledClass} !h-24 resize-none`} maxLength="500"></textarea>
+                </div>
+            </div>
+            <div className="!mt-6">
+                <LLMSelection selectedLLM={formData.localSelectedLLM} onLlmChange={(llm) => handleChange({ target: { name: 'localSelectedLLM', value: llm }})} disabled={loading} />
+            </div>
+            {/* The rest of the LLM logic will be handled in the main return statement */}
+        </div>
+    );
+    
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        if (isLoginView) {
+            const toastId = toast.loading('Logging in...');
+            try {
+                const { email, password } = formData;
+                if (!emailRegex.test(email) && !(email === (import.meta.env.VITE_ADMIN_USERNAME || 'admin@admin.com'))) {
+                    throw new Error("Please enter a valid email address.");
+                }
+                const authDataResponse = await login({ email, password });
+                if (authDataResponse.isAdminLogin) {
+                    toast.success("Admin login successful!", { id: toastId });
+                    setIsAdminSessionActive(true); 
+                    onClose({ isAdminLogin: true });
+                } else {
+                    toast.success(authDataResponse.message || 'Login Successful!', { id: toastId });
+                    onClose(authDataResponse);
+                }
+            } catch (err) {
+                const errorMessage = err.response?.data?.message || err.message;
+                setError(errorMessage);
+                toast.error(errorMessage, { id: toastId });
+            } finally {
+                setLoading(false);
+            }
+        } else { // Handle multi-step signup submission
+            const toastId = toast.loading('Creating your account...');
+            // Final validation for Step 3
+            if (formData.localSelectedLLM === 'gemini' && !formData.apiKey.trim() && !formData.requestKeyFromAdmin) {
+                setLoading(false);
+                toast.dismiss(toastId);
+                return setError("Gemini API Key is required, or request one from the admin.");
+            }
+            if (formData.localSelectedLLM === 'ollama' && !formData.ollamaUrl.trim()) {
+                setLoading(false);
+                toast.dismiss(toastId);
+                return setError("Ollama URL is required.");
+            }
+            
+            try {
+                // Consolidate data for the API
+                const signupData = {
+                    email: formData.email,
+                    password: formData.password,
+                    preferredLlmProvider: formData.localSelectedLLM,
+                    requestAdminKey: formData.requestKeyFromAdmin,
+                    apiKey: formData.apiKey,
+                    ollamaUrl: formData.ollamaUrl,
+                    name: formData.name,
+                    college: formData.college,
+                    universityNumber: formData.universityNumber,
+                    degreeType: formData.degreeType,
+                    branch: formData.branch,
+                    year: formData.year,
+                    learningStyle: formData.learningStyle.split(' ')[0], // Send just "Visual", etc.
+                    currentGoals: formData.currentGoals
+                };
+                
+                const authDataResponse = await signup(signupData);
+                setGlobalLLM(formData.localSelectedLLM);
+                toast.success(authDataResponse.message || 'Signup Successful!', { id: toastId });
+                onClose(authDataResponse);
+            } catch (err) {
+                const errorMessage = err.response?.data?.message || err.message;
+                setError(errorMessage);
+                toast.error(errorMessage, { id: toastId });
+            } finally {
+                setLoading(false);
+            }
+        }
+    };
+
 
     return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
@@ -9512,13 +9724,28 @@ function AuthModal({ isOpen, onClose }) {
                 initial={{ opacity: 0, scale: 0.95, y: -10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="card-base p-6 sm:p-8 w-full max-w-md"
+                className="card-base p-6 sm:p-8 w-full max-w-lg" // Increased max-width for profile form
             >
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl sm:text-2xl font-bold">{isLoginView ? 'Welcome Back' : 'Create Your Account'}</h2>
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <h2 className="text-xl sm:text-2xl font-bold">{isLoginView ? 'Welcome Back' : 'Create Your Account'}</h2>
+                        {!isLoginView && <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Step {step} of 3</p>}
+                    </div>
                     <IconButton icon={X} onClick={() => onClose(null)} variant="ghost" size="sm" title="Close" />
                 </div>
 
+                {/* --- Progress Bar for Signup --- */}
+                {!isLoginView && (
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-6">
+                        <motion.div
+                            className="bg-primary h-1.5 rounded-full"
+                            initial={{ width: '0%' }}
+                            animate={{ width: `${(step / 3) * 100}%` }}
+                            transition={{ ease: "easeInOut", duration: 0.5 }}
+                        />
+                    </div>
+                )}
+                
                 {error && (
                     <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2">
                         <AlertCircle size={16}/>{error}
@@ -9526,71 +9753,93 @@ function AuthModal({ isOpen, onClose }) {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
-                    <div className={inputWrapperClass}>
-                        <AtSign className={inputIconClass} />
-                        <input type="text" id="auth-email" className={inputFieldStyledClass} placeholder="Email Address" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading} />
-                    </div>
-                    <div className={inputWrapperClass}>
-                        <KeyRound className={inputIconClass} />
-                        <input type="password" id="auth-password" className={inputFieldStyledClass} placeholder="Password (min. 6 characters)" value={password} onChange={(e) => setPassword(e.target.value)} required minLength="6" disabled={loading} />
-                    </div>
-
-                    {!isLoginView && (
+                    {/* --- Conditional Rendering Based on View/Step --- */}
+                    <AnimatePresence mode="wait">
+                        <motion.div
+                            key={isLoginView ? 'login' : `step${step}`}
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            transition={{ duration: 0.2 }}
+                        >
+                            {isLoginView ? (
+                                <div className="space-y-5">
+                                    <div className={inputWrapperClass}>
+                                        <AtSign className={inputIconClass} />
+                                        <input type="text" name="email" className={inputFieldStyledClass} placeholder="Email Address" value={formData.email} onChange={handleChange} required disabled={loading} />
+                                    </div>
+                                    <div className={inputWrapperClass}>
+                                        <KeyRound className={inputIconClass} />
+                                        <input type="password" name="password" className={inputFieldStyledClass} placeholder="Password" value={formData.password} onChange={handleChange} required disabled={loading} />
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {step === 1 && renderStep1()}
+                                    {step === 2 && renderStep2()}
+                                    {step === 3 && renderStep3()}
+                                </>
+                            )}
+                        </motion.div>
+                    </AnimatePresence>
+                    
+                    {/* --- Renders Gemini/Ollama specific fields only on the last step of signup --- */}
+                    {!isLoginView && step === 3 && (
                         <div className="space-y-4 pt-2 animate-fadeIn">
-                            <LLMSelection selectedLLM={localSelectedLLM} onLlmChange={setLocalSelectedLLM} disabled={loading} />
-                            
-                            <div style={{ display: localSelectedLLM === 'gemini' ? 'block' : 'none' }}>
+                            <div style={{ display: formData.localSelectedLLM === 'gemini' ? 'block' : 'none' }}>
                                 <motion.div key="gemini-input" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                                     <div className="flex items-center mb-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => setRequestKeyFromAdmin(!requestKeyFromAdmin)}
-                                            className="flex items-center text-sm text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors"
-                                            disabled={loading}
-                                        >
-                                            {requestKeyFromAdmin ? <CheckSquare size={16} className="text-primary mr-2" /> : <Square size={16} className="mr-2" />}
+                                        <button type="button" onClick={() => handleChange({ target: { name: 'requestKeyFromAdmin', type: 'checkbox', checked: !formData.requestKeyFromAdmin }})} className="flex items-center text-sm text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light" disabled={loading}>
+                                            {formData.requestKeyFromAdmin ? <CheckSquare size={16} className="text-primary mr-2" /> : <Square size={16} className="mr-2" />}
                                             Request API Key from Admin
                                         </button>
                                     </div>
                                     <AnimatePresence>
-                                        {!requestKeyFromAdmin && (
-                                            <motion.div
-                                                key="api-key-field"
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                className="overflow-hidden"
-                                            >
+                                        {!formData.requestKeyFromAdmin && (
+                                            <motion.div key="api-key-field" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                                                 <label htmlFor="api-key-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Gemini API Key <span className="text-red-500">*</span></label>
                                                 <div className={inputWrapperClass}>
                                                     <KeyRound className={inputIconClass} />
-                                                    <input type="password" id="api-key-input" className={inputFieldStyledClass} placeholder="Enter your Gemini API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} required={!requestKeyFromAdmin && localSelectedLLM === 'gemini'} disabled={loading} />
+                                                    <input type="password" name="apiKey" id="api-key-input" className={inputFieldStyledClass} placeholder="Enter your Gemini API Key" value={formData.apiKey} onChange={handleChange} required={!formData.requestKeyFromAdmin && formData.localSelectedLLM === 'gemini'} disabled={loading} />
                                                 </div>
                                             </motion.div>
                                         )}
                                     </AnimatePresence>
                                 </motion.div>
                             </div>
-                        
-                            <div style={{ display: localSelectedLLM === 'ollama' ? 'block' : 'none' }}>
+                            <div style={{ display: formData.localSelectedLLM === 'ollama' ? 'block' : 'none' }}>
                                 <motion.div key="ollama-input" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                                     <label htmlFor="ollama-url-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Ollama URL <span className="text-red-500">*</span></label>
                                     <div className={inputWrapperClass}>
                                         <HardDrive className={inputIconClass} />
-                                        <input type="text" id="ollama-url-input" className={inputFieldStyledClass} placeholder="e.g., http://localhost:11434" value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} required={localSelectedLLM === 'ollama'} disabled={loading} />
+                                        <input type="text" name="ollamaUrl" id="ollama-url-input" className={inputFieldStyledClass} placeholder="e.g., http://localhost:11434" value={formData.ollamaUrl} onChange={handleChange} required={formData.localSelectedLLM === 'ollama'} disabled={loading} />
                                     </div>
                                 </motion.div>
                             </div>
                         </div>
                     )}
-
-                    <Button type="submit" fullWidth isLoading={loading} leftIcon={isLoginView ? <LogIn size={18}/> : <UserPlus size={18}/>} className="py-2.5 !text-base">
-                        {isLoginView ? 'Login' : 'Sign Up'}
-                    </Button>
+                    
+                    {/* --- Dynamic Button Rendering --- */}
+                    <div className="pt-2 flex items-center gap-3">
+                        {!isLoginView && step > 1 && (
+                            <Button type="button" variant="secondary" onClick={handleBack} disabled={loading}>
+                                Back
+                            </Button>
+                        )}
+                        <div className="flex-grow">
+                            {isLoginView ? (
+                                <Button type="submit" fullWidth isLoading={loading} leftIcon={<LogIn size={18}/>} className="py-2.5 !text-base">Login</Button>
+                            ) : step < 3 ? (
+                                <Button type="button" fullWidth onClick={handleNext} disabled={loading} className="py-2.5 !text-base">Continue</Button>
+                            ) : (
+                                <Button type="submit" fullWidth isLoading={loading} leftIcon={<UserPlus size={18}/>} className="py-2.5 !text-base">Create Account</Button>
+                            )}
+                        </div>
+                    </div>
                 </form>
 
                 <p className="mt-6 text-center text-sm">
-                    <button onClick={() => setIsLoginView(!isLoginView)} className="font-medium text-primary hover:underline" disabled={loading}>
+                    <button onClick={() => { setIsLoginView(!isLoginView); setError(''); setStep(1); }} className="font-medium text-primary hover:underline" disabled={loading}>
                         {isLoginView ? "Don't have an account? Sign Up" : "Already have an account? Login"}
                     </button>
                 </p>
@@ -10259,13 +10508,16 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     <details className="group/details text-xs" open>
-                        <summary className="flex items-center gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                            <LinkIcon size={14} /> References
+                     <details className="group/details text-xs">
+                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
+                            <span className="flex items-center gap-1">
+                                <LinkIcon size={14} /> References
+                            </span>
+                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
                         </summary>
                         <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
                             {references.map((ref, index) => (
-                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source || '')}`}>
+                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
                                     <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
                                 </li>
                             ))}
@@ -11189,31 +11441,120 @@ export default SubjectList;
 ```javascript
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import api from '../../services/api';
 import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
+import { motion } from 'framer-motion';
+import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame } from 'lucide-react';
+
+const features = [
+    {
+        icon: Globe,
+        title: "Web Search Agent",
+        description: "Get real-time answers and information from the web for up-to-the-minute topics.",
+        status: 'active',
+        glowColor: 'blue'
+    },
+    {
+        icon: BookMarked,
+        title: "Academic Search",
+        description: "Find and synthesize information from academic papers and scholarly articles.",
+        status: 'active',
+        glowColor: 'purple'
+    },
+    {
+        icon: Code,
+        title: "Secure Code Executor",
+        description: "Write, compile, and run code in a sandboxed environment with AI assistance.",
+        status: 'active',
+        glowColor: 'orange'
+    },
+    {
+        icon: TestTubeDiagonal,
+        title: "API Endpoint Tester",
+        description: "A tool for testing and validating API endpoints will be available soon.",
+        status: 'soon',
+        glowColor: 'gray'
+    }
+];
+
+
+const glowStyles = {
+    blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
+    purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
+    orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
+    gray: "" // No glow for disabled/soon cards
+};
+
 
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
     const { token: regularUserToken } = useRegularAuth();
-    const { selectedLLM, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
+    const { setSelectedSubject, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
+    const navigate = useNavigate();
 
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
     const [isActuallySendingAPI, setIsActuallySendingAPI] = useState(false);
     const abortControllerRef = useRef(null);
+    const [recommendations, setRecommendations] = useState([]);
+    const [isLoadingRecs, setIsLoadingRecs] = useState(true);
+
+    const handleFeatureClick = (title) => {
+        switch (title) {
+            case 'Web Search Agent':
+                setUseWebSearch(true);
+                toast.success("Web Search has been enabled for your next message.");
+                break;
+            case 'Academic Search':
+                setUseAcademicSearch(true);
+                toast.success("Academic Search has been enabled for your next message.");
+                break;
+            case 'Secure Code Executor':
+                navigate('/tools/code-executor');
+                break;
+            case 'API Endpoint Tester':
+                toast.info("The API Endpoint Tester is coming soon!");
+                break;
+            default:
+                break;
+        }
+    };
 
     useEffect(() => {
-        return () => { 
-            if (abortControllerRef.current) abortControllerRef.current.abort(); 
+        const fetchRecommendations = async () => {
+            if (messages.length === 0 && currentSessionId) {
+                setIsLoadingRecs(true);
+                try {
+                    const data = await api.getRecommendations(currentSessionId);
+                    setRecommendations(data.recommendations || []);
+                } catch (error) {
+                    console.error("Failed to fetch recommendations:", error);
+                    setRecommendations([]);
+                } finally {
+                    setIsLoadingRecs(false);
+                }
+            }
         };
-    }, []);
 
-    const handleSendMessage = async (inputText) => {
+        fetchRecommendations();
+    }, [currentSessionId, messages.length]);
+
+    const handleSendMessage = async (inputText, options = {}) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
+
+        const effectiveUseWebSearch = options.useWebSearch ?? useWebSearch;
+        const effectiveUseAcademicSearch = options.useAcademicSearch ?? useAcademicSearch;
+        const effectiveCriticalThinking = options.criticalThinkingEnabled ?? criticalThinkingEnabled;
+        const effectiveDocumentContext = options.documentContextName ?? selectedSubject ?? selectedDocumentForAnalysis;
+
+        console.log(`[DEBUG | CenterPanel] handleSendMessage triggered.`);
+        console.log(`  - Query: "${inputText.substring(0, 50)}..."`);
+        console.log(`  - Effective Flags: WebSearch=${effectiveUseWebSearch}, AcademicSearch=${effectiveUseAcademicSearch}`);
 
         abortControllerRef.current = new AbortController();
 
@@ -11229,10 +11570,10 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             id: streamingPlaceholderId,
             sender: 'bot',
             text: '',
-            thinking: criticalThinkingEnabled ? '' : null,
+            thinking: effectiveCriticalThinking ? '' : null,
             isStreaming: true,
             timestamp: new Date().toISOString(),
-            _accumulatedContent: '' // New field to accumulate content
+            _accumulatedContent: ''
         };
 
         setMessages(prev => [...prev, userMessage, placeholderMessage]);
@@ -11240,10 +11581,17 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         setIsActuallySendingAPI(true);
 
         try {
-            if (criticalThinkingEnabled) {
-                await handleStreamingSendMessage(inputText, streamingPlaceholderId);
+            const handlerOptions = {
+                useWebSearch: effectiveUseWebSearch,
+                useAcademicSearch: effectiveUseAcademicSearch,
+                criticalThinkingEnabled: effectiveCriticalThinking,
+                documentContextName: effectiveDocumentContext
+            };
+
+            if (effectiveCriticalThinking) {
+                await handleStreamingSendMessage(inputText, streamingPlaceholderId, handlerOptions);
             } else {
-                await handleStandardSendMessage(inputText, streamingPlaceholderId);
+                await handleStandardSendMessage(inputText, streamingPlaceholderId, handlerOptions);
             }
         } catch (error) {
             console.error("Error in handleSendMessage:", error);
@@ -11259,23 +11607,20 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         }
     };
     
-    const handleStreamingSendMessage = async (inputText, placeholderId) => {
+    const handleStreamingSendMessage = async (inputText, placeholderId, options) => {
         const payload = {
             query: inputText.trim(), 
             sessionId: currentSessionId, 
-            useWebSearch, 
-            useAcademicSearch,
+            useWebSearch: options.useWebSearch, 
+            useAcademicSearch: options.useAcademicSearch,
             systemPrompt, 
-            criticalThinkingEnabled, 
-            documentContextName: selectedSubject || selectedDocumentForAnalysis,
+            criticalThinkingEnabled: options.criticalThinkingEnabled, 
+            documentContextName: options.documentContextName,
         };
 
         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/message`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${regularUserToken}` 
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
             body: JSON.stringify(payload),
             signal: abortControllerRef.current.signal,
         });
@@ -11301,23 +11646,12 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 const jsonString = line.replace('data: ', '');
                 try {
                     const eventData = JSON.parse(jsonString);
-                    
                     if (eventData.type === 'thought') {
                         accumulatedThinking += eventData.content;
-                        setMessages(prev => prev.map(msg =>
-                            msg.id === placeholderId
-                            ? { 
-                                ...msg, 
-                                thinking: accumulatedThinking,
-                                _accumulatedContent: accumulatedThinking
-                              }
-                            : msg
-                        ));
-                    } 
-                    else if (eventData.type === 'final_answer') {
+                        setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...msg, thinking: accumulatedThinking, _accumulatedContent: accumulatedThinking } : msg));
+                    } else if (eventData.type === 'final_answer') {
                         finalBotMessageObject = eventData.content;
-                    } 
-                    else if (eventData.type === 'error') {
+                    } else if (eventData.type === 'error') {
                         throw new Error(eventData.content);
                     }
                 } catch (e) { 
@@ -11327,45 +11661,188 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         }
         
         if (finalBotMessageObject) {
-            setMessages(prev => prev.map(msg =>
-                msg.id === placeholderId
-                ? { 
-                    ...finalBotMessageObject, 
-                    id: placeholderId, 
-                    sender: 'bot', 
-                    isStreaming: false,
-                    thinking: accumulatedThinking || finalBotMessageObject.thinking
-                  }
-                : msg
-            ));
+            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
         }
     };
 
-    const handleStandardSendMessage = async (inputText, placeholderId) => {
+    const handleStandardSendMessage = async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
             query: inputText.trim(), 
-            history: messages.slice(0, -2), 
+            history: messages.slice(0, -2),
             sessionId: currentSessionId,
-            useWebSearch, 
-            useAcademicSearch, 
+            useWebSearch: options.useWebSearch,
+            useAcademicSearch: options.useAcademicSearch, 
             systemPrompt, 
-            documentContextName: selectedSubject || selectedDocumentForAnalysis
+            documentContextName: options.documentContextName
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg =>
-                msg.id === placeholderId
-                ? { ...response.reply, id: placeholderId, isStreaming: false }
-                : msg
-            ));
+            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...response.reply, id: placeholderId, isStreaming: false } : msg));
         } else {
             throw new Error("Invalid response from AI service.");
         }
     };
 
+    const handleRecommendationClick = async (rec) => {
+        if (isActuallySendingAPI) return;
+
+        setUseWebSearch(false);
+        setUseAcademicSearch(false);
+
+        switch (rec.actionType) {
+            case 'direct_answer': {
+                toast.success(`Asking the AI about "${rec.topic}"...`);
+                const detailedQuery = `Regarding the topic of "${rec.topic}", please provide a detailed explanation. Elaborate on the key concepts and provide clear examples.`;
+                handleSendMessage(detailedQuery, { useWebSearch: false, useAcademicSearch: false });
+                break;
+            }
+            case 'web_search': {
+                toast.success(`Web Search enabled for "${rec.topic}". Sending now...`);
+                setUseWebSearch(true);
+                const webQuery = `Search the web for the latest information on: ${rec.topic}`;
+                handleSendMessage(webQuery, { useWebSearch: true, useAcademicSearch: false });
+                break;
+            }
+            case 'academic_search': {
+                toast.success(`Academic Search enabled for "${rec.topic}". Sending now...`);
+                setUseAcademicSearch(true);
+                const academicQuery = `Find and summarize academic papers about: ${rec.topic}`;
+                handleSendMessage(academicQuery, { useWebSearch: false, useAcademicSearch: true });
+                break;
+            }
+            case 'document_review': {
+                toast.loading(`Finding the best document for "${rec.topic}"...`, { id: 'doc-find-toast' });
+                try {
+                    const { documentName } = await api.findDocumentForTopic(rec.topic);
+                    toast.success(`Focus set to document: ${documentName}`, { id: 'doc-find-toast' });
+                    setSelectedSubject(documentName); 
+                    handleSendMessage(`Based on the document "${documentName}", please explain "${rec.topic}".`, { documentContextName: documentName });
+                } catch (error) {
+                    toast.error(error.message || `Could not find a document for "${rec.topic}".`, { id: 'doc-find-toast' });
+                }
+                break;
+            }
+            default: {
+                toast.error(`Unknown recommendation type: ${rec.actionType}`);
+                break;
+            }
+        }
+    };
+
+    const RecommendationCard = ({ rec, index }) => (
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: index * 0.1, ease: "easeOut" }}
+            className="relative p-[2px] rounded-lg group"
+            style={{
+                background: `conic-gradient(from var(--angle), #059669, #3b82f6, #9333ea, #059669)`,
+                animation: 'spin-border 6s linear infinite',
+            }}
+        >
+            <button
+                onClick={() => handleRecommendationClick(rec)}
+                disabled={isActuallySendingAPI}
+                className="w-full h-full text-left bg-surface-light dark:bg-slate-800 rounded-[7px] p-4 flex flex-col justify-between transition-colors duration-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-60"
+            >
+                <div>
+                    <div className="flex items-center gap-2 mb-2">
+                        <Sparkles size={16} className="text-primary dark:text-teal-400 flex-shrink-0 twinkling-text" />
+                        <p className="text-sm font-semibold text-primary dark:text-primary-light uppercase tracking-wider truncate" title={rec.topic}>
+                            {rec.topic}
+                        </p>
+                    </div>
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark mt-1 h-16">
+                        {rec.suggestion_text}
+                    </p>
+                </div>
+                <div className="mt-4 text-sm font-bold text-teal-500 dark:text-teal-400 self-start flex items-center gap-1.5 transition-transform duration-300 group-hover:translate-x-1">
+                    Explore Now
+                    <ChevronRight size={18} />
+                </div>
+            </button>
+        </motion.div>
+    );
+
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark rounded-lg shadow-inner">
-            <ChatHistory messages={messages} />
+            {messages.length === 0 && !isActuallySendingAPI && currentSessionId ? (
+                <div className="flex-1 flex flex-col justify-center items-center p-4 sm:p-8 overflow-y-auto custom-scrollbar animate-fadeIn">
+                    <div className="w-full max-w-4xl mx-auto">
+                        <div className="text-center">
+                            <h1 className="text-5xl md:text-7xl font-extrabold bg-gradient-to-r from-purple-500 to-blue-500 text-transparent bg-clip-text mb-4">
+                                Welcome to iMentor
+                            </h1>
+                            <p className="text-lg md:text-xl text-text-muted-light dark:text-text-muted-dark font-medium">
+                                Your personal AI-powered guide for learning and discovery.
+                            </p>
+                        </div>
+                        
+                        <hr className="border-border-light dark:border-border-dark my-8" />
+                        
+                        <div className="text-center">
+                            <h2 className="text-2xl font-semibold mb-6 text-orange-500 animated-underline">
+                                What's New
+                            </h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+                                {features.map((feature, index) => (
+                                    <button 
+                                        key={index}
+                                        onClick={() => handleFeatureClick(feature.title)}
+                                        disabled={feature.status === 'soon'}
+                                        className={`group relative text-left bg-surface-light dark:bg-surface-dark/50 border border-border-light dark:border-border-dark rounded-lg p-4 transition-all duration-300 ease-in-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed ${glowStyles[feature.glowColor]}`}
+                                    >
+                                        <div className="relative">
+                                            {/* Special "HOT" tag for the Code Executor */}
+                                            {feature.title === 'Secure Code Executor' && (
+                                                <div className="fire-tag-animation absolute -top-2.5 -right-2.5 flex items-center gap-1 bg-gradient-to-br from-red-500 to-orange-400 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
+                                                    <Flame size={12} />
+                                                    HOT
+                                                </div>
+                                            )}
+                                            {feature.status === 'soon' && <span className="absolute -top-2 -right-2 text-xs bg-yellow-400/20 text-yellow-600 dark:text-yellow-400 font-semibold px-2 py-0.5 rounded-full">Coming Soon</span>}
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <feature.icon className="w-6 h-6 text-primary dark:text-primary-light" />
+                                                <h3 className="font-semibold text-text-light dark:text-text-dark">{feature.title}</h3>
+                                            </div>
+                                            <p className="text-sm text-text-muted-light dark:text-text-muted-dark">{feature.description}</p>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {!isLoadingRecs && recommendations.length > 0 && (
+                            <motion.div 
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
+                                className="mt-12"
+                            >
+                                <div className="relative text-center mb-6">
+                                    <hr className="border-border-light dark:border-border-dark" />
+                                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-background-light dark:bg-background-dark px-4">
+                                        <h3 className="text-xl font-bold flex items-center gap-2 bg-gradient-to-r from-accent to-green-400 text-transparent bg-clip-text twinkling-text">
+                                            <Sparkles size={20} /> Recommended For You
+                                        </h3>
+                                    </div>
+                                </div>
+                                <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark mb-6">
+                                    Based on your recent activity, here are a few suggestions to explore next.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                                    {recommendations.map((rec, index) => (
+                                        <RecommendationCard key={index} rec={rec} index={index} />
+                                    ))}
+                                </div>
+                            </motion.div>
+                        )}
+                    </div>
+                </div>
+            ) : (
+                <ChatHistory messages={messages} />
+            )}
+            
             <ChatInput
                 onSendMessage={handleSendMessage} 
                 isLoading={isActuallySendingAPI}
@@ -12141,7 +12618,18 @@ import api from '../../services/api';
 import toast from 'react-hot-toast';
 import Modal from '../core/Modal.jsx';
 import Button from '../core/Button.jsx';
-import { Save, User, School, Hash, Award, Wrench, Calendar } from 'lucide-react';
+import { Save, User, School, Hash, Award, Wrench, Calendar, Lightbulb, Goal, ChevronDown } from 'lucide-react';
+
+const yearOptions = {
+    "Bachelor's": ["1st Year", "2nd Year", "3rd Year", "4th Year"],
+    "Master's": ["1st Year", "2nd Year"],
+    "PhD": ["Coursework", "Research Phase", "Writing Phase"],
+    "Diploma": ["1st Year", "2nd Year", "3rd Year"]
+};
+
+const getYearOptions = (degree) => {
+    return yearOptions[degree] || ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"];
+};
 
 const ProfileSettingsModal = ({ isOpen, onClose }) => {
     const [profile, setProfile] = useState({
@@ -12167,9 +12655,11 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
                         name: data.name || '',
                         college: data.college || '',
                         universityNumber: data.universityNumber || '',
-                        degreeType: data.degreeType || 'Bachelors', // Default value
-                        branch: data.branch || 'Computer Science', // Default value
-                        year: data.year || '1st Year' // Default value
+                        degreeType: data.degreeType || "Bachelor's",
+                        branch: data.branch || 'Computer Science',
+                        year: data.year || '1st Year',
+                        learningStyle: data.learningStyle || 'Visual', // Add new field with default
+                        currentGoals: data.currentGoals || '' // Add new field with default
                     });
                 } catch (err) {
                     toast.error('Failed to load profile data.');
@@ -12184,8 +12674,16 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setProfile(prev => ({ ...prev, [name]: value }));
+        setProfile(prev => {
+            const newState = { ...prev, [name]: value };
+            if (name === 'degreeType') {
+                const newYearOptions = getYearOptions(value);
+                newState.year = newYearOptions[0];
+            }
+            return newState;
+        });
     };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -12224,7 +12722,7 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
             size="lg"
             footerContent={
                 <>
-                    <Button variant="ghost" onClick={onClose} disabled={isLoading}>Cancel</Button>
+                    <Button variant="secondary" onClick={onClose} disabled={isLoading}>Cancel</Button>
                     <Button onClick={handleSubmit} isLoading={isLoading} leftIcon={<Save size={16} />}>
                         Save Changes
                     </Button>
@@ -12234,54 +12732,71 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
             <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 
+                {/* --- Academic Details Section --- */}
+                <h3 className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark border-b border-border-light dark:border-border-dark pb-2">Academic Profile</h3>
                 <div className={inputWrapperClass}>
                     <User className={inputIconClass} />
                     <input type="text" name="name" value={profile.name} onChange={handleChange} placeholder="Full Name" className={inputFieldStyledClass} required />
                 </div>
-
-                <div className={inputWrapperClass}>
-                    <School className={inputIconClass} />
-                    <input type="text" name="college" value={profile.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={inputWrapperClass}>
+                        <School className={inputIconClass} />
+                        <input type="text" name="college" value={profile.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+                    </div>
+                    <div className={inputWrapperClass}>
+                        <Hash className={inputIconClass} />
+                        <input type="text" name="universityNumber" value={profile.universityNumber} onChange={handleChange} placeholder="University Number" className={inputFieldStyledClass} required />
+                    </div>
                 </div>
-                
-                <div className={inputWrapperClass}>
-                    <Hash className={inputIconClass} />
-                    <input type="text" name="universityNumber" value={profile.universityNumber} onChange={handleChange} placeholder="Registered University Number" className={inputFieldStyledClass} required />
-                </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className={inputWrapperClass}>
                         <Award className={inputIconClass} />
-                        <select name="degreeType" value={profile.degreeType} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="Bachelors">Bachelor's</option>
-                            <option value="Masters">Master's</option>
-                            <option value="PhD">PhD</option>
-                            <option value="Diploma">Diploma</option>
+                        <select name="degreeType" value={profile.degreeType} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                            <option>Bachelor's</option><option>Master's</option><option>PhD</option><option>Diploma</option>
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
                     </div>
-                    
                     <div className={inputWrapperClass}>
                         <Wrench className={inputIconClass} />
-                        <select name="branch" value={profile.branch} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="Computer Science">Computer Science</option>
-                            <option value="Mechanical Engineering">Mechanical</option>
-                            <option value="Electrical Engineering">Electrical</option>
-                            <option value="Civil Engineering">Civil</option>
-                            <option value="Electronics & Communication">Electronics & Comm.</option>
-                            <option value="Other">Other</option>
+                        <select name="branch" value={profile.branch} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Computer Science</option><option>Mechanical</option><option>Electrical</option><option>Civil</option><option>Electronics</option><option>Other</option>
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
                     </div>
-
                     <div className={inputWrapperClass}>
                         <Calendar className={inputIconClass} />
-                        <select name="year" value={profile.year} onChange={handleChange} className={selectFieldStyledClass} required>
-                            <option value="1st Year">1st Year</option>
-                            <option value="2nd Year">2nd Year</option>
-                            <option value="3rd Year">3rd Year</option>
-                            <option value="4th Year">4th Year</option>
-                            <option value="Final Year">Final Year</option>
-                            <option value="Graduated">Graduated</option>
+                        <select name="year" value={profile.year} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                            {getYearOptions(profile.degreeType).map(option => (
+                                <option key={option} value={option}>{option}</option>
+                            ))}
                         </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                    </div>
+
+                </div>
+
+                {/* --- Learning Preferences Section --- */}
+                <h3 className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark border-b border-border-light dark:border-border-dark pb-2 pt-4">Learning Preferences</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                    <div className="space-y-1">
+                        <label className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Preferred Learning Style</label>
+                        <div className={inputWrapperClass}>
+                            <Lightbulb className={inputIconClass} />
+                            <select name="learningStyle" value={profile.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                                <option>Visual</option>
+                                <option>Auditory</option>
+                                <option>Reading/Writing</option>
+                                <option>Kinesthetic</option>
+                            </select>
+                            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+                        </div>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark">Current Learning Goals (Optional)</label>
+                        <div className={inputWrapperClass}>
+                            <Goal className={inputIconClass} />
+                            <textarea name="currentGoals" value={profile.currentGoals} onChange={handleChange} placeholder="e.g., Prepare for my AI exam..." className={`${inputFieldStyledClass} !h-[42px] resize-none`} maxLength="500"></textarea>
+                        </div>
                     </div>
                 </div>
             </form>
@@ -12675,6 +13190,7 @@ const CodeExecutorPage = () => {
     const [results, setResults] = useState([]);
     const [compilationError, setCompilationError] = useState(null);
     const [isExecuting, setIsExecuting] = useState(false);
+    const [executionId, setExecutionId] = useState(0); // <<< FIX: Add execution ID state
 
     const handleLanguageChange = (newLanguage) => {
         setLanguage(newLanguage);
@@ -12682,6 +13198,7 @@ const CodeExecutorPage = () => {
     };
 
     const handleExecute = async () => {
+        setExecutionId(prevId => prevId + 1); // <<< FIX: Increment ID to force re-render
         setIsExecuting(true);
         setResults([]);
         setCompilationError(null);
@@ -12738,6 +13255,7 @@ const CodeExecutorPage = () => {
                             <PanelResizeHandle className="h-2 panel-resize-handle" />
                             <Panel defaultSize={40} minSize={20}>
                                 <OutputDisplay
+                                    key={executionId} // <<< FIX: Pass the key here
                                     results={results}
                                     compilationError={compilationError}
                                     code={code}
@@ -13976,44 +14494,195 @@ export const useWebSpeech = () => {
     @apply px-4 py-3 text-sm font-semibold border-b;
     @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
   }
+
+  .panel-resize-handle {
+      @apply relative bg-transparent;
+  }
+  
+  .panel-resize-handle::after {
+    content: '';
+    @apply absolute inset-0 transition-colors duration-200;
+  }
+
+  .panel-resize-handle[data-active='true']::after {
+    @apply bg-primary/50;
+  }
+
+  /* --- NEW: Twinkling Title Effect --- */
+  .twinkling-title {
+    animation: twinkle-effect 4s ease-in-out infinite;
+  }
 }
-  /* --- ADDED THIS SECTION --- */
-  @keyframes shimmer {
+
+@layer utilities {
+  /* --- NEW: Keyframes --- */
+  @keyframes twinkle-effect {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+      text-shadow: 0 0 8px theme('colors.orange.400' / 0.5);
+    }
+    50% {
+      opacity: 0.85;
+      transform: scale(0.98);
+      text-shadow: 0 0 16px theme('colors.amber.400' / 0.7);
+    }
+  }
+}
+
+
+/* In frontend/src/index.css, add this at the end */
+
+@layer utilities {
+  /* Keyframes for the border rotation */
+  @keyframes spin-border {
     0% {
-      background-position: -200% 0;
+      --angle: 0deg;
     }
     100% {
-      background-position: 200% 0;
+      --angle: 360deg;
     }
   }
 
-  .shimmer-text {
-    /* Set the gradient that will shimmer through the text */
-    background: linear-gradient(
-      90deg,
-      theme('colors.transparent') 25%,
-      theme('colors.gray.400 / 0.5') 50%,
-      theme('colors.transparent') 75%
-    );
-    background-size: 200% 100%;
-    
-    animation: shimmer 1.5s linear infinite;
-
-    -webkit-background-clip: text;
-    background-clip: text;
-    
-    color: transparent;
+  /* Keyframes for the twinkling/shining effect on text and icons */
+  @keyframes twinkle-effect {
+    0%, 100% {
+      opacity: 1;
+      text-shadow: 0 0 8px currentColor, 0 0 10px currentColor;
+    }
+    50% {
+      opacity: 0.85;
+      text-shadow: 0 0 12px currentColor, 0 0 16px currentColor;
+    }
   }
 
-  html.dark .shimmer-text {
-    background: linear-gradient(
-      90deg,
-      theme('colors.transparent') 25%,
-      theme('colors.gray.500 / 0.6') 50%,
-      theme('colors.transparent') 75%
-    );
-    background-size: 200% 100%;
+  /* Utility class to apply the twinkling animation */
+  .twinkling-text {
+    animation: twinkle-effect 4s ease-in-out infinite;
   }
+
+  /* 
+    This is the core of the rotating border effect.
+    We register '--angle' as a CSS property that can be animated.
+    This is a modern CSS feature that makes this animation smooth and performant.
+  */
+  @property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  @keyframes sweep-underline {
+  from {
+    transform: translateX(-101%); /* Start completely off-screen to the left */
+  }
+  to {
+    transform: translateX(101%); /* End completely off-screen to the right */
+  }
+}
+
+/* --- Utility class for the animated underline --- */
+.animated-underline {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 4px;
+  overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+}
+
+/* REVISED PSEUDO-ELEMENT for a smooth sweep */
+.animated-underline::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%; /* The gradient bar is the same width as the text */
+  height: 2px;
+  background: linear-gradient(
+    90deg, 
+    transparent, /* Start transparent */
+    theme('colors.orange.500'),
+    theme('colors.red.500'),
+    theme('colors.amber.400'),
+    transparent /* End transparent */
+  );
+  animation: sweep-underline 4s linear infinite;
+}
+
+/* --- Keyframes for the fiery "Hot" tag effect --- */
+@keyframes fire-flicker {
+  0%, 100% {
+    transform: scale(1, 1);
+    box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
+  }
+  50% {
+    transform: scale(1.05, 1.05);
+    box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
+  }
+}
+
+/* --- Utility class for the fire animation --- */
+.fire-tag-animation {
+  animation: fire-flicker 2.5s ease-in-out infinite;
+}
+}
+
+
+
+@layer utilities {
+  /* --- Keyframes for the sweeping underline effect --- */
+  @keyframes sweep-underline {
+    from {
+      transform: translateX(-101%); /* Start completely off-screen to the left */
+    }
+    to {
+      transform: translateX(101%); /* End completely off-screen to the right */
+    }
+  }
+
+  /* --- Utility class for the animated underline --- */
+  .animated-underline {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 4px;
+    overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+  }
+
+  .animated-underline::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%; /* The gradient bar is the same width as the text */
+    height: 2px;
+    background: linear-gradient(
+      90deg, 
+      transparent,
+      theme('colors.orange.500'),
+      theme('colors.red.500'),
+      theme('colors.amber.400'),
+      transparent
+    );
+    animation: sweep-underline 4s linear infinite;
+  }
+
+  /* --- Keyframes for the fiery "Hot" tag effect --- */
+  @keyframes fire-flicker {
+    0%, 100% {
+      transform: scale(1, 1);
+      box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
+    }
+    50% {
+      transform: scale(1.05, 1.05);
+      box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
+    }
+  }
+
+  /* --- Utility class for the fire animation --- */
+  .fire-tag-animation {
+    animation: fire-flicker 2.5s ease-in-out infinite;
+  }
+}
+
 ```
 
 `frontend/src/main.jsx`
@@ -14356,6 +15025,15 @@ const api = {
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
     return response.data; // Should be { explanation: "..." }
+  },
+  getRecommendations: async (sessionId) => {
+    const response = await apiClient.get(`/learning/recommendations/${sessionId}`);
+    return response.data; // Should be { recommendations: [...] }
+  },
+
+  findDocumentForTopic: async (topic) => {
+    const response = await apiClient.post('/learning/find-document', { topic });
+    return response.data; // Should be { documentName: "..." }
   },
 };
 
@@ -15504,6 +16182,7 @@ if (redisClient) {
 const connectRedis = async () => {
     if (redisClient && !redisClient.isOpen) {
         try {
+            console.log('[Redis Cache] Attempting to connect to Redis...');
             await redisClient.connect();
         } catch (err) {
             console.error('Failed to connect to Redis:', err);
@@ -15782,6 +16461,8 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const { encrypt } = require("../utils/crypto");
 
+// server/models/User.js
+
 const ProfileSchema = new mongoose.Schema(
   {
     name: { type: String, default: "", trim: true },
@@ -15790,6 +16471,24 @@ const ProfileSchema = new mongoose.Schema(
     degreeType: { type: String, default: "", trim: true },
     branch: { type: String, default: "", trim: true },
     year: { type: String, default: "", trim: true },
+    // --- NEW FIELDS START HERE ---
+    learningStyle: {
+      type: String,
+      enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
+      default: 'Not Specified'
+    },
+    currentGoals: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 500 // Prevent excessively long inputs
+    },
+    performanceMetrics: {
+      type: Map,
+      of: Number, // Stores topic proficiency, e.g., { "Calculus": 0.8 }
+      default: () => new Map()
+    }
+    // --- NEW FIELDS END HERE ---
   },
   { _id: false }
 );
@@ -16931,7 +17630,7 @@ import subprocess
 import tempfile
 import shutil
 import json
-
+import re
 
 from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 from pydub import AudioSegment
@@ -16957,6 +17656,11 @@ try:
     import academic_search
     import knowledge_graph_generator
     import google.generativeai as genai
+    from prompts import (
+        CODE_ANALYSIS_PROMPT_TEMPLATE,
+        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
+        EXPLAIN_ERROR_PROMPT_TEMPLATE
+    )
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -16967,6 +17671,29 @@ app = Flask(__name__)
 GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "script.py",
+        "compile_cmd": None,
+        "run_cmd": ["python", "script.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "program.c",
+        "compile_cmd": ["gcc", "program.c", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    },
+    "cpp": {
+        "filename": "program.cpp",
+        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
+        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
+    }
+}
 
 # --- Dynamic LLM Initialization & Wrapper ---
 def get_llm_model(api_key: str):
@@ -17029,6 +17756,7 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
     data = request.get_json()
@@ -17055,46 +17783,28 @@ def execute_code():
         with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
-        # --- Compilation Step ---
         if lang_config["compile_cmd"]:
             compile_process = subprocess.run(
-                lang_config["compile_cmd"],
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=10, # 10-second timeout for compilation
-                encoding='utf-8'
+                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                text=True, timeout=10, encoding='utf-8'
             )
             if compile_process.returncode != 0:
                 error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
                 logger.warning(f"Compilation failed for {language}. Error: {error_output}")
                 return jsonify({"compilationError": error_output}), 200
 
-        # --- Execution Step ---
         for i, case in enumerate(test_cases):
             case_input = case.get('input', '')
             expected_output = str(case.get('expectedOutput', '')).strip()
             
-            case_result = {
-                "input": case_input,
-                "expected": expected_output,
-                "output": "",
-                "error": None,
-                "status": "fail"
-            }
+            case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
 
             try:
                 run_process = subprocess.run(
-                    lang_config["run_cmd"],
-                    cwd=temp_dir,
-                    input=case_input,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    encoding='utf-8'
+                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
+                    capture_output=True, text=True, timeout=5, encoding='utf-8'
                 )
-
-                stdout = run_process.stdout.strip()
+                stdout = run_process.stdout.strip().replace('\r\n', '\n')
                 stderr = run_process.stderr.strip()
                 case_result["output"] = stdout
 
@@ -17116,16 +17826,69 @@ def execute_code():
             except Exception as exec_err:
                 case_result["status"] = "error"
                 case_result["error"] = f"An unexpected error occurred during execution: {str(exec_err)}"
-
             results.append(case_result)
-
     finally:
         shutil.rmtree(temp_dir)
 
     return jsonify({"results": results}), 200
 
+@app.route('/analyze_code', methods=['POST'])
+def analyze_code_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+        
+    try:
+        prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
+        analysis = llm_wrapper(prompt, api_key)
+        return jsonify({"analysis": analysis}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to analyze code: {str(e)}", 500)
 
-# --- THIS IS THE CORRECTED /query ENDPOINT ---
+@app.route('/generate_test_cases', methods=['POST'])
+def generate_test_cases_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
+    
+    if not all([code, language, api_key]):
+        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+
+    try:
+        prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for test cases.")
+        
+        test_cases = json.loads(json_match.group(0))
+        return jsonify({"testCases": test_cases}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to generate test cases: {str(e)}", 500)
+
+@app.route('/explain_error', methods=['POST'])
+def explain_error_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
+    
+    if not all([code, language, error_message, api_key]):
+        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+        
+    try:
+        prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
+        explanation = llm_wrapper(prompt, api_key)
+        return jsonify({"explanation": explanation}), 200
+    except Exception as e:
+        return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
     current_app.logger.info("--- /query Request (RAG Search Only) ---")
@@ -17146,11 +17909,10 @@ def search_qdrant_documents():
         if document_context_name:
             current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
-                key="file_name", # This is the field where originalName is stored in Qdrant metadata
+                key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
             ))
         
-        # This endpoint no longer handles KG logic. It's purely for Qdrant RAG.
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
         retrieved_docs, snippet, docs_map = vector_service.search_documents(
@@ -19396,29 +20158,29 @@ const router = express.Router();
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
 // --- @route   POST /api/auth/signup ---
-router.post('/signup', async (req, res) => {
-  // --- FIX START ---
-  // 1. Destructure the 'requestAdminKey' field from the request body.
-  const { email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey } = req.body;
-  // --- FIX END ---
+// server/routes/auth.js
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
+router.post('/signup', async (req, res) => {
+  // 1. Destructure the full payload from the multi-step form
+  const {
+    email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
+    name, college, universityNumber, degreeType, branch, year,
+    learningStyle, currentGoals
+  } = req.body;
+
+  // 2. Comprehensive Validation for the entire payload
+  if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
+    return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
   }
   if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
     return res.status(400).json({ message: 'Please provide a valid email address.' });
   }
   if (password.length < 6) {
-     return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
   }
-
-  // --- FIX START ---
-  // 2. Adjust validation logic: An API key is only required if the user *doesn't* request one from the admin.
   if (preferredLlmProvider === 'gemini' && !requestAdminKey && (!apiKey || apiKey.trim() === '')) {
-    return res.status(400).json({ message: 'A Gemini API Key is required when one is not being requested from the admin.' });
+    return res.status(400).json({ message: 'A Gemini API Key is required unless you request one from the admin.' });
   }
-  // --- FIX END ---
-  
   if (preferredLlmProvider === 'ollama' && (!ollamaUrl || ollamaUrl.trim() === '')) {
     return res.status(400).json({ message: 'An Ollama URL is required when Ollama is selected.' });
   }
@@ -19429,7 +20191,8 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-     const newUser = new User({
+    // 3. Create the new User with the complete profile object
+    const newUser = new User({
       email,
       username: email.split('@')[0],
       password,
@@ -19437,8 +20200,12 @@ router.post('/signup', async (req, res) => {
       apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
       encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
+      profile: {
+        name, college, universityNumber, degreeType, branch, year,
+        learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
+      }
     });
-    
+
     await newUser.save();
 
     const payload = {
@@ -19456,10 +20223,11 @@ router.post('/signup', async (req, res) => {
       sessionId: uuidv4(),
       message: "User registered successfully",
     });
+
   } catch (error) {
     console.error('Signup Error:', error);
     if (error.code === 11000 || error.message.includes('duplicate key error collection')) {
-        return res.status(400).json({ message: 'An account with this email already exists.' });
+        return res.status(400).json({ message: 'An account with this email or username already exists.' });
     }
     if (error.name === 'ValidationError') {
         const messages = Object.values(error.errors).map(val => val.message);
@@ -19531,11 +20299,12 @@ module.exports = router;
 ```javascript
 // server/routes/chat.js
 const express = require('express');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
-const { createOrUpdateSummary } = require('../services/summarizationService');
+const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
@@ -19575,6 +20344,10 @@ router.post('/message', async (req, res) => {
     } = req.body;
     
     const userId = req.user._id;
+
+    console.log(`%c[DEBUG | POST /message] Request Received`, 'color: #FFD700; font-weight: bold;');
+    console.log(`  - Session ID from Client:`, sessionId);
+    console.log(`  - User ID:`, userId.toString());
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
@@ -19663,6 +20436,10 @@ router.post('/message', async (req, res) => {
 
             streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
             
+            console.log(`%c[DEBUG | POST /message] Executing DB Update`, 'color: #FFD700; font-weight: bold;');
+            console.log(`  - Action: findOneAndUpdate (This will ADD messages to the existing session)`);
+            console.log(`  - Target Session ID:`, sessionId);
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
@@ -19687,12 +20464,20 @@ router.post('/message', async (req, res) => {
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
             };
-
+            console.log("---------------------------------------");
+            console.log(`[DB WRITE | /message] PRE-SAVE for Session ${sessionId}`);
+            console.log(`  - Attempting to atomically $push user message: "${userMessageForDb.parts[0].text.substring(0, 50)}..."`);
+            console.log(`  - Attempting to atomically $push AI response: "${aiMessageForDbAndClient.text.substring(0, 50)}..."`);
+            console.log("---------------------------------------");
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
                 { upsert: true, new: true }
             );
+            console.log("---------------------------------------");
+            console.log(`[DB WRITE | /message] POST-SAVE for Session ${sessionId}`);
+            console.log(`  - findOneAndUpdate operation completed successfully.`);
+            console.log("---------------------------------------");
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForDbAndClient });
@@ -19715,60 +20500,78 @@ router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
-    let contextSummaryForNewSession = "";
 
     try {
-        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean();
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-        const userOllamaUrl = user?.ollamaUrl || null;
-        let userApiKey = null;
-        if (llmProvider === 'gemini') {
-            userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
-
-        // --- THIS IS THE FIX ---
-        // 1. If there was a previous session, summarize IT and save that summary.
         if (previousSessionId) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
-            if (previousSession && previousSession.messages?.length > 0) {
-                console.log(`[New Chat] Summarizing previous session ${previousSessionId} before creating new one.`);
-                const summaryForOldSession = await createOrUpdateSummary(
-                    previousSession.messages,
-                    previousSession.summary, // Pass its own summary in case it's a continuation
-                    llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
+            
+            if (previousSession && previousSession.messages?.length > 1) {
+                console.log("---------------------------------------");
+                console.log(`[DB READ | /history] PRE-ANALYSIS for Session ${previousSessionId}`);
+                console.log(`  - Document loaded from DB contains ${previousSession.messages.length} messages.`);
+                console.log("---------------------------------------");
+                console.log(`[Chat Route] POST /history: Finalizing previous session '${previousSessionId}' for user '${userId}'...`);
                 
-                // Save the generated summary to the *old* session document.
-                previousSession.summary = summaryForOldSession;
-                await previousSession.save();
-                console.log(`[New Chat] Saved summary to previous session ${previousSessionId}.`);
-            }
-        }
-        
-        // 2. Now, create a new, broader summary for the NEW session's context.
-        // This gives the new session memory of the last 5 conversations.
-        const lastSessions = await ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean();
-        if (lastSessions && lastSessions.length > 0) {
-            const messagesForNewSummary = lastSessions.flatMap(session => session.messages);
-            if (messagesForNewSummary.length > 0) {
-                 console.log(`[New Chat] Creating context summary for new session from the last ${lastSessions.length} sessions.`);
-                contextSummaryForNewSession = await createOrUpdateSummary(
-                    messagesForNewSummary, null, llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
-            }
-        }
-        // --- END OF FIX ---
+                const user = await User.findById(userId).select('profile preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
+                const llmConfig = {
+                    llmProvider: user?.preferredLlmProvider || 'gemini',
+                    ollamaModel: user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL,
+                    apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+                    ollamaUrl: user?.ollamaUrl || null
+                };
 
-    } catch (summaryError) {
-        console.error(`Could not create summary from last sessions:`, summaryError);
-    }
-    
-    try {
-        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: contextSummaryForNewSession });
+                const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
+                    previousSession.messages, previousSession.summary,
+                    llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
+                );
+
+                await ChatHistory.updateOne(
+                    { sessionId: previousSessionId, userId: userId },
+                    { $set: { summary: summary } }
+                );
+
+
+                console.log("---------------------------------------");
+                console.log("History added");
+                console.log("---------------------------------------");
+
+                
+
+                if (knowledgeGaps && knowledgeGaps.size > 0) {
+                    user.profile.performanceMetrics.clear();     
+                    knowledgeGaps.forEach((score, topic) => {
+                        const sanitizedTopic = topic.replace(/\./g, '-');
+                        user.profile.performanceMetrics.set(sanitizedTopic, score);
+                    });
+                    await user.save(); 
+                    console.log(`[Chat Route] Overwrote user performance metrics with ${knowledgeGaps.size} new gaps.`);
+                }
+                
+                if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
+                    const cacheKey = `recommendations:${newSessionId}`;
+                    await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
+                    console.log(`[Chat Route] Caching ${recommendations.length} recommendations for new session ${newSessionId}.`);
+                }
+            }
+        }
+
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+        console.log(`[Chat Route] New session ${newSessionId} created and sent to user ${userId}.`);
         res.status(200).json({ message: 'New session started.', newSessionId });
-    } catch (dbError) {
-        res.status(500).json({ message: 'Failed to create new session.' });
+
+    } catch (error) {
+        console.error(`Error during finalize-and-create-new process:`, error);
+        if (!res.headersSent) {
+            try {
+                await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+                res.status(200).json({ 
+                    message: 'New session started, but analysis of previous session failed.',
+                    newSessionId: newSessionId 
+                });
+            } catch (fallbackError) {
+                 res.status(500).json({ message: 'A critical error occurred while creating a new session.' });
+            }
+        }
     }
 });
 
@@ -19788,49 +20591,14 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
-    const userId = req.user._id;
-    const cacheKey = `session:${sessionId}`;
-    const CACHE_TTL_SECONDS = 3600;
     try {
-        // 1. Check Redis Cache First
-        if (redisClient && redisClient.isOpen) {
-            const cachedSession = await redisClient.get(cacheKey);
-            if (cachedSession) {
-                console.log(`[Chat History] Cache HIT for session ${sessionId}`);
-                return res.status(200).json(JSON.parse(cachedSession));
-            }
-            console.log(`[Chat History] Cache MISS for session ${sessionId}`);
-        }
-
-        // 2. If miss, fetch from MongoDB
-        const session = await ChatHistory.findOne({ sessionId, userId }).lean();
-        if (!session) {
-            return res.status(404).json({ message: 'Chat session not found.' });
-        }
-        
-        const messagesForFrontend = (session.messages || []).map(msg => ({ 
-            id: msg._id || uuidv4(), 
-            sender: msg.role === 'model' ? 'bot' : 'user', 
-            text: msg.parts?.[0]?.text || '', 
-            thinking: msg.thinking, 
-            references: msg.references, 
-            timestamp: msg.timestamp, 
-            source_pipeline: msg.source_pipeline 
-        }));
-        
-        const responsePayload = { ...session, messages: messagesForFrontend };
-
-        // 3. Store the result in Redis for next time
-        if (redisClient && redisClient.isOpen) {
-            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(responsePayload)).catch(err => {
-                console.error(`Redis SETEX error for session ${sessionId}:`, err);
-            });
-        }
-
-        res.status(200).json(responsePayload);
+        const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
+        if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
+        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+        res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to retrieve chat session.' });
+        console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
+        res.status(500).json({ message: 'Failed to retrieve chat session details.' });
     }
 });
 
@@ -20627,6 +21395,91 @@ router.get('/visualize/:documentName', async (req, res) => {
 module.exports = router;
 ```
 
+`server/routes/learning.js`
+
+```javascript
+// server/routes/learning.js
+const express = require('express');
+const router = express.Router();
+const { redisClient } = require('../config/redisClient');
+const axios = require('axios');
+
+// @route   GET /api/learning/recommendations/:sessionId
+// @desc    Get cached recommendations for a new session.
+// @access  Private
+router.get('/recommendations/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const cacheKey = `recommendations:${sessionId}`;
+
+    try {
+        if (redisClient && redisClient.isOpen) {
+            const cachedData = await redisClient.get(cacheKey);
+
+            console.log(`[Learning Route] GET recommendations for session ${sessionId}:`);
+            console.log(`  - Cache Key: ${cacheKey}`);
+            console.log(`  - Data from Redis: ${cachedData ? cachedData.substring(0, 100) + '...' : 'null'}`);
+
+            
+            if (cachedData) {
+                console.log(`[Learning Route] Cache HIT for recommendations on session ${sessionId}.`);
+                // Once read, we can remove it from the cache
+                await redisClient.del(cacheKey); 
+                return res.status(200).json({ recommendations: JSON.parse(cachedData) });
+            }
+        }
+        console.log(`[Learning Route] Cache MISS for recommendations on session ${sessionId}.`);
+        res.status(200).json({ recommendations: [] }); // Return empty array if not found
+    } catch (error) {
+        console.error(`Error fetching recommendations from cache for session ${sessionId}:`, error);
+        res.status(500).json({ message: 'Server error retrieving recommendations.' });
+    }
+});
+
+// @route   POST /api/learning/find-document
+// @desc    Perform a JIT RAG search for a recommended topic.
+// @access  Private
+router.post('/find-document', async (req, res) => {
+    const { topic } = req.body;
+    const userId = req.user._id.toString();
+
+    if (!topic) {
+        return res.status(400).json({ message: 'Topic is required.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: 'RAG service is not configured.' });
+    }
+    const searchUrl = `${pythonServiceUrl}/query`;
+
+    try {
+        console.log(`[Learning Route] Performing JIT RAG search for topic: "${topic}" for user ${userId}`);
+        const response = await axios.post(searchUrl, {
+            query: topic,
+            user_id: userId, // Pass user ID to search their docs and admin docs
+            k: 1 // We only want the single best document for this topic
+        });
+
+        const docs = response.data?.retrieved_documents_list;
+        if (docs && docs.length > 0) {
+            const bestDoc = docs[0].metadata?.file_name || docs[0].metadata?.original_name;
+            if (bestDoc) {
+                return res.status(200).json({ documentName: bestDoc });
+            }
+        }
+
+        res.status(404).json({ message: 'No relevant document could be found for that topic.' });
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        console.error(`[Learning Route] RAG search failed for topic "${topic}":`, errorMsg);
+        res.status(500).json({ message: 'Failed to find a relevant document.' });
+    }
+});
+
+module.exports = router;
+```
+
 `server/routes/llmConfig.js`
 
 ```javascript
@@ -20928,8 +21781,23 @@ module.exports = router;
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+const User = require('../models/User'); // Import User model
+const { decrypt } = require('../utils/crypto'); // Import decrypt function
 
 // This entire router will be protected by the main authMiddleware in server.js
+async function getApiKeyForUser(userId) {
+    const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider');
+    if (!user) {
+        throw new Error("User not found.");
+    }
+    if (user.preferredLlmProvider === 'gemini') {
+        if (!user.encryptedApiKey) {
+            throw new Error("User has selected Gemini but has no API key configured.");
+        }
+        return decrypt(user.encryptedApiKey);
+    }
+    return null; 
+}
 
 // @route   POST /api/tools/execute
 // @desc    Execute code by proxying to the Python service
@@ -20990,11 +21858,12 @@ router.post("/analyze-code", async (req, res) => {
 
   const analysisUrl = `${pythonServiceUrl}/analyze_code`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       analysisUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -21016,11 +21885,12 @@ router.post("/generate-test-cases", async (req, res) => {
 
   const generationUrl = `${pythonServiceUrl}/generate_test_cases`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       generationUrl,
-      { language, code },
+      { language, code, apiKey }, // Pass apiKey
       { timeout: 60000 }
-    ); // 1 min timeout
+    );
     res.status(200).json(pythonResponse.data);
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
@@ -21044,9 +21914,10 @@ router.post("/explain-error", async (req, res) => {
 
   const explanationUrl = `${pythonServiceUrl}/explain_error`;
   try {
+    const apiKey = await getApiKeyForUser(req.user._id);
     const pythonResponse = await axios.post(
       explanationUrl,
-      { language, code, errorMessage },
+      { language, code, errorMessage, apiKey }, // Pass apiKey
       { timeout: 60000 }
     );
     res.status(200).json(pythonResponse.data);
@@ -21057,7 +21928,6 @@ router.post("/explain-error", async (req, res) => {
 });
 
 module.exports = router;
-
 ```
 
 `server/routes/upload.js`
@@ -21293,10 +22163,11 @@ router.get('/profile', async (req, res) => {
 // @desc    Update the current user's profile data
 // @access  Private
 router.put('/profile', async (req, res) => {
-    const { name, college, universityNumber, degreeType, branch, year } = req.body;
+    // 1. Destructure all possible profile fields, including the new ones
+    const { name, college, universityNumber, degreeType, branch, year, learningStyle, currentGoals } = req.body;
 
-    // Basic backend validation
-    if (!name || !college || !universityNumber || !degreeType || !branch || !year) {
+    // 2. Update validation to include the new required fields
+    if (!name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
         return res.status(400).json({ message: 'All profile fields are required.' });
     }
 
@@ -21306,17 +22177,22 @@ router.put('/profile', async (req, res) => {
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // Update the profile sub-document
+        // 3. Update the profile sub-document with all fields
+        // This ensures a complete and consistent profile object is always saved.
         user.profile = {
             name,
             college,
             universityNumber,
             degreeType,
             branch,
-            year
+            year,
+            learningStyle,
+            currentGoals: currentGoals || ''
         };
+        // The performanceMetrics field is intentionally not updated here, as it's managed by the system.
 
         await user.save();
+        
         if (redisClient && redisClient.isOpen) {
             const cacheKey = `user:${req.user._id}`;
             await redisClient.del(cacheKey);
@@ -21332,6 +22208,7 @@ router.put('/profile', async (req, res) => {
         res.status(500).json({ message: 'Server error while updating profile.' });
     }
 });
+
 
 module.exports = router;
 ```
@@ -21358,6 +22235,8 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
+const { connectRedis } = require('./config/redisClient');
+
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -21374,6 +22253,7 @@ const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
+const learningRoutes = require("./routes/learning");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -21409,6 +22289,7 @@ app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
 app.use(authMiddleware);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/learning", learningRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
@@ -21437,7 +22318,8 @@ async function startServer() {
     await connectDB(mongoUri);
     await performAssetCleanup();
     await checkRagService(pythonRagUrl);
-
+    await connectRedis();
+    
     const server = app.listen(port, "0.0.0.0", () => {
       console.log("\n=== Node.js Server Ready ===");
       console.log(`🚀 Server listening on port ${port}`);
@@ -22233,90 +23115,165 @@ module.exports = {
 };
 ```
 
-`server/services/summarizationService.js`
+`server/services/sessionAnalysisService.js`
 
 ```javascript
-// server/services/summarizationService.js
+// server/services/sessionAnalysisService.js
 const geminiService = require('./geminiService');
 const ollamaService = require('./ollamaService');
 
-// This prompt is key. It instructs the LLM on how to create a good, cumulative summary.
-const SUMMARIZATION_SYSTEM_PROMPT = `You are an expert conversation summarizer. Your task is to create a concise, yet comprehensive summary of the provided chat history between a User and an AI Assistant.
+// --- NEW, FOCUSED PROMPT 1: For Summary and Knowledge Gaps ---
+const SUMMARY_GAPS_PROMPT = `You are an expert educational analyst. Your task is to analyze the provided chat transcript and perform three actions. Your entire output MUST be a single, valid JSON object with NO other text before or after it.
 
-If an "Existing Summary" is provided, you MUST integrate the "New Messages" into it to create a single, updated, and coherent summary. Do not just append the new information; seamlessly weave it into the existing narrative.
+The JSON object MUST have three keys:
+1.  "summary": A string containing an updated, cumulative summary of the conversation. Incorporate the "Existing Summary" with insights from the "New Messages".
+2.  "keyTopics": An array of strings listing the 3-4 most important topics discussed in the conversation (e.g., ["Python Decorators", "Machine Learning Applications"]). This should be generated even if the user understood everything.
+3.  "knowledgeGaps": An array of objects, each with "topic" (string) and "proficiencyScore" (a number from 0.0 to 1.0). Only include topics where the user showed confusion or was corrected, and proficiency is clearly below 0.8.
 
-The final summary MUST be in the third person.
-Focus on capturing:
-- The user's primary goals or questions.
-- Key facts, concepts, or entities discussed.
-- Important conclusions or resolutions reached.
-- Any unresolved questions or next steps mentioned by the user.
+Example Output:
+{
+  "summary": "The user asked about the definition of machine learning and its real-world applications. They seem to have a good grasp of the core concepts.",
+  "keyTopics": ["Machine Learning Definition", "Real-world AI Applications", "Future of ML"],
+  "knowledgeGaps": []
+}`;
 
-Do NOT include conversational filler (e.g., "The user said hello"). The output should be a dense, information-rich paragraph.
 
-Example of a good updated summary:
-"Previously, the user, a PhD student, asked about 'Separation of Concerns'. In the latest exchange, they pivoted to inquiring about the specifics of Ohm's Law, and the AI provided the formula V=IR based on a document the user supplied. The user's current goal appears to be understanding foundational engineering concepts, moving from software to electrical principles."
-`;
+// --- NEW, FOCUSED PROMPT 2: For Recommendations ---
+const RECOMMENDATIONS_PROMPT = `You are an expert academic advisor. Based on the provided list of topics from a recent study session, your task is to generate 3 strategic "next step" recommendations. Your entire output MUST be a single, valid JSON object with ONE key, "recommendations", containing an array of objects.
+
+For each topic, suggest a logical follow-up action.
+- Suggest 'direct_answer' for a related, more advanced concept.
+- Suggest 'web_search' for practical applications or recent news.
+- Suggest 'academic_search' for deeper, theoretical research.
+
+Each recommendation object MUST have these keys:
+- "topic": The string for the NEW recommended topic.
+- "actionType": A string, must be one of 'web_search', 'academic_search', or 'direct_answer'.
+- "suggestion_text": A string containing a brief, encouraging sentence explaining what the user will learn next.
+
+Example Input Topics: ["Machine Learning Definition", "Real-world AI Applications"]
+Example Output:
+{
+  "recommendations": [
+    {
+      "topic": "Supervised vs. Unsupervised Learning",
+      "actionType": "direct_answer",
+      "suggestion_text": "Now that you know what ML is, let's explore its main learning paradigms."
+    },
+    {
+      "topic": "AI in Healthcare",
+      "actionType": "web_search",
+      "suggestion_text": "Discover how the applications we discussed are being used in the medical field today."
+    },
+    {
+      "topic": "Neural Network Architectures",
+      "actionType": "academic_search",
+      "suggestion_text": "Dive deeper into the technical foundations of modern AI by exploring research papers."
+    }
+  ]
+}`;
+
+
 
 /**
- * Creates or updates a conversation summary.
- * @param {Array<Object>} messagesToSummarize - The array of new message objects to add to the summary.
- * @param {string} existingSummary - The existing summary from the database.
- * @param {string} llmProvider - The LLM provider to use ('gemini' or 'ollama').
- * @param {string} ollamaModel - The specific Ollama model if the provider is 'ollama'.
- * @returns {Promise<string>} The generated summary text.
+ * STEP A: Gets the summary and knowledge gaps from a transcript.
  */
-async function createOrUpdateSummary(messagesToSummarize, existingSummary, llmProvider, ollamaModel, userApiKey, userOllamaUrl) {
-    if (!messagesToSummarize || messagesToSummarize.length === 0) {
-        return existingSummary || "";
-    }
-
-    const newMessagesText = messagesToSummarize.map(msg => {
-        const role = msg.role === 'model' ? 'Assistant' : 'User';
-        const text = msg.parts?.[0]?.text || '';
-        return `${role}: ${text}`;
-    }).join('\n\n');
-
-    let userPrompt = "";
-    if (existingSummary && existingSummary.trim() !== "") {
-        userPrompt = `Existing Summary:\n"""\n${existingSummary}\n"""\n\nNew Messages to integrate:\n"""\n${newMessagesText}\n"""\n\nPlease provide the new, updated summary.`;
-    } else {
-        userPrompt = `New Messages to summarize:\n"""\n${newMessagesText}\n"""\n\nPlease provide the summary.`;
-    }
-
-    const historyForLlm = [{ role: 'user', parts: [{ text: userPrompt }] }];
-
-    console.log(`[SummarizationService] Requesting summary using ${llmProvider}.`);
-
+async function getSummaryAndGaps(transcript, existingSummary, llmProvider, ollamaModel, userApiKey, userOllamaUrl) {
+    // Add keyTopics to the default response for safety.
+    const defaultResponse = { summary: existingSummary || "", knowledgeGaps: [], keyTopics: [] };
+    const userPrompt = `Existing Summary:\n"""\n${existingSummary || "None"}\n"""\n\nNew Messages:\n"""\n${transcript}\n"""\n\nPlease provide your analysis in the required JSON format.`;
+    
+    console.log(`[SessionAnalysisService] Requesting summary, gaps, and key topics using ${llmProvider}.`);
+    
     try {
-        let summary;
-        const llmOptions = { 
-            apiKey: userApiKey,
-            ollamaUrl: userOllamaUrl
-        };
-        if (llmProvider === 'ollama') {
-            summary = await ollamaService.generateContentWithHistory(
-                historyForLlm, SUMMARIZATION_SYSTEM_PROMPT, null, { ...llmOptions, model: ollamaModel }
-            );
-        } else {
-            summary = await geminiService.generateContentWithHistory(
-                historyForLlm, userPrompt, SUMMARIZATION_SYSTEM_PROMPT, llmOptions
-            );
-        }
-        console.log(`[SummarizationService] Summary generated successfully.`);
-        return summary.trim();
+        const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
+        const llmOptions = { apiKey: userApiKey, ollamaUrl: userOllamaUrl, model: ollamaModel, temperature: 0.2 };
+        const responseText = await llmService.generateContentWithHistory([], userPrompt, SUMMARY_GAPS_PROMPT, llmOptions);
+
+        // Find and parse the JSON block from the LLM's response.
+        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+        const jsonString = jsonMatch ? jsonMatch[2].trim() : responseText.trim();
+        const result = JSON.parse(jsonString);
+
+        // Safely extract each piece of data, providing fallbacks.
+        const finalSummary = result.summary || existingSummary || "";
+        const knowledgeGaps = (result.knowledgeGaps && Array.isArray(result.knowledgeGaps)) ? result.knowledgeGaps : [];
+        const keyTopics = (result.keyTopics && Array.isArray(result.keyTopics)) ? result.keyTopics : [];
+        
+        console.log(`[SessionAnalysisService] Analysis successful. Found ${knowledgeGaps.length} gaps and ${keyTopics.length} key topics.`);
+        
+        // Return all three pieces of data in the final object.
+        return { summary: finalSummary, knowledgeGaps, keyTopics };
+        
     } catch (error) {
-        console.error(`[SummarizationService] Error generating summary: ${error.message}`);
-        // --- THIS IS THE FIX ---
-        // Instead of returning an empty string, return a descriptive error.
-        // This will be saved in the DB and visible to the admin.
-        const errorMessage = `Summary generation failed: ${error.message}`;
-        return errorMessage;
-        // --- END OF FIX ---
+        console.error(`[SessionAnalysisService] Error during summary/gap/topic analysis: ${error.message}`);
+        return defaultResponse; // Return a safe default on any error.
     }
 }
 
-module.exports = { createOrUpdateSummary };
+/**
+ * STEP B: Gets recommendations based on knowledge gaps.
+ */
+async function generateRecommendations(knowledgeGaps, llmProvider, ollamaModel, userApiKey, userOllamaUrl) {
+    if (!knowledgeGaps || knowledgeGaps.length === 0) {
+        return []; // No gaps, no recommendations needed.
+    }
+    
+    const userPrompt = `Knowledge Gaps Identified:\n${JSON.stringify(knowledgeGaps, null, 2)}\n\nPlease provide your recommendations in the required JSON format.`;
+    console.log(`[SessionAnalysisService] Requesting recommendations for ${knowledgeGaps.length} knowledge gaps.`);
+
+    try {
+        const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
+        const llmOptions = { apiKey: userApiKey, ollamaUrl: userOllamaUrl, model: ollamaModel, temperature: 0.5 };
+        const responseText = await llmService.generateContentWithHistory([], userPrompt, RECOMMENDATIONS_PROMPT, llmOptions);
+
+        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+        const jsonString = jsonMatch ? jsonMatch[2].trim() : responseText.trim();
+        const result = JSON.parse(jsonString);
+
+        const recommendations = (result.recommendations && Array.isArray(result.recommendations)) ? result.recommendations.slice(0, 3) : [];
+        console.log(`[SessionAnalysisService] Recommendation generation successful. Generated ${recommendations.length} recommendations.`);
+        return recommendations;
+    } catch (error) {
+        console.error(`[SessionAnalysisService] Error during recommendation generation: ${error.message}`);
+        return []; // Return empty array on error
+    }
+}
+
+/**
+ * Orchestrates the full analysis pipeline.
+ * @returns {Promise<{summary: string, knowledgeGaps: Map<string, number>, recommendations: Array<Object>}>}
+ */
+async function analyzeAndRecommend(messagesToSummarize, existingSummary, llmProvider, ollamaModel, userApiKey, userOllamaUrl) {
+    const defaultResponse = { summary: existingSummary || "", knowledgeGaps: new Map(), recommendations: [] };
+    if (!messagesToSummarize || messagesToSummarize.length < 2) {
+        return defaultResponse;
+    }
+    
+    const transcript = messagesToSummarize.map(msg => `${msg.role === 'model' ? 'Tutor' : 'Student'}: ${msg.parts?.[0]?.text || ''}`).join('\n---\n');
+
+    // Step A: Get Summary, Gaps, and NOW Key Topics
+    const { summary, knowledgeGaps, keyTopics } = await getSummaryAndGaps(transcript, existingSummary, llmProvider, ollamaModel, userApiKey, userOllamaUrl);
+
+    // Step B: Generate Recommendations FROM THE KEY TOPICS
+    // We now pass keyTopics to the recommendation generator instead of knowledgeGaps
+    const recommendations = await generateRecommendations(keyTopics, llmProvider, ollamaModel, userApiKey, userOllamaUrl);
+    
+    // ... (rest of the function converting knowledgeGaps to a Map remains the same)
+    const knowledgeGapsMap = new Map();
+    if (knowledgeGaps) {
+        knowledgeGaps.forEach(item => {
+            if (typeof item.topic === 'string' && typeof item.proficiencyScore === 'number') {
+                knowledgeGapsMap.set(item.topic, item.proficiencyScore);
+            }
+        });
+    }
+
+    return { summary, knowledgeGaps: knowledgeGapsMap, recommendations };
+}
+
+
+module.exports = { analyzeAndRecommend }; 
 ```
 
 `server/services/toolExecutionService.js`

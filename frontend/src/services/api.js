@@ -221,6 +221,15 @@ const api = {
     const response = await apiClient.post("/tools/explain-error", payload);
     return response.data; // Should be { explanation: "..." }
   },
+  getRecommendations: async (sessionId) => {
+    const response = await apiClient.get(`/learning/recommendations/${sessionId}`);
+    return response.data; // Should be { recommendations: [...] }
+  },
+
+  findDocumentForTopic: async (topic) => {
+    const response = await apiClient.post('/learning/find-document', { topic });
+    return response.data; // Should be { documentName: "..." }
+  },
 };
 
 export default api;
