@@ -14,9 +14,12 @@ import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
 import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
+import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Button from './components/core/Button.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -40,7 +43,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -51,7 +54,6 @@ function MainAppLayout({ orchestratorStatus }) {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
-    const [isSessionLoading, setIsSessionLoading] = useState(false);
     
     const handleChatProcessingStatusChange = (isLoading) => {
         setIsChatProcessing(isLoading);
@@ -61,26 +63,6 @@ function MainAppLayout({ orchestratorStatus }) {
         regularUserLogout();
         setGlobalSessionId(null);
     };
-
-    const handleNewChat = async () => {
-    setIsSessionLoading(true); // Show the loading modal immediately
-    try {
-        // The API call is now awaited, blocking further execution until it's done
-        const data = await api.startNewSession(currentSessionId);
-        
-        if (data && data.newSessionId) {
-            setGlobalSessionId(data.newSessionId);
-            toast.success("New chat started!");
-        } else {
-            toast.error(data.message || "Could not start new chat session.");
-        }
-    } catch (error) {
-        toast.error(`Failed to start new chat: ${error.message}`);
-    } finally {
-        setIsSessionLoading(false); // Hide the loading modal in all cases (success or failure)
-    }
-    };
-
 
     const handleSelectSessionFromHistory = (sessionId) => {
         if (sessionId && sessionId !== currentSessionId) {
@@ -99,13 +81,7 @@ function MainAppLayout({ orchestratorStatus }) {
         }
         try {
             const sessionData = await api.getChatHistory(sid);
-            
-            // --- THIS IS THE CORRECTED LOGIC ---
-            // The API now returns messages pre-formatted with `sender`.
-            // We no longer need to map or transform the data here.
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
-            // --- END OF CORRECTION ---
-
         } catch (error) {
             toast.error(`History load failed: ${error.message}`);
         }
@@ -160,7 +136,6 @@ function MainAppLayout({ orchestratorStatus }) {
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
     </>
     );
-
 }
 
 function App() {
@@ -171,9 +146,69 @@ function App() {
     const [appInitializing, setAppInitializing] = useState(true);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+    const [isSessionLoading, setIsSessionLoading] = useState(false);
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+
+    const handleNewChat = useCallback(async (callback) => {
+        setIsSessionLoading(true);
+        try {
+            const data = await api.startNewSession(currentSessionId); 
+            if (data && data.newSessionId) {
+                setGlobalSessionId(data.newSessionId);
+                toast.success("New chat started!");
+
+                if (data.studyPlanSuggestion) {
+                    const { topic, reason } = data.studyPlanSuggestion;
+                    toast.custom((t) => (
+                        <motion.div
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
+                        >
+                            <div className="flex items-start">
+                                <div className="flex-shrink-0 pt-0.5">
+                                    <GraduationCap className="h-6 w-6 text-primary" />
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
+                                    <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
+                                    <div className="mt-4 flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            onClick={() => {
+                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
+                                                toast.dismiss(t.id);
+                                            }}
+                                        >
+                                            Create Plan for "{topic}"
+                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
+                                            Dismiss
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    ), {
+                        id: `study-plan-toast-${topic}`,
+                        duration: Infinity,
+                    });
+                }
+                
+                if (callback) callback(data.newSessionId);
+
+            } else {
+                toast.error(data.message || "Could not start new chat session.");
+            }
+        } catch (error) {
+            toast.error(`Failed to start new chat: ${error.message}`);
+        } finally {
+            setIsSessionLoading(false);
+        }
+    }, [currentSessionId, setGlobalSessionId, navigate]);
 
     useEffect(() => {
         if (isAdminSessionActive) {
@@ -193,26 +228,18 @@ function App() {
             setShowAuthModal(false);
             if (location.pathname.startsWith('/admin')) {
                 navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools')) { 
-                api.startNewSession(null).then(data => {
-                    if (data && data.newSessionId) {
-                        setGlobalSessionId(data.newSessionId);
-                    }
-                });
+            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
+                handleNewChat();
             }
         } else if (!location.pathname.startsWith('/admin')) {
             setShowAuthModal(true);
         }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId]);
+    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            api.startNewSession(null).then(data => {
-                if (data && data.newSessionId) {
-                    setGlobalSessionId(data.newSessionId);
-                }
-            });
+            handleNewChat();
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -236,8 +263,12 @@ function App() {
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
+                <Route
+                    path="/study-plan"
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} navigate={navigate} handleNewChat={handleNewChat} isSessionLoading={isSessionLoading} /> : null} />
             </Routes>
         </div>
     );

@@ -201,17 +201,20 @@ router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
+    
+    // This will hold our final response payload
+    const responsePayload = {
+        message: 'New session started.',
+        newSessionId: newSessionId,
+        studyPlanSuggestion: null // Default to null
+    };
 
     try {
         if (previousSessionId) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
             
             if (previousSession && previousSession.messages?.length > 1) {
-                console.log("---------------------------------------");
-                console.log(`[DB READ | /history] PRE-ANALYSIS for Session ${previousSessionId}`);
-                console.log(`  - Document loaded from DB contains ${previousSession.messages.length} messages.`);
-                console.log("---------------------------------------");
-                console.log(`[Chat Route] POST /history: Finalizing previous session '${previousSessionId}' for user '${userId}'...`);
+                console.log(`[Chat Route] Finalizing previous session '${previousSessionId}'...`);
                 
                 const user = await User.findById(userId).select('profile preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
                 const llmConfig = {
@@ -231,44 +234,67 @@ router.post('/history', async (req, res) => {
                     { $set: { summary: summary } }
                 );
 
-
-                console.log("---------------------------------------");
-                console.log("History added");
-                console.log("---------------------------------------");
-
-                
-
                 if (knowledgeGaps && knowledgeGaps.size > 0) {
                     user.profile.performanceMetrics.clear();     
                     knowledgeGaps.forEach((score, topic) => {
-                        const sanitizedTopic = topic.replace(/\./g, '-');
-                        user.profile.performanceMetrics.set(sanitizedTopic, score);
+                        user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
                     });
                     await user.save(); 
-                    console.log(`[Chat Route] Overwrote user performance metrics with ${knowledgeGaps.size} new gaps.`);
+                    console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
+
+                    // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
+                    // Find the single most significant knowledge gap (lowest score)
+                    let mostSignificantGap = null;
+                    let lowestScore = 1.1; // Start higher than max possible score
+
+                    knowledgeGaps.forEach((score, topic) => {
+                        if (score < lowestScore) {
+                            lowestScore = score;
+                            mostSignificantGap = topic;
+                        }
+                    });
+
+                    // If we found a significant gap (e.g., score < 0.6), create the suggestion object
+                    if (mostSignificantGap && lowestScore < 0.6) {
+                        console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
+                        responsePayload.studyPlanSuggestion = {
+                            topic: mostSignificantGap,
+                            reason: `Analysis of your last session shows this is a key area for improvement.`
+                        };
+                    }
+                    // --- END OF NEW LOGIC ---
                 }
                 
+                if (keyTopics && keyTopics.length > 0) {
+                    const primaryTopic = keyTopics[0];
+                    console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
+                    responsePayload.studyPlanSuggestion = {
+                        topic: primaryTopic,
+                        reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
+                    };
+                }
+
                 if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
                     const cacheKey = `recommendations:${newSessionId}`;
                     await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
-                    console.log(`[Chat Route] Caching ${recommendations.length} recommendations for new session ${newSessionId}.`);
+                    console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
                 }
             }
         }
 
         await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
-        console.log(`[Chat Route] New session ${newSessionId} created and sent to user ${userId}.`);
-        res.status(200).json({ message: 'New session started.', newSessionId });
+        console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
+        // Send the final payload, which may or may not include the suggestion
+        res.status(200).json(responsePayload);
 
     } catch (error) {
         console.error(`Error during finalize-and-create-new process:`, error);
         if (!res.headersSent) {
             try {
+                // Failsafe: even if analysis fails, still give the user a new session
                 await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
-                res.status(200).json({ 
-                    message: 'New session started, but analysis of previous session failed.',
-                    newSessionId: newSessionId 
-                });
+                responsePayload.message = 'New session started, but analysis of previous session failed.';
+                res.status(200).json(responsePayload);
             } catch (fallbackError) {
                  res.status(500).json({ message: 'A critical error occurred while creating a new session.' });
             }

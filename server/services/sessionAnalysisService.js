@@ -2,20 +2,31 @@
 const geminiService = require('./geminiService');
 const ollamaService = require('./ollamaService');
 
-// --- NEW, FOCUSED PROMPT 1: For Summary and Knowledge Gaps ---
 const SUMMARY_GAPS_PROMPT = `You are an expert educational analyst. Your task is to analyze the provided chat transcript and perform three actions. Your entire output MUST be a single, valid JSON object with NO other text before or after it.
 
 The JSON object MUST have three keys:
 1.  "summary": A string containing an updated, cumulative summary of the conversation. Incorporate the "Existing Summary" with insights from the "New Messages".
-2.  "keyTopics": An array of strings listing the 3-4 most important topics discussed in the conversation (e.g., ["Python Decorators", "Machine Learning Applications"]). This should be generated even if the user understood everything.
-3.  "knowledgeGaps": An array of objects, each with "topic" (string) and "proficiencyScore" (a number from 0.0 to 1.0). Only include topics where the user showed confusion or was corrected, and proficiency is clearly below 0.8.
+2.  "keyTopics": An array of strings listing the 3-4 most important topics discussed in the conversation (e.g., ["Python Decorators", "Machine Learning Applications"]). This must be generated regardless of user proficiency.
+3.  "knowledgeGaps": An array of objects, each with "topic" (string) and "proficiencyScore" (a number from 0.0 to 1.0).
+
+**CRITICAL INSTRUCTIONS FOR "knowledgeGaps":**
+- A knowledge gap exists if the user **explicitly states confusion** (e.g., "I have a gap in X", "I don't understand Y"), even if you provided a good explanation later.
+- A knowledge gap exists if the user asks **multiple, basic clarifying questions** about the same foundational topic.
+- Assign a **low proficiencyScore (e.g., 0.3 - 0.5)** to any topic where the user stated a "huge gap" or significant confusion at the start.
+- Only include topics where the user's proficiency appears to be below 0.8 by the end of the conversation. If they seem to understand everything perfectly, this array should be empty.
 
 Example Output:
 {
-  "summary": "The user asked about the definition of machine learning and its real-world applications. They seem to have a good grasp of the core concepts.",
-  "keyTopics": ["Machine Learning Definition", "Real-world AI Applications", "Future of ML"],
-  "knowledgeGaps": []
+  "summary": "The user stated a significant gap in their understanding of the Software Development Life Cycle (SDLC) and Separation of Concerns (SoC). A detailed explanation of SoC was provided, covering its goals and analogies.",
+  "keyTopics": ["Separation of Concerns (SoC)", "Software Design Principles", "System Complexity Management"],
+  "knowledgeGaps": [
+    {
+      "topic": "Separation of Concerns (SoC)",
+      "proficiencyScore": 0.4
+    }
+  ]
 }`;
+
 
 
 // --- NEW, FOCUSED PROMPT 2: For Recommendations ---

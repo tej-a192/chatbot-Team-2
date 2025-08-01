@@ -7242,6 +7242,7 @@ import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
 import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7463,6 +7464,10 @@ function App() {
             <Routes>
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
+                />
+                <Route
+                    path="/study-plan"
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage /> : <Navigate to="/" />}
                 />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
@@ -10148,6 +10153,7 @@ import IconButton from '../core/IconButton.jsx';
 import toast from 'react-hot-toast';
 import blueBrain from "./../../assets/blueBrain.svg";
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 
 function ChatInput({ 
     onSendMessage, 
@@ -10160,10 +10166,20 @@ function ChatInput({
     setCriticalThinkingEnabled
 }) {
     const [inputValue, setInputValue] = useState('');
+    const location = useLocation();
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+
+    useEffect(() => {
+        const locationState = location.state;
+        if (locationState?.prefilledPrompt) {
+            setInputValue(locationState.prefilledPrompt);
+        }
+    }, [location.state]);
+
 
     useEffect(() => {
         if (transcript) {
@@ -11440,8 +11456,8 @@ export default SubjectList;
 
 ```javascript
 // frontend/src/components/layout/CenterPanel.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import api from '../../services/api';
@@ -11482,7 +11498,6 @@ const features = [
     }
 ];
 
-
 const glowStyles = {
     blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
@@ -11490,12 +11505,13 @@ const glowStyles = {
     gray: "" // No glow for disabled/soon cards
 };
 
-
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
     const { token: regularUserToken } = useRegularAuth();
     const { setSelectedSubject, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const navigate = useNavigate();
+    const location = useLocation();
 
+    // Local state for toggles and component status
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
@@ -11503,111 +11519,10 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-
-    const handleFeatureClick = (title) => {
-        switch (title) {
-            case 'Web Search Agent':
-                setUseWebSearch(true);
-                toast.success("Web Search has been enabled for your next message.");
-                break;
-            case 'Academic Search':
-                setUseAcademicSearch(true);
-                toast.success("Academic Search has been enabled for your next message.");
-                break;
-            case 'Secure Code Executor':
-                navigate('/tools/code-executor');
-                break;
-            case 'API Endpoint Tester':
-                toast.info("The API Endpoint Tester is coming soon!");
-                break;
-            default:
-                break;
-        }
-    };
-
-    useEffect(() => {
-        const fetchRecommendations = async () => {
-            if (messages.length === 0 && currentSessionId) {
-                setIsLoadingRecs(true);
-                try {
-                    const data = await api.getRecommendations(currentSessionId);
-                    setRecommendations(data.recommendations || []);
-                } catch (error) {
-                    console.error("Failed to fetch recommendations:", error);
-                    setRecommendations([]);
-                } finally {
-                    setIsLoadingRecs(false);
-                }
-            }
-        };
-
-        fetchRecommendations();
-    }, [currentSessionId, messages.length]);
-
-    const handleSendMessage = async (inputText, options = {}) => {
-        if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
-
-        const effectiveUseWebSearch = options.useWebSearch ?? useWebSearch;
-        const effectiveUseAcademicSearch = options.useAcademicSearch ?? useAcademicSearch;
-        const effectiveCriticalThinking = options.criticalThinkingEnabled ?? criticalThinkingEnabled;
-        const effectiveDocumentContext = options.documentContextName ?? selectedSubject ?? selectedDocumentForAnalysis;
-
-        console.log(`[DEBUG | CenterPanel] handleSendMessage triggered.`);
-        console.log(`  - Query: "${inputText.substring(0, 50)}..."`);
-        console.log(`  - Effective Flags: WebSearch=${effectiveUseWebSearch}, AcademicSearch=${effectiveUseAcademicSearch}`);
-
-        abortControllerRef.current = new AbortController();
-
-        const userMessage = {
-            id: `user-${Date.now()}`, 
-            sender: 'user', 
-            text: inputText.trim(),
-            timestamp: new Date().toISOString(),
-        };
-
-        const streamingPlaceholderId = `bot-streaming-${Date.now()}`;
-        const placeholderMessage = {
-            id: streamingPlaceholderId,
-            sender: 'bot',
-            text: '',
-            thinking: effectiveCriticalThinking ? '' : null,
-            isStreaming: true,
-            timestamp: new Date().toISOString(),
-            _accumulatedContent: ''
-        };
-
-        setMessages(prev => [...prev, userMessage, placeholderMessage]);
-        onChatProcessingChange(true);
-        setIsActuallySendingAPI(true);
-
-        try {
-            const handlerOptions = {
-                useWebSearch: effectiveUseWebSearch,
-                useAcademicSearch: effectiveUseAcademicSearch,
-                criticalThinkingEnabled: effectiveCriticalThinking,
-                documentContextName: effectiveDocumentContext
-            };
-
-            if (effectiveCriticalThinking) {
-                await handleStreamingSendMessage(inputText, streamingPlaceholderId, handlerOptions);
-            } else {
-                await handleStandardSendMessage(inputText, streamingPlaceholderId, handlerOptions);
-            }
-        } catch (error) {
-            console.error("Error in handleSendMessage:", error);
-            setMessages(prev => prev.map(msg =>
-                msg.id === streamingPlaceholderId
-                ? { ...msg, isStreaming: false, text: `Error: ${error.message}` }
-                : msg
-            ));
-            toast.error(error.message);
-        } finally {
-            setIsActuallySendingAPI(false);
-            onChatProcessingChange(false);
-        }
-    };
     
-    const handleStreamingSendMessage = async (inputText, placeholderId, options) => {
+    // --- STABLE FUNCTION DEFINITIONS ---
+
+    const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const payload = {
             query: inputText.trim(), 
             sessionId: currentSessionId, 
@@ -11663,9 +11578,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
         }
-    };
+    }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
-    const handleStandardSendMessage = async (inputText, placeholderId, options) => {
+    const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
             query: inputText.trim(), 
             history: messages.slice(0, -2),
@@ -11680,6 +11595,143 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...response.reply, id: placeholderId, isStreaming: false } : msg));
         } else {
             throw new Error("Invalid response from AI service.");
+        }
+    }, [messages, currentSessionId, systemPrompt, setMessages]);
+
+    const handleSendMessage = useCallback(async (inputText, options = {}) => {
+        if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
+
+        const effectiveUseWebSearch = options.useWebSearch ?? useWebSearch;
+        const effectiveUseAcademicSearch = options.useAcademicSearch ?? useAcademicSearch;
+        const effectiveCriticalThinking = options.criticalThinkingEnabled ?? criticalThinkingEnabled;
+        const effectiveDocumentContext = options.documentContextName ?? selectedSubject ?? selectedDocumentForAnalysis;
+
+        abortControllerRef.current = new AbortController();
+
+        const userMessage = {
+            id: `user-${Date.now()}`,
+            sender: 'user',
+            text: inputText.trim(),
+            timestamp: new Date().toISOString(),
+        };
+
+        const streamingPlaceholderId = `bot-streaming-${Date.now()}`;
+        const placeholderMessage = {
+            id: streamingPlaceholderId,
+            sender: 'bot',
+            text: '',
+            thinking: effectiveCriticalThinking ? '' : null,
+            isStreaming: true,
+            timestamp: new Date().toISOString(),
+            _accumulatedContent: ''
+        };
+
+        setMessages(prev => [...prev, userMessage, placeholderMessage]);
+        onChatProcessingChange(true);
+        setIsActuallySendingAPI(true);
+
+        try {
+            const handlerOptions = {
+                useWebSearch: effectiveUseWebSearch,
+                useAcademicSearch: effectiveUseAcademicSearch,
+                criticalThinkingEnabled: effectiveCriticalThinking,
+                documentContextName: effectiveDocumentContext
+            };
+
+            if (effectiveCriticalThinking) {
+                await handleStreamingSendMessage(inputText, streamingPlaceholderId, handlerOptions);
+            } else {
+                await handleStandardSendMessage(inputText, streamingPlaceholderId, handlerOptions);
+            }
+        } catch (error) {
+            console.error("Error in handleSendMessage:", error);
+            setMessages(prev => prev.map(msg =>
+                msg.id === streamingPlaceholderId
+                ? { ...msg, isStreaming: false, text: `Error: ${error.message}` }
+                : msg
+            ));
+            toast.error(error.message);
+        } finally {
+            setIsActuallySendingAPI(false);
+            onChatProcessingChange(false);
+            setUseWebSearch(false);
+            setUseAcademicSearch(false);
+        }
+    }, [
+        regularUserToken, currentSessionId, isActuallySendingAPI, useWebSearch, 
+        useAcademicSearch, criticalThinkingEnabled, selectedSubject, 
+        selectedDocumentForAnalysis, setMessages, onChatProcessingChange,
+        handleStreamingSendMessage, handleStandardSendMessage, systemPrompt
+    ]);
+    
+    // --- HOOKS ---
+
+    useEffect(() => {
+        const fetchRecommendations = async () => {
+            if (messages.length === 0 && currentSessionId) {
+                setIsLoadingRecs(true);
+                try {
+                    const data = await api.getRecommendations(currentSessionId);
+                    setRecommendations(data.recommendations || []);
+                } catch (error) {
+                    console.error("Failed to fetch recommendations:", error);
+                    setRecommendations([]);
+                } finally {
+                    setIsLoadingRecs(false);
+                }
+            }
+        };
+        fetchRecommendations();
+    }, [currentSessionId, messages.length]);
+
+    useEffect(() => {
+        const locationState = location.state;
+        if (locationState?.startModuleActivity && locationState.startModuleActivity.type) {
+            const { activity, prefilledPrompt } = locationState;
+            
+            const options = {
+                useWebSearch: activity.type === 'web_search',
+                useAcademicSearch: activity.type === 'academic_search',
+                documentContextName: (activity.type === 'document_review' && activity.resourceName) ? activity.resourceName : null
+            };
+
+            if (options.documentContextName) {
+                setSelectedSubject(options.documentContextName);
+            } else {
+                // Only clear the subject if the activity doesn't involve a document review
+                if (activity.type !== 'document_review') {
+                    setSelectedSubject(null);
+                }
+            }
+
+            if (prefilledPrompt) {
+                handleSendMessage(prefilledPrompt, options);
+            }
+
+            navigate(location.pathname, { replace: true, state: {} });
+        }
+    }, [location.state, navigate, setSelectedSubject, handleSendMessage]);
+
+    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
+
+    const handleFeatureClick = (title) => {
+        switch (title) {
+            case 'Web Search Agent':
+                setUseWebSearch(true);
+                toast.success("Web Search has been enabled for your next message.");
+                break;
+            case 'Academic Search':
+                setUseAcademicSearch(true);
+                toast.success("Academic Search has been enabled for your next message.");
+                break;
+            case 'Secure Code Executor':
+                navigate('/tools/code-executor');
+                break;
+            case 'API Endpoint Tester':
+                toast.info("The API Endpoint Tester is coming soon!");
+                break;
+            default:
+                break;
         }
     };
 
@@ -11698,16 +11750,12 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             }
             case 'web_search': {
                 toast.success(`Web Search enabled for "${rec.topic}". Sending now...`);
-                setUseWebSearch(true);
-                const webQuery = `Search the web for the latest information on: ${rec.topic}`;
-                handleSendMessage(webQuery, { useWebSearch: true, useAcademicSearch: false });
+                handleSendMessage(`Search the web for the latest information on: ${rec.topic}`, { useWebSearch: true, useAcademicSearch: false });
                 break;
             }
             case 'academic_search': {
                 toast.success(`Academic Search enabled for "${rec.topic}". Sending now...`);
-                setUseAcademicSearch(true);
-                const academicQuery = `Find and summarize academic papers about: ${rec.topic}`;
-                handleSendMessage(academicQuery, { useWebSearch: false, useAcademicSearch: true });
+                handleSendMessage(`Find and summarize academic papers about: ${rec.topic}`, { useWebSearch: false, useAcademicSearch: true });
                 break;
             }
             case 'document_review': {
@@ -11793,7 +11841,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                                         className={`group relative text-left bg-surface-light dark:bg-surface-dark/50 border border-border-light dark:border-border-dark rounded-lg p-4 transition-all duration-300 ease-in-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed ${glowStyles[feature.glowColor]}`}
                                     >
                                         <div className="relative">
-                                            {/* Special "HOT" tag for the Code Executor */}
                                             {feature.title === 'Secure Code Executor' && (
                                                 <div className="fire-tag-animation absolute -top-2.5 -right-2.5 flex items-center gap-1 bg-gradient-to-br from-red-500 to-orange-400 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
                                                     <Flame size={12} />
@@ -12457,7 +12504,7 @@ import LLMSelectionModal from './LLMSelectionModal.jsx';
 import ProfileSettingsModal from '../profile/ProfileSettingsModal.jsx';
 import { Link } from 'react-router-dom';
 import { 
-    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench 
+    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench, GraduationCap 
 } from 'lucide-react';
 import ToolsModal from '../tools/ToolsModal.jsx'; 
 
@@ -12510,7 +12557,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                     <div className="flex items-center gap-1 sm:gap-2">
                          <button
                             onClick={onNewChat}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-sky-700 dark:text-sky-300 bg-sky-500/10 dark:bg-sky-500/20 hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="Start a new chat session"
                         >
@@ -12519,16 +12566,25 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                         
                         <button
                             onClick={onHistoryClick}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-teal-700 dark:text-teal-300 bg-teal-500/10 dark:bg-teal-500/20 hover:bg-teal-500/20 dark:hover:bg-teal-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="View chat history"
                         >
                             <HistoryIcon size={14} /> <span className="hidden sm:inline">History</span>
                         </button>
 
-                         <button
+                         <Link
+                            to="/study-plan"
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 dark:bg-indigo-500/20 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={(e) => isChatProcessing && e.preventDefault()}
+                            title="Open your personalized Study Plan"
+                        >
+                            <GraduationCap size={14} /> <span className="hidden sm:inline">Study Plan</span>
+                        </Link>
+
+                        <button
                             onClick={() => setIsToolsModalOpen(true)}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 text-amber-700 dark:text-amber-400 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-amber-700 dark:text-amber-400 bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="Open Tools"
                         >
@@ -12537,7 +12593,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
 
                         <button
                             onClick={() => setIsLLMModalOpen(true)}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-slate-500/10 dark:bg-slate-500/20 hover:bg-slate-500/20 dark:hover:bg-slate-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title={`Switch LLM (Current: ${selectedLLM.toUpperCase()})`}
                         >
@@ -12545,6 +12601,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                         </button>
                     </div>
                 </div>
+
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
                     <div className="w-8 h-8 flex items-center justify-center">
@@ -12607,6 +12664,257 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
     );
 }
 export default TopNav;
+```
+
+`frontend/src/components/learning/StudyPlanPage.jsx`
+
+```javascript
+// frontend/src/components/learning/StudyPlanPage.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked } from 'lucide-react';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+import Button from '../core/Button';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useAppState } from '../../contexts/AppStateContext';
+
+const iconMap = {
+    direct_answer: GraduationCap,
+    document_review: FileText,
+    web_search: Globe,
+    academic_search: BookMarked,
+    code_executor: Code,
+};
+
+// --- Module Checklist Item Component ---
+const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp }) => {
+    const navigate = useNavigate();
+    const [isUpdating, setIsUpdating] = useState(false);
+
+    const handleStatusToggle = async () => {
+        setIsUpdating(true);
+        const newStatus = module.status === 'completed' ? 'not_started' : 'completed';
+        try {
+            await api.updateModuleStatus(pathId, module.moduleId, newStatus);
+            toast.success(`Module '${module.title}' marked as ${newStatus}.`);
+            onModuleUpdate(); // Trigger parent to refetch all paths
+        } catch (error) {
+            toast.error(`Failed to update module: ${error.message}`);
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const handleStartModule = () => {
+        const { activity } = module;
+
+        // For code executor, just navigate directly
+        if (activity.type === 'code_executor') {
+            navigate('/tools/code-executor');
+            return;
+        }
+
+        // For all other types, navigate to the chat page and pass the
+        // activity details in the navigation state. The chat page will handle it.
+        navigate('/', { 
+            state: { 
+                prefilledPrompt: activity.suggestedPrompt,
+                startModuleActivity: activity // Pass the entire activity object
+            } 
+        });
+    };
+
+    const ActivityIcon = iconMap[module.activity.type] || GraduationCap;
+    const isLocked = module.status === 'locked';
+    const isCompleted = module.status === 'completed';
+
+    return (
+        <div className={`flex items-start gap-4 p-4 border-l-4 ${isCompleted ? 'border-green-500 bg-green-500/5' : isNextUp ? 'border-primary' : 'border-transparent'}`}>
+            <div className="flex-shrink-0 mt-1">
+                {isUpdating ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                ) : (
+                    <button onClick={handleStatusToggle} disabled={isLocked} className="disabled:opacity-50 disabled:cursor-not-allowed">
+                        {isLocked ? <Lock className="w-6 h-6 text-text-muted-light dark:text-text-muted-dark" /> :
+                         isCompleted ? <CheckCircle className="w-6 h-6 text-green-500" /> :
+                         <Circle className="w-6 h-6 text-text-muted-light dark:text-text-muted-dark hover:text-primary" />}
+                    </button>
+                )}
+            </div>
+            <div className="flex-grow">
+                <h4 className={`font-semibold ${isCompleted ? 'line-through text-text-muted-light dark:text-text-muted-dark' : 'text-text-light dark:text-text-dark'}`}>
+                    {module.title}
+                </h4>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark mt-1 italic">"{module.objective}"</p>
+                <div className="flex items-center gap-2 text-xs mt-2 text-text-muted-light dark:text-text-muted-dark">
+                    <ActivityIcon size={14} />
+                    <span>Activity: {module.activity.resourceName ? `${module.activity.type} (${module.activity.resourceName})` : module.activity.type}</span>
+                </div>
+            </div>
+            {isNextUp && !isCompleted && (
+                <div className="flex-shrink-0 self-center">
+                    <Button size="sm" onClick={handleStartModule}>Start Module</Button>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+// --- Create New Plan Component ---
+const CreatePlan = ({ onPlanCreated }) => {
+    const [goal, setGoal] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleGenerate = async (e) => {
+        e.preventDefault();
+        if (!goal.trim()) {
+            toast.error("Please enter a learning goal.");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            await api.generateLearningPath(goal.trim());
+            toast.success("New study plan created successfully!");
+            setGoal('');
+            onPlanCreated(); // Callback to refresh the list
+        } catch (error) {
+            toast.error(`Failed to create plan: ${error.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="card-base p-6 mb-8">
+            <h2 className="text-lg font-semibold text-center mb-4">Create a New Study Plan</h2>
+            <form onSubmit={handleGenerate} className="flex flex-col sm:flex-row items-center gap-3">
+                <input
+                    type="text"
+                    value={goal}
+                    onChange={(e) => setGoal(e.target.value)}
+                    placeholder="What is your learning goal? e.g., 'Master Python for data science'"
+                    className="input-field flex-grow !py-2.5"
+                    disabled={isLoading}
+                />
+                <Button type="submit" isLoading={isLoading} leftIcon={<Plus size={16} />} className="w-full sm:w-auto">
+                    Generate Plan
+                </Button>
+            </form>
+        </div>
+    );
+};
+
+// --- Main Study Plan Page ---
+const StudyPlanPage = () => {
+    const [learningPaths, setLearningPaths] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [activePathId, setActivePathId] = useState(null);
+
+    const fetchPaths = useCallback(async () => {
+        setIsLoading(true);
+        setError('');
+        try {
+            const paths = await api.getLearningPaths();
+            setLearningPaths(paths);
+            // If no active path is set, or the active one was deleted, set the first one as active
+            if (paths.length > 0 && (!activePathId || !paths.some(p => p._id === activePathId))) {
+                setActivePathId(paths[0]._id);
+            }
+        } catch (err) {
+            setError(err.message || 'Failed to fetch learning paths.');
+            toast.error(err.message);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [activePathId]);
+
+    useEffect(() => {
+        fetchPaths();
+    }, [fetchPaths]);
+
+    return (
+        <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
+                <h1 className="text-xl font-bold">My Study Plans</h1>
+                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
+                    <Home size={16}/>
+                    Back to Main App
+                </Link>
+            </header>
+
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 custom-scrollbar">
+                <div className="max-w-4xl mx-auto">
+                    <CreatePlan onPlanCreated={fetchPaths} />
+
+                    {isLoading && (
+                        <div className="text-center p-8">
+                            <Loader2 className="w-8 h-8 mx-auto animate-spin text-primary" />
+                            <p className="mt-2 text-text-muted-light dark:text-text-muted-dark">Loading your plans...</p>
+                        </div>
+                    )}
+                    {error && !isLoading && (
+                        <div className="p-4 bg-red-500/10 text-red-500 rounded-md text-center">
+                            <AlertTriangle className="w-6 h-6 mx-auto mb-2" />
+                            <p>{error}</p>
+                            <Button onClick={fetchPaths} size="sm" variant="outline" className="mt-4">Retry</Button>
+                        </div>
+                    )}
+                    {!isLoading && !error && learningPaths.length === 0 && (
+                        <div className="text-center py-12 text-text-muted-light dark:text-text-muted-dark">
+                            <GraduationCap size={48} className="mx-auto opacity-50 mb-4" />
+                            <h3 className="font-semibold text-lg">No Study Plans Found</h3>
+                            <p>Create your first plan above to get started on a personalized learning journey!</p>
+                        </div>
+                    )}
+
+                    {!isLoading && !error && learningPaths.length > 0 && (
+                        <div className="space-y-4">
+                            {learningPaths.map(path => {
+                                const isExpanded = activePathId === path._id;
+                                const nextUpModule = path.modules.find(m => m.status === 'not_started' || m.status === 'in_progress');
+                                return (
+                                    <div key={path._id} className="card-base overflow-hidden">
+                                        <h2 onClick={() => setActivePathId(isExpanded ? null : path._id)} className="px-6 py-4 text-lg font-semibold cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                            {path.title}
+                                        </h2>
+                                        <AnimatePresence>
+                                            {isExpanded && (
+                                                <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    exit={{ height: 0, opacity: 0 }}
+                                                    transition={{ duration: 0.3, ease: 'easeInOut' }}
+                                                    className="border-t border-border-light dark:border-border-dark"
+                                                >
+                                                    <div className="divide-y divide-border-light dark:divide-border-dark">
+                                                        {path.modules.map(module => (
+                                                            <ModuleItem
+                                                                key={module.moduleId}
+                                                                module={module}
+                                                                pathId={path._id}
+                                                                onModuleUpdate={fetchPaths}
+                                                                isNextUp={nextUpModule?.moduleId === module.moduleId}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </main>
+        </div>
+    );
+};
+
+export default StudyPlanPage;
 ```
 
 `frontend/src/components/profile/ProfileSettingsModal.jsx`
@@ -14710,10 +15018,62 @@ import 'prismjs/components/prism-csharp';
 import 'prismjs/components/prism-java';
 
 
+// ReactDOM.createRoot(document.getElementById('root')).render(
+//   <React.StrictMode>
+//     <AuthProvider>
+//       <AppStateProvider>
+//         <AppWrapper />
+//       </AppStateProvider>
+//     </AuthProvider>
+//   </React.StrictMode>,
+// );
+
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
       <AppStateProvider>
+        <Toaster
+          position="top-center"
+          reverseOrder={false}
+          gutter={8}
+          toastOptions={{
+            // Define default options
+            className: '',
+            duration: 5000,
+            style: {
+              background: '#363636',
+              color: '#fff',
+            },
+            // Default options for specific types
+            success: {
+              duration: 3000,
+              theme: {
+                primary: 'green',
+                secondary: 'black',
+              },
+              style: {
+                background: '#10B981', // green-500
+                color: 'white',
+              },
+              iconTheme: {
+                primary: 'white',
+                secondary: '#10B981',
+              },
+            },
+            error: {
+              duration: 5000,
+              style: {
+                background: '#EF4444', // red-500
+                color: 'white',
+              },
+              iconTheme: {
+                primary: 'white',
+                secondary: '#EF4444',
+              },
+            },
+          }}
+        />
         <AppWrapper />
       </AppStateProvider>
     </AuthProvider>
@@ -15035,6 +15395,21 @@ const api = {
     const response = await apiClient.post('/learning/find-document', { topic });
     return response.data; // Should be { documentName: "..." }
   },
+  getLearningPaths: async () => {
+    const response = await apiClient.get('/learning/paths');
+    return response.data; // Should be an array of learning path objects
+  },
+
+  generateLearningPath: async (goal, context = null) => {
+    const response = await apiClient.post('/learning/paths/generate', { goal, context });
+    return response.data; // Should be the newly created learning path object
+  },
+
+  updateModuleStatus: async (pathId, moduleId, status) => {
+    const response = await apiClient.put(`/learning/paths/${pathId}/modules/${moduleId}`, { status });
+    return response.data; // Should be the entire updated learning path object
+  },
+
 };
 
 export default api;
@@ -16453,6 +16828,72 @@ const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
 module.exports = ChatHistory;
 ```
 
+`server/models/LearningPath.js`
+
+```javascript
+// server/models/LearningPath.js
+const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
+
+const ModuleSchema = new mongoose.Schema({
+    moduleId: { 
+        type: String, 
+        required: true, 
+        default: () => `mod_${uuidv4()}` 
+    },
+    title: { 
+        type: String, 
+        required: true 
+    },
+    status: { 
+        type: String, 
+        enum: ['completed', 'in_progress', 'not_started', 'locked'], 
+        default: 'not_started' 
+    },
+    objective: {
+        type: String
+    },
+    activity: {
+        type: { 
+            type: String, 
+            required: true,
+            enum: ['direct_answer', 'web_search', 'academic_search', 'document_review', 'code_executor']
+        },
+        resourceName: { // e.g., 'RL_Foundations.pdf' or null
+            type: String 
+        },
+        suggestedPrompt: {
+            type: String
+        }
+    }
+}, { _id: false });
+
+const LearningPathSchema = new mongoose.Schema({
+    userId: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'User', 
+        required: true, 
+        index: true 
+    },
+    title: { 
+        type: String, 
+        required: true 
+    }, // The user's goal, e.g., "Master Reinforcement Learning"
+    isActive: { 
+        type: Boolean, 
+        default: true 
+    },
+    modules: [ModuleSchema],
+    createdAt: { 
+        type: Date, 
+        default: Date.now 
+    }
+});
+
+const LearningPath = mongoose.model('LearningPath', LearningPathSchema);
+module.exports = LearningPath;
+```
+
 `server/models/User.js`
 
 ```javascript
@@ -16471,7 +16912,6 @@ const ProfileSchema = new mongoose.Schema(
     degreeType: { type: String, default: "", trim: true },
     branch: { type: String, default: "", trim: true },
     year: { type: String, default: "", trim: true },
-    // --- NEW FIELDS START HERE ---
     learningStyle: {
       type: String,
       enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
@@ -16563,6 +17003,10 @@ const UserSchema = new mongoose.Schema({
       uploadedAt: { type: Date, default: Date.now },
     },
   ],
+  learningPaths: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'LearningPath' 
+  }],
   createdAt: {
     type: Date,
     default: Date.now,
@@ -21480,6 +21924,101 @@ router.post('/find-document', async (req, res) => {
 module.exports = router;
 ```
 
+`server/routes/learningPath.js`
+
+```javascript
+// server/routes/learningPath.js
+const express = require('express');
+const router = express.Router();
+const LearningPath = require('../models/LearningPath');
+const { createLearningPath } = require('../services/learning/curriculumOrchestrator');
+
+// @route   POST /api/learning/paths/generate
+// @desc    Create a new learning path for the authenticated user based on a goal.
+// @access  Private
+router.post('/generate', async (req, res) => {
+    const { goal, context } = req.body;
+    const userId = req.user._id;
+
+    if (!goal) {
+        return res.status(400).json({ message: 'A learning goal is required.' });
+    }
+
+    try {
+        const newPath = await createLearningPath(userId, goal, context);
+        res.status(201).json(newPath);
+    } catch (error) {
+        console.error(`[API Error] Failed to create learning path for user ${userId}:`, error);
+        res.status(500).json({ message: `Server error: ${error.message}` });
+    }
+});
+
+// @route   GET /api/learning/paths
+// @desc    Get all learning paths for the authenticated user.
+// @access  Private
+router.get('/', async (req, res) => {
+    const userId = req.user._id;
+
+    try {
+        const paths = await LearningPath.find({ userId: userId }).sort({ createdAt: -1 });
+        res.status(200).json(paths);
+    } catch (error) {
+        console.error(`[API Error] Failed to retrieve learning paths for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while fetching learning paths.' });
+    }
+});
+
+
+router.put('/:pathId/modules/:moduleId', async (req, res) => {
+    const { pathId, moduleId } = req.params;
+    const { status } = req.body;
+    const userId = req.user._id;
+
+    if (!status || !['completed', 'in_progress', 'not_started'].includes(status)) {
+        return res.status(400).json({ message: 'A valid status is required (completed, in_progress, not_started).' });
+    }
+
+    try {
+        // Find the learning path ensuring it belongs to the current user
+        const learningPath = await LearningPath.findOne({ _id: pathId, userId: userId });
+
+        if (!learningPath) {
+            return res.status(404).json({ message: 'Learning path not found or you do not have permission to modify it.' });
+        }
+
+        const moduleIndex = learningPath.modules.findIndex(m => m.moduleId === moduleId);
+        if (moduleIndex === -1) {
+            return res.status(404).json({ message: 'Module not found in this learning path.' });
+        }
+
+        // Update the status of the specific module
+        learningPath.modules[moduleIndex].status = status;
+
+        // Business Logic: If a module is completed, unlock the next one
+        if (status === 'completed' && moduleIndex + 1 < learningPath.modules.length) {
+            // Check if the next module is currently locked
+            if (learningPath.modules[moduleIndex + 1].status === 'locked') {
+                learningPath.modules[moduleIndex + 1].status = 'not_started';
+            }
+        }
+
+        // Mark the document as modified before saving
+        learningPath.markModified('modules');
+        await learningPath.save();
+        
+        // Return the entire updated path so the frontend can refresh its state
+        res.status(200).json(learningPath);
+
+    } catch (error) {
+        console.error(`[API Error] Failed to update module status for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while updating module status.' });
+    }
+});
+
+
+module.exports = router;
+```
+
 `server/routes/llmConfig.js`
 
 ```javascript
@@ -22254,6 +22793,8 @@ const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
+const learningPathRoutes = require("./routes/learningPath");
+
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -22290,6 +22831,7 @@ app.use(authMiddleware);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
+app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
@@ -22926,6 +23468,114 @@ async function generateAndStoreKg(chunksForKg, userId, originalName, llmProvider
 }
 
 module.exports = { generateAndStoreKg };
+```
+
+`server/services/learning/curriculumOrchestrator.js`
+
+```javascript
+// server/services/learning/curriculumOrchestrator.js
+const LearningPath = require('../../models/LearningPath');
+const User = require('../../models/User');
+// We will need LLM services and other dependencies later.
+
+/**
+ * Placeholder for the logic that deconstructs a goal and creates a plan.
+ * This is the core "brain" of the feature.
+ * @param {string} goal - The user's learning goal.
+ * @param {object} user - The full user object from MongoDB.
+ * @returns {Promise<Array>} A promise that resolves to an array of module objects.
+ */
+async function generateModulesForGoal(goal, user) {
+    console.log(`[CurriculumOrchestrator] Generating modules for goal: "${goal}"`);
+
+    // --- THIS IS A MOCK IMPLEMENTATION FOR NOW ---
+    // In future steps, this will involve complex LLM calls, clarification dialogues, and RAG searches.
+    // For now, we return a simple, static plan to test the API structure.
+    const mockModules = [
+        {
+            title: "Module 1: Getting Started",
+            objective: "Understand the foundational concepts.",
+            activity: {
+                type: 'direct_answer',
+                suggestedPrompt: `Explain the absolute basics of "${goal}".`
+            }
+        },
+        {
+            title: "Module 2: Core Principles",
+            objective: "Dive into the main principles of the topic.",
+            activity: {
+                type: 'web_search',
+                suggestedPrompt: `Perform a web search for the core principles of "${goal}".`
+            }
+        },
+        {
+            title: "Module 3: Advanced Application",
+            objective: "Explore how this topic is used in the real world.",
+            activity: {
+                type: 'academic_search',
+                suggestedPrompt: `Find academic papers on advanced applications of "${goal}".`
+            }
+        }
+    ];
+
+    // Set initial status for the modules: first one is ready, rest are locked.
+    if (mockModules.length > 0) {
+        mockModules[0].status = 'not_started';
+        for (let i = 1; i < mockModules.length; i++) {
+            mockModules[i].status = 'locked';
+        }
+    }
+
+    return mockModules;
+}
+
+
+/**
+ * Main orchestrator function. Creates and saves a new learning path.
+ * @param {string} userId - The ID of the user.
+ * @param {string} goal - The user's stated learning goal.
+ * @param {object} [context] - Optional context from a previous chat session.
+ * @returns {Promise<Document>} The newly created LearningPath document.
+ */
+async function createLearningPath(userId, goal, context = {}) {
+    if (!userId || !goal) {
+        throw new Error("User ID and a learning goal are required to create a path.");
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+        throw new Error("User not found.");
+    }
+
+    // Call the "brain" function to generate the modules
+    const modules = await generateModulesForGoal(goal, user);
+
+    if (!modules || modules.length === 0) {
+        throw new Error("The curriculum orchestrator failed to generate any modules for this goal.");
+    }
+    
+    // Create the new LearningPath document
+    const newLearningPath = new LearningPath({
+        userId,
+        title: goal,
+        modules: modules
+    });
+
+    // Save the new path to the database
+    await newLearningPath.save();
+
+    // Add the reference of the new path to the user's document
+    user.learningPaths.push(newLearningPath._id);
+    await user.save();
+
+    console.log(`[CurriculumOrchestrator] Saved new learning path "${goal}" for user ${userId}.`);
+
+    return newLearningPath;
+}
+
+module.exports = {
+    createLearningPath,
+};
 ```
 
 `server/services/ollamaService.js`

@@ -230,6 +230,21 @@ const api = {
     const response = await apiClient.post('/learning/find-document', { topic });
     return response.data; // Should be { documentName: "..." }
   },
+  getLearningPaths: async () => {
+    const response = await apiClient.get('/learning/paths');
+    return response.data; // Should be an array of learning path objects
+  },
+
+  generateLearningPath: async (goal, context = null) => {
+    const response = await apiClient.post('/learning/paths/generate', { goal, context });
+    return response.data; // Should be the newly created learning path object
+  },
+
+  updateModuleStatus: async (pathId, moduleId, status) => {
+    const response = await apiClient.put(`/learning/paths/${pathId}/modules/${moduleId}`, { status });
+    return response.data; // Should be the entire updated learning path object
+  },
+
 };
 
 export default api;

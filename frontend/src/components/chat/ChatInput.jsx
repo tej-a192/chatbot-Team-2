@@ -9,6 +9,7 @@ import IconButton from '../core/IconButton.jsx';
 import toast from 'react-hot-toast';
 import blueBrain from "./../../assets/blueBrain.svg";
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 
 function ChatInput({ 
     onSendMessage, 
@@ -18,13 +19,22 @@ function ChatInput({
     useAcademicSearch, // This prop is now used
     setUseAcademicSearch, // This prop is now used
     criticalThinkingEnabled,
-    setCriticalThinkingEnabled
+    setCriticalThinkingEnabled,
+    initialPrompt
 }) {
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+
+    useEffect(() => {
+        if (initialPrompt) {
+            setInputValue(initialPrompt);
+        }
+    }, [initialPrompt]);
+
 
     useEffect(() => {
         if (transcript) {

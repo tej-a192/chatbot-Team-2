@@ -1,6 +1,6 @@
 // frontend/src/components/layout/CenterPanel.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import api from '../../services/api';
@@ -41,7 +41,6 @@ const features = [
     }
 ];
 
-
 const glowStyles = {
     blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
@@ -49,12 +48,13 @@ const glowStyles = {
     gray: "" // No glow for disabled/soon cards
 };
 
-
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
     const { token: regularUserToken } = useRegularAuth();
     const { setSelectedSubject, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const navigate = useNavigate();
+    const location = useLocation();
 
+    // Local state for toggles and component status
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
@@ -62,111 +62,11 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-
-    const handleFeatureClick = (title) => {
-        switch (title) {
-            case 'Web Search Agent':
-                setUseWebSearch(true);
-                toast.success("Web Search has been enabled for your next message.");
-                break;
-            case 'Academic Search':
-                setUseAcademicSearch(true);
-                toast.success("Academic Search has been enabled for your next message.");
-                break;
-            case 'Secure Code Executor':
-                navigate('/tools/code-executor');
-                break;
-            case 'API Endpoint Tester':
-                toast.info("The API Endpoint Tester is coming soon!");
-                break;
-            default:
-                break;
-        }
-    };
-
-    useEffect(() => {
-        const fetchRecommendations = async () => {
-            if (messages.length === 0 && currentSessionId) {
-                setIsLoadingRecs(true);
-                try {
-                    const data = await api.getRecommendations(currentSessionId);
-                    setRecommendations(data.recommendations || []);
-                } catch (error) {
-                    console.error("Failed to fetch recommendations:", error);
-                    setRecommendations([]);
-                } finally {
-                    setIsLoadingRecs(false);
-                }
-            }
-        };
-
-        fetchRecommendations();
-    }, [currentSessionId, messages.length]);
-
-    const handleSendMessage = async (inputText, options = {}) => {
-        if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
-
-        const effectiveUseWebSearch = options.useWebSearch ?? useWebSearch;
-        const effectiveUseAcademicSearch = options.useAcademicSearch ?? useAcademicSearch;
-        const effectiveCriticalThinking = options.criticalThinkingEnabled ?? criticalThinkingEnabled;
-        const effectiveDocumentContext = options.documentContextName ?? selectedSubject ?? selectedDocumentForAnalysis;
-
-        console.log(`[DEBUG | CenterPanel] handleSendMessage triggered.`);
-        console.log(`  - Query: "${inputText.substring(0, 50)}..."`);
-        console.log(`  - Effective Flags: WebSearch=${effectiveUseWebSearch}, AcademicSearch=${effectiveUseAcademicSearch}`);
-
-        abortControllerRef.current = new AbortController();
-
-        const userMessage = {
-            id: `user-${Date.now()}`, 
-            sender: 'user', 
-            text: inputText.trim(),
-            timestamp: new Date().toISOString(),
-        };
-
-        const streamingPlaceholderId = `bot-streaming-${Date.now()}`;
-        const placeholderMessage = {
-            id: streamingPlaceholderId,
-            sender: 'bot',
-            text: '',
-            thinking: effectiveCriticalThinking ? '' : null,
-            isStreaming: true,
-            timestamp: new Date().toISOString(),
-            _accumulatedContent: ''
-        };
-
-        setMessages(prev => [...prev, userMessage, placeholderMessage]);
-        onChatProcessingChange(true);
-        setIsActuallySendingAPI(true);
-
-        try {
-            const handlerOptions = {
-                useWebSearch: effectiveUseWebSearch,
-                useAcademicSearch: effectiveUseAcademicSearch,
-                criticalThinkingEnabled: effectiveCriticalThinking,
-                documentContextName: effectiveDocumentContext
-            };
-
-            if (effectiveCriticalThinking) {
-                await handleStreamingSendMessage(inputText, streamingPlaceholderId, handlerOptions);
-            } else {
-                await handleStandardSendMessage(inputText, streamingPlaceholderId, handlerOptions);
-            }
-        } catch (error) {
-            console.error("Error in handleSendMessage:", error);
-            setMessages(prev => prev.map(msg =>
-                msg.id === streamingPlaceholderId
-                ? { ...msg, isStreaming: false, text: `Error: ${error.message}` }
-                : msg
-            ));
-            toast.error(error.message);
-        } finally {
-            setIsActuallySendingAPI(false);
-            onChatProcessingChange(false);
-        }
-    };
+    const [promptFromNav, setPromptFromNav] = useState('');
     
-    const handleStreamingSendMessage = async (inputText, placeholderId, options) => {
+    // --- STABLE FUNCTION DEFINITIONS ---
+
+    const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const payload = {
             query: inputText.trim(), 
             sessionId: currentSessionId, 
@@ -222,9 +122,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
         }
-    };
+    }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
-    const handleStandardSendMessage = async (inputText, placeholderId, options) => {
+    const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
             query: inputText.trim(), 
             history: messages.slice(0, -2),
@@ -240,11 +140,152 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         } else {
             throw new Error("Invalid response from AI service.");
         }
+    }, [messages, currentSessionId, systemPrompt, setMessages]);
+
+    const handleSendMessage = useCallback(async (inputText, options = {}) => {
+        if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
+
+        const effectiveUseWebSearch = options.useWebSearch ?? useWebSearch;
+        const effectiveUseAcademicSearch = options.useAcademicSearch ?? useAcademicSearch;
+        const effectiveCriticalThinking = options.criticalThinkingEnabled ?? criticalThinkingEnabled;
+        const effectiveDocumentContext = options.documentContextName ?? selectedSubject ?? selectedDocumentForAnalysis;
+
+        abortControllerRef.current = new AbortController();
+
+        const userMessage = {
+            id: `user-${Date.now()}`,
+            sender: 'user',
+            text: inputText.trim(),
+            timestamp: new Date().toISOString(),
+        };
+
+        const streamingPlaceholderId = `bot-streaming-${Date.now()}`;
+        const placeholderMessage = {
+            id: streamingPlaceholderId,
+            sender: 'bot',
+            text: '',
+            thinking: effectiveCriticalThinking ? '' : null,
+            isStreaming: true,
+            timestamp: new Date().toISOString(),
+            _accumulatedContent: ''
+        };
+
+        setMessages(prev => [...prev, userMessage, placeholderMessage]);
+        onChatProcessingChange(true);
+        setIsActuallySendingAPI(true);
+
+        try {
+            const handlerOptions = {
+                useWebSearch: effectiveUseWebSearch,
+                useAcademicSearch: effectiveUseAcademicSearch,
+                criticalThinkingEnabled: effectiveCriticalThinking,
+                documentContextName: effectiveDocumentContext
+            };
+
+            if (effectiveCriticalThinking) {
+                await handleStreamingSendMessage(inputText, streamingPlaceholderId, handlerOptions);
+            } else {
+                await handleStandardSendMessage(inputText, streamingPlaceholderId, handlerOptions);
+            }
+        } catch (error) {
+            console.error("Error in handleSendMessage:", error);
+            setMessages(prev => prev.map(msg =>
+                msg.id === streamingPlaceholderId
+                ? { ...msg, isStreaming: false, text: `Error: ${error.message}` }
+                : msg
+            ));
+            toast.error(error.message);
+        } finally {
+            setIsActuallySendingAPI(false);
+            onChatProcessingChange(false);
+            setUseWebSearch(false);
+            setUseAcademicSearch(false);
+        }
+    }, [
+        regularUserToken, currentSessionId, isActuallySendingAPI, useWebSearch, 
+        useAcademicSearch, criticalThinkingEnabled, selectedSubject, 
+        selectedDocumentForAnalysis, setMessages, onChatProcessingChange,
+        handleStreamingSendMessage, handleStandardSendMessage, systemPrompt
+    ]);
+    
+    // --- HOOKS ---
+
+    useEffect(() => {
+        const fetchRecommendations = async () => {
+            if (messages.length === 0 && currentSessionId) {
+                setIsLoadingRecs(true);
+                try {
+                    const data = await api.getRecommendations(currentSessionId);
+                    setRecommendations(data.recommendations || []);
+                } catch (error) {
+                    console.error("Failed to fetch recommendations:", error);
+                    setRecommendations([]);
+                } finally {
+                    setIsLoadingRecs(false);
+                }
+            }
+        };
+        fetchRecommendations();
+    }, [currentSessionId, messages.length]);
+
+
+    useEffect(() => {
+        const locationState = location.state;
+        // Check if the specific state we need exists
+        if (locationState?.startModuleActivity) {
+            const { activity, prefilledPrompt } = locationState;
+
+            // Guard against the activity object being undefined
+            if (activity && activity.type) {
+                console.log("[CenterPanel] Module activity received:", activity);
+
+                // Set tool context
+                setUseWebSearch(activity.type === 'web_search');
+                setUseAcademicSearch(activity.type === 'academic_search');
+
+                // Set document context
+                if (activity.type === 'document_review' && activity.resourceName) {
+                    setSelectedSubject(activity.resourceName);
+                } else if (activity.type !== 'document_review') {
+                    setSelectedSubject(null);
+                }
+                
+                // Set the prompt for the ChatInput component
+                if (prefilledPrompt) {
+                    setPromptFromNav(prefilledPrompt);
+                }
+            }
+            
+            // CRITICAL: Clear the state from location immediately after processing it once.
+            navigate(location.pathname, { replace: true, state: {} });
+        }
+    }, [location.state, navigate, setSelectedSubject]);
+
+    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
+
+    const handleFeatureClick = (title) => {
+        switch (title) {
+            case 'Web Search Agent':
+                setUseWebSearch(true);
+                toast.success("Web Search has been enabled for your next message.");
+                break;
+            case 'Academic Search':
+                setUseAcademicSearch(true);
+                toast.success("Academic Search has been enabled for your next message.");
+                break;
+            case 'Secure Code Executor':
+                navigate('/tools/code-executor');
+                break;
+            case 'API Endpoint Tester':
+                toast.info("The API Endpoint Tester is coming soon!");
+                break;
+            default:
+                break;
+        }
     };
 
     const handleRecommendationClick = async (rec) => {
         if (isActuallySendingAPI) return;
-
         setUseWebSearch(false);
         setUseAcademicSearch(false);
 
@@ -257,16 +298,12 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             }
             case 'web_search': {
                 toast.success(`Web Search enabled for "${rec.topic}". Sending now...`);
-                setUseWebSearch(true);
-                const webQuery = `Search the web for the latest information on: ${rec.topic}`;
-                handleSendMessage(webQuery, { useWebSearch: true, useAcademicSearch: false });
+                handleSendMessage(`Search the web for the latest information on: ${rec.topic}`, { useWebSearch: true, useAcademicSearch: false });
                 break;
             }
             case 'academic_search': {
                 toast.success(`Academic Search enabled for "${rec.topic}". Sending now...`);
-                setUseAcademicSearch(true);
-                const academicQuery = `Find and summarize academic papers about: ${rec.topic}`;
-                handleSendMessage(academicQuery, { useWebSearch: false, useAcademicSearch: true });
+                handleSendMessage(`Find and summarize academic papers about: ${rec.topic}`, { useWebSearch: false, useAcademicSearch: true });
                 break;
             }
             case 'document_review': {
@@ -352,7 +389,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                                         className={`group relative text-left bg-surface-light dark:bg-surface-dark/50 border border-border-light dark:border-border-dark rounded-lg p-4 transition-all duration-300 ease-in-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed ${glowStyles[feature.glowColor]}`}
                                     >
                                         <div className="relative">
-                                            {/* Special "HOT" tag for the Code Executor */}
                                             {feature.title === 'Secure Code Executor' && (
                                                 <div className="fire-tag-animation absolute -top-2.5 -right-2.5 flex items-center gap-1 bg-gradient-to-br from-red-500 to-orange-400 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
                                                     <Flame size={12} />
@@ -411,7 +447,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 setUseAcademicSearch={setUseAcademicSearch}
                 criticalThinkingEnabled={criticalThinkingEnabled} 
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
+                initialPrompt={promptFromNav}
             />
+
         </div>
     );
 }

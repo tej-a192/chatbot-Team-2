@@ -13,7 +13,6 @@ const ProfileSchema = new mongoose.Schema(
     degreeType: { type: String, default: "", trim: true },
     branch: { type: String, default: "", trim: true },
     year: { type: String, default: "", trim: true },
-    // --- NEW FIELDS START HERE ---
     learningStyle: {
       type: String,
       enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
@@ -105,6 +104,10 @@ const UserSchema = new mongoose.Schema({
       uploadedAt: { type: Date, default: Date.now },
     },
   ],
+  learningPaths: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'LearningPath' 
+  }],
   createdAt: {
     type: Date,
     default: Date.now,

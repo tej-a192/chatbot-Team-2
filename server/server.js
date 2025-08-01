@@ -36,6 +36,8 @@ const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
+const learningPathRoutes = require("./routes/learningPath");
+
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -72,6 +74,7 @@ app.use(authMiddleware);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
+app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);

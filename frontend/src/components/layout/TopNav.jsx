@@ -6,7 +6,7 @@ import LLMSelectionModal from './LLMSelectionModal.jsx';
 import ProfileSettingsModal from '../profile/ProfileSettingsModal.jsx';
 import { Link } from 'react-router-dom';
 import { 
-    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench 
+    LogOut, User, MessageSquare, History as HistoryIcon, Settings, Cpu, Zap, ServerCrash, Server, Wrench, GraduationCap 
 } from 'lucide-react';
 import ToolsModal from '../tools/ToolsModal.jsx'; 
 
@@ -59,7 +59,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                     <div className="flex items-center gap-1 sm:gap-2">
                          <button
                             onClick={onNewChat}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-sky-700 dark:text-sky-300 bg-sky-500/10 dark:bg-sky-500/20 hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="Start a new chat session"
                         >
@@ -68,16 +68,25 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                         
                         <button
                             onClick={onHistoryClick}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-teal-700 dark:text-teal-300 bg-teal-500/10 dark:bg-teal-500/20 hover:bg-teal-500/20 dark:hover:bg-teal-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="View chat history"
                         >
                             <HistoryIcon size={14} /> <span className="hidden sm:inline">History</span>
                         </button>
 
-                         <button
+                         <Link
+                            to="/study-plan"
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 dark:bg-indigo-500/20 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={(e) => isChatProcessing && e.preventDefault()}
+                            title="Open your personalized Study Plan"
+                        >
+                            <GraduationCap size={14} /> <span className="hidden sm:inline">Study Plan</span>
+                        </Link>
+
+                        <button
                             onClick={() => setIsToolsModalOpen(true)}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 text-amber-700 dark:text-amber-400 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-amber-700 dark:text-amber-400 bg-amber-400/20 dark:bg-amber-500/20 hover:bg-amber-400/30 dark:hover:bg-amber-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title="Open Tools"
                         >
@@ -86,7 +95,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
 
                         <button
                             onClick={() => setIsLLMModalOpen(true)}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs sm:text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-slate-500/10 dark:bg-slate-500/20 hover:bg-slate-500/20 dark:hover:bg-slate-500/30 transition-colors ${isChatProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             disabled={isChatProcessing}
                             title={`Switch LLM (Current: ${selectedLLM.toUpperCase()})`}
                         >
@@ -94,6 +103,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                         </button>
                     </div>
                 </div>
+
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
                     <div className="w-8 h-8 flex items-center justify-center">
