@@ -11197,6 +11197,8 @@ export default DocumentList;
 `frontend/src/components/documents/DocumentUpload.jsx`
 
 ```javascript
+
+
 // frontend/src/components/documents/DocumentUpload.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../../services/api.js';
@@ -11214,7 +11216,6 @@ const RAG_STAGES = [
     { name: "Embedding", duration: 4000, message: "Converting content to searchable vectors..." },
     { name: "Analyzing", duration: 3000, message: "Indexing content for optimal retrieval..." },
 ];
-
 // MODIFIED: Renamed 'onUploadSuccess' prop to 'onSourceAdded'
 function DocumentUpload({ onSourceAdded }) { 
     const [selectedFile, setSelectedFile] = useState(null);
@@ -12510,7 +12511,7 @@ function LeftPanel() {
                 <AnimatePresence>
                     {isKnowledgeBaseOpen && (
                         <motion.div key="knowledge-base-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex-grow flex flex-col overflow-hidden p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner">
-                            {/* CHANGE: Pass 'onSourceAdded' prop here */}
+                            {/* MODIFIED: Pass 'onSourceAdded' prop here */}
                             <DocumentUpload onSourceAdded={handleSourceAdded}  />
                             <div className="mt-3 flex-grow overflow-y-auto custom-scrollbar">
                                 <KnowledgeSourceList
@@ -16552,7 +16553,8 @@ JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
 # ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
 # GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
 # GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
-GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
+# GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
+GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 # OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
@@ -18899,20 +18901,25 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
 
 
 # --- Main Orchestration Function ---
-def process_document_for_qdrant(file_path: str, original_name: str, user_id: str) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
+def process_document_for_qdrant(
+    file_path: str, # Could be empty if text_content_override is used
+    original_name: str,
+    user_id: str,
+    text_content_override: Optional[str] = None # NEW parameter
+) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
     """
-    Main orchestrator for processing a document.
+    Main orchestrator for processing a document or raw text.
     Returns:
         - final_chunks_for_qdrant: List of chunks with embeddings for Qdrant.
         - text_for_node_analysis: Consolidated text for Node.js general analysis (FAQ, Topics).
         - chunks_for_kg_worker: List of chunks with metadata (no embeddings) for KG worker.
     """
     logger.info(f"ai_core: Orchestrating document processing for '{original_name}', user '{user_id}'")
-    if not os.path.exists(file_path):
-        logger.error(f"File not found at ai_core entry: {file_path}")
-        # Return empty tuple of expected types
+    
+    # Check if source is valid (either text_content_override or existing file_path)
+    if not text_content_override and not (file_path and os.path.exists(file_path)):
+        logger.error(f"File not found at ai_core entry or no text_content_override: {file_path}")
         return [], None, []
-
 
     # Default return values for failure cases
     empty_qdrant_chunks = []
@@ -18920,26 +18927,38 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
     empty_kg_chunks = []
 
     try:
-        # 1. Initial Parsing (Rich Element Extraction)
-        parsed_doc_elements = _get_initial_parsed_document(file_path)
-        initial_text_from_parser = parsed_doc_elements.get('text_content')
-        images_from_parser = parsed_doc_elements.get('images', [])
-        tables_from_parser = parsed_doc_elements.get('tables', [])
-        is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
-        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+        initial_text_from_parser = None
+        images_from_parser = []
+        tables_from_parser = []
+        is_scanned_heuristic = False
+        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Default type from original name
 
-        # 2. OCR if needed
+        if text_content_override:
+            # If override is provided, use it directly, bypass file parsing.
+            logger.info(f"ai_core: Using text_content_override for '{original_name}'.")
+            initial_text_from_parser = text_content_override
+            file_type_from_parser = "text_override" # Custom type for metadata for debugging/tracking
+        else:
+            # Original file parsing logic
+            parsed_doc_elements = _get_initial_parsed_document(file_path)
+            initial_text_from_parser = parsed_doc_elements.get('text_content')
+            images_from_parser = parsed_doc_elements.get('images', [])
+            tables_from_parser = parsed_doc_elements.get('tables', [])
+            is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
+            file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+
+        # 2. OCR if needed (only if content was from a file/images and not explicitly overridden)
         ocr_text_output = ""
         ocr_applied_flag = False
+        
         # Decide if OCR is necessary:
-        # - Explicitly image file types.
-        # - Parser's heuristic says scanned.
-        # - Parser extracted no text but found images (strong indicator for OCR).
-        # - Parser extracted minimal text and images are present (e.g., a DOCX that's mostly a picture).
-        should_ocr = is_scanned_heuristic or \
-                     (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
-                     (not initial_text_from_parser and images_from_parser) or \
-                     (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser) # Heuristic for low text + images
+        # Only try OCR if there's no initial text (from parser or override) AND images were found
+        # OR if it's explicitly an image file type and no override.
+        should_ocr = (not text_content_override) and \
+                     (is_scanned_heuristic or \
+                      (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
+                      (not initial_text_from_parser and images_from_parser) or \
+                      (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser))
 
         if should_ocr and images_from_parser:
             if PYTESSERACT_AVAILABLE and pytesseract:
@@ -18949,7 +18968,7 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             else:
                 logger.warning(f"OCR needed for {original_name} but Pytesseract not available. Content may be incomplete.")
         
-        # 3. Combine Text (Parser + OCR)
+        # 3. Combine Text (Parser/Override + OCR)
         combined_raw_text_parts = []
         if initial_text_from_parser: combined_raw_text_parts.append(initial_text_from_parser)
         if ocr_text_output: combined_raw_text_parts.append(ocr_text_output)
@@ -18972,39 +18991,32 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             file_type_from_parser,
             original_name
         )
-        # This `text_for_further_processing` is a good candidate for Node.js analysis (FAQ, topics)
-        # as it's cleaned and has table context.
         raw_text_for_node_analysis = text_for_further_processing 
 
         # 6. Extract Comprehensive Metadata
         doc_metadata = extract_document_metadata_info(
-            file_path,
+            file_path if not text_content_override else f"virtual://{original_name}", # Provide a sensible path for metadata if override
             text_for_further_processing, # Pass the final text that will be chunked
-            parsed_doc_elements, # Pass the full initial parse results
+            parsed_doc_elements if not text_content_override else {}, # Pass initial parse results or empty if override
             original_name,
             user_id
         )
         doc_metadata['ocr_applied'] = ocr_applied_flag # Update with actual OCR status
+        doc_metadata['source_type_actual'] = file_type_from_parser # Capture true source type from URL processing
 
         # 7. Chunk Document
-        # We chunk `text_for_further_processing` which includes table representations.
         chunks_with_metadata_for_qdrant_and_kg = chunk_document_into_segments(
             text_for_further_processing,
             doc_metadata # Pass rich metadata to chunks
         )
         if not chunks_with_metadata_for_qdrant_and_kg:
             logger.warning(f"No chunks produced for {original_name}. Cannot proceed with Qdrant/KG.")
-            # Still return raw_text_for_node_analysis if it exists
             return empty_qdrant_chunks, raw_text_for_node_analysis, empty_kg_chunks
 
         # Prepare chunks for KG worker (these don't need embeddings yet)
-        # Important: Deep copy if you modify this list before embedding,
-        # or if embedding modifies in-place (unlikely with current generate_segment_embeddings)
         chunks_for_kg_worker = copy.deepcopy(chunks_with_metadata_for_qdrant_and_kg) 
-        # Remove embedding from KG chunks if it somehow got there, or any very large fields not needed by KG LLM
         for chunk in chunks_for_kg_worker:
             chunk.pop('embedding', None) 
-            # Consider removing other large metadata fields if KG LLM doesn't need them from each chunk's metadata
 
         # 8. Generate Embeddings for Qdrant chunks
         final_chunks_for_qdrant = generate_segment_embeddings(chunks_with_metadata_for_qdrant_and_kg)
@@ -19013,15 +19025,11 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
         return final_chunks_for_qdrant, raw_text_for_node_analysis, chunks_for_kg_worker
 
     except Exception as e:
-        # Check for specific critical errors like Tesseract not found
         if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):
             logger.critical(f"ai_core: Tesseract (OCR) not found processing {original_name}. OCR failed. Error: {e}", exc_info=False)
-            # Depending on policy, you might still want to return any text extracted *before* OCR attempt.
-            # For now, re-raise to indicate critical failure to the caller (app.py).
             raise
         
         logger.error(f"ai_core: Critical error processing {original_name}: {e}", exc_info=True)
-        # Re-raise the exception to be handled by the caller in app.py
         raise
 ```
 
@@ -19477,17 +19485,49 @@ def health_check():
 def add_document_qdrant():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
+    
+    user_id = data.get('user_id')
+    file_path = data.get('file_path') # This might be temporary or empty for URL content
+    original_name = data.get('original_name')
+    text_content_override = data.get('text_content_override') # NEW parameter
+
+    if not all([user_id, original_name]):
+        return create_error_response("Missing 'user_id' or 'original_name'", 400)
+
+    # Conditional check for source of text
+    if text_content_override:
+        logger.info(f"Adding document '{original_name}' (from text_content_override), user '{user_id}'.")
+        # ai_core.process_document_for_qdrant needs to handle text_content_override
+        # Pass a dummy file_path as it's required by the signature, actual file is not read.
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path="",  # Dummy, as content is overridden
+            original_name=original_name,
+            user_id=user_id,
+            text_content_override=text_content_override # Pass the override
+        )
+    elif file_path and os.path.exists(file_path):
+        logger.info(f"Adding document '{original_name}' (from file_path), user '{user_id}'.")
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path=file_path,
+            original_name=original_name,
+            user_id=user_id
+        )
+    else:
+        return create_error_response("Neither 'file_path' (and file exists) nor 'text_content_override' provided.", 400)
+
+    num_added, status = 0, "processed_no_content"
+    if processed_chunks:
+        num_added = app.vector_service.add_processed_chunks(processed_chunks)
+        if num_added > 0: status = "added_to_qdrant"
+    
+    return jsonify({
+        "message": "Document processed.",
+        "status": status,
+        "filename": original_name,
+        "num_chunks_added_to_qdrant": num_added,
+        "raw_text_for_analysis": raw_text or "",
+        "chunks_with_metadata": kg_chunks
+    }), 201
 
 
 @app.route('/academic_search', methods=['POST'])
@@ -19622,6 +19662,32 @@ def delete_kg_route(user_id, document_name):
         deleted = neo4j_handler.delete_knowledge_graph(user_id, document_name)
         return jsonify({"message": "KG deleted"}) if deleted else create_error_response("KG not found", 404)
     except Exception as e: return create_error_response(f"KG deletion failed: {str(e)}", 500)
+
+@app.route('/query_kg', methods=['POST'])
+def query_kg_route():
+    current_app.logger.info("--- /query_kg Request (Knowledge Graph Search) ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    document_name = data.get('document_name')
+    user_id = data.get('user_id')
+
+    if not all([query_text, document_name, user_id]):
+        return create_error_response("Missing 'query', 'document_name', or 'user_id'", 400)
+
+    try:
+        # Call the Neo4j handler to search the KG
+        facts_from_kg = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
+        
+        return jsonify({"success": True, "facts": facts_from_kg}), 200
+    except neo4j_exceptions.ClientError as e:
+        logger.error(f"Neo4j client error during KG query: {e}", exc_info=True)
+        return create_error_response(f"Database error during KG query: {str(e)}", 500)
+    except Exception as e:
+        logger.error(f"Error during KG query: {e}", exc_info=True)
+        return create_error_response(f"KG query failed: {str(e)}", 500)
+
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -20375,7 +20441,7 @@ AI_CORE_CHUNK_SIZE = int(os.getenv("AI_CORE_CHUNK_SIZE", 512))
 AI_CORE_CHUNK_OVERLAP = int(os.getenv("AI_CORE_CHUNK_OVERLAP", 100))
 MAX_TEXT_LENGTH_FOR_NER = int(os.getenv("MAX_TEXT_LENGTH_FOR_NER", 500000))
 QDRANT_DEFAULT_SEARCH_K = int(os.getenv("QDRANT_DEFAULT_SEARCH_K", 5))
-QDRANT_SEARCH_MIN_RELEVANCE_SCORE = float(os.getenv("QDRANT_SEARCH_MIN_RELEVANCE_SCORE", 0.05))
+QDRANT_SEARCH_MIN_RELEVANCE_SCORE = float(os.getenv("QDRANT_SEARCH_MIN_RELEVANCE_SCORE", 0.1))
 
 # --- SpaCy Configuration ---
 SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
@@ -24077,8 +24143,8 @@ router.post('/', async (req, res) => {
         // Create initial record in DB to track progress
         newSource = new KnowledgeSource({
             userId,
-            sourceType: 'webpage', // Default, Python will confirm if it's YouTube
-            title: content, // Use URL as initial title
+            sourceType: 'webpage', // Initial type, will be corrected by Python
+            title: content, 
             sourceUrl: content,
             status: 'processing_extraction',
         });
@@ -24090,49 +24156,71 @@ router.post('/', async (req, res) => {
             source: newSource 
         });
         
-        // --- Start background processing ---
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
 
-        // 1. Call Python to extract text
+        // 1. Call Python to extract text from URL
         const extractionResponse = await axios.post(`${pythonServiceUrl}/process_url`, {
             url: content,
             user_id: userId.toString(),
         }, { timeout: 300000 }); // 5 min timeout for scraping/transcription
 
         const { text_content, title, source_type } = extractionResponse.data;
+        if (!text_content) throw new Error("Failed to extract text from the URL source.");
         
-        // 2. Update the source document with extracted text
+        // 2. Call Python to add the extracted content to Qdrant and get KG chunks
+        // This is the CRITICAL NEW STEP for URL embedding
+        const addDocumentResponse = await axios.post(`${pythonServiceUrl}/add_document`, {
+            user_id: userId.toString(),
+            file_path: '', // Dummy path, as content is provided directly
+            original_name: title, // Use the extracted title as the original_name
+            text_content_override: text_content // Pass the actual content here
+        }, { timeout: 300000 }); // Large timeout for processing
+
+        const { num_chunks_added_to_qdrant, raw_text_for_analysis, chunks_with_metadata: chunksForKg } = addDocumentResponse.data;
+
+        if (num_chunks_added_to_qdrant === 0) {
+            throw new Error("No embeddings generated for the URL content. It might be too short or failed processing.");
+        }
+
+        // 3. Update the KnowledgeSource record in MongoDB with final details
         const sourceDoc = await KnowledgeSource.findById(newSource._id);
         if (!sourceDoc) throw new Error(`KnowledgeSource with ID ${newSource._id} disappeared during processing.`);
 
-        sourceDoc.textContent = text_content;
-        sourceDoc.title = title;
-        sourceDoc.sourceType = source_type;
-        sourceDoc.status = 'processing_analysis';
+        sourceDoc.textContent = text_content; // Store the extracted content
+        sourceDoc.title = title; // Update with proper title from Python
+        sourceDoc.sourceType = source_type; // Update with actual type from Python
+        sourceDoc.status = 'processing_analysis'; // Next step: analysis
         await sourceDoc.save();
 
-        // 3. Trigger analysis worker
+        // 4. Trigger Analysis Worker
         const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
         
         const workerBaseData = {
-            sourceId: sourceDoc._id.toString(),
-            originalName: title,
-            llmProvider,
-            ollamaModel: user.ollamaModel,
-            apiKey: userApiKey,
-            ollamaUrl: user.ollamaUrl,
-            textForAnalysis: text_content
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName: title, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
         };
         
         const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
-            workerData: workerBaseData
+            workerData: { ...workerBaseData, textForAnalysis: raw_text_for_analysis }
         });
         analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (URL: ${title}):`, err));
         
-        // Note: KG worker is not triggered for URLs yet as there's no chunking pipeline for them. This can be added later.
+        // 5. Trigger KG Worker if chunks are available
+        if (chunksForKg && chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
+            });
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (URL: ${title}):`, err));
+        } else {
+            console.warn(`[KnowledgeSource Route] No chunks for KG processing for URL '${title}'.`);
+            await KnowledgeSource.updateOne(
+                { _id: sourceDoc._id },
+                { $set: { kgStatus: "skipped_no_chunks" } }
+            );
+        }
 
     } catch (error) {
         console.error(`Error processing URL source '${content}':`, error);

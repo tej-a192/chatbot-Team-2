@@ -48,8 +48,8 @@ router.post('/', async (req, res) => {
         // Create initial record in DB to track progress
         newSource = new KnowledgeSource({
             userId,
-            sourceType: 'webpage', // Default, Python will confirm if it's YouTube
-            title: content, // Use URL as initial title
+            sourceType: 'webpage', // Initial type, will be corrected by Python
+            title: content, 
             sourceUrl: content,
             status: 'processing_extraction',
         });
@@ -61,49 +61,71 @@ router.post('/', async (req, res) => {
             source: newSource 
         });
         
-        // --- Start background processing ---
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
 
-        // 1. Call Python to extract text
+        // 1. Call Python to extract text from URL
         const extractionResponse = await axios.post(`${pythonServiceUrl}/process_url`, {
             url: content,
             user_id: userId.toString(),
         }, { timeout: 300000 }); // 5 min timeout for scraping/transcription
 
         const { text_content, title, source_type } = extractionResponse.data;
+        if (!text_content) throw new Error("Failed to extract text from the URL source.");
         
-        // 2. Update the source document with extracted text
+        // 2. Call Python to add the extracted content to Qdrant and get KG chunks
+        // This is the CRITICAL NEW STEP for URL embedding
+        const addDocumentResponse = await axios.post(`${pythonServiceUrl}/add_document`, {
+            user_id: userId.toString(),
+            file_path: '', // Dummy path, as content is provided directly
+            original_name: title, // Use the extracted title as the original_name
+            text_content_override: text_content // Pass the actual content here
+        }, { timeout: 300000 }); // Large timeout for processing
+
+        const { num_chunks_added_to_qdrant, raw_text_for_analysis, chunks_with_metadata: chunksForKg } = addDocumentResponse.data;
+
+        if (num_chunks_added_to_qdrant === 0) {
+            throw new Error("No embeddings generated for the URL content. It might be too short or failed processing.");
+        }
+
+        // 3. Update the KnowledgeSource record in MongoDB with final details
         const sourceDoc = await KnowledgeSource.findById(newSource._id);
         if (!sourceDoc) throw new Error(`KnowledgeSource with ID ${newSource._id} disappeared during processing.`);
 
-        sourceDoc.textContent = text_content;
-        sourceDoc.title = title;
-        sourceDoc.sourceType = source_type;
-        sourceDoc.status = 'processing_analysis';
+        sourceDoc.textContent = text_content; // Store the extracted content
+        sourceDoc.title = title; // Update with proper title from Python
+        sourceDoc.sourceType = source_type; // Update with actual type from Python
+        sourceDoc.status = 'processing_analysis'; // Next step: analysis
         await sourceDoc.save();
 
-        // 3. Trigger analysis worker
+        // 4. Trigger Analysis Worker
         const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
         
         const workerBaseData = {
-            sourceId: sourceDoc._id.toString(),
-            originalName: title,
-            llmProvider,
-            ollamaModel: user.ollamaModel,
-            apiKey: userApiKey,
-            ollamaUrl: user.ollamaUrl,
-            textForAnalysis: text_content
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName: title, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
         };
         
         const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
-            workerData: workerBaseData
+            workerData: { ...workerBaseData, textForAnalysis: raw_text_for_analysis }
         });
         analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (URL: ${title}):`, err));
         
-        // Note: KG worker is not triggered for URLs yet as there's no chunking pipeline for them. This can be added later.
+        // 5. Trigger KG Worker if chunks are available
+        if (chunksForKg && chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
+            });
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (URL: ${title}):`, err));
+        } else {
+            console.warn(`[KnowledgeSource Route] No chunks for KG processing for URL '${title}'.`);
+            await KnowledgeSource.updateOne(
+                { _id: sourceDoc._id },
+                { $set: { kgStatus: "skipped_no_chunks" } }
+            );
+        }
 
     } catch (error) {
         console.error(`Error processing URL source '${content}':`, error);

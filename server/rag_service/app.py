@@ -447,17 +447,49 @@ def health_check():
 def add_document_qdrant():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
+    
+    user_id = data.get('user_id')
+    file_path = data.get('file_path') # This might be temporary or empty for URL content
+    original_name = data.get('original_name')
+    text_content_override = data.get('text_content_override') # NEW parameter
+
+    if not all([user_id, original_name]):
+        return create_error_response("Missing 'user_id' or 'original_name'", 400)
+
+    # Conditional check for source of text
+    if text_content_override:
+        logger.info(f"Adding document '{original_name}' (from text_content_override), user '{user_id}'.")
+        # ai_core.process_document_for_qdrant needs to handle text_content_override
+        # Pass a dummy file_path as it's required by the signature, actual file is not read.
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path="",  # Dummy, as content is overridden
+            original_name=original_name,
+            user_id=user_id,
+            text_content_override=text_content_override # Pass the override
+        )
+    elif file_path and os.path.exists(file_path):
+        logger.info(f"Adding document '{original_name}' (from file_path), user '{user_id}'.")
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path=file_path,
+            original_name=original_name,
+            user_id=user_id
+        )
+    else:
+        return create_error_response("Neither 'file_path' (and file exists) nor 'text_content_override' provided.", 400)
+
+    num_added, status = 0, "processed_no_content"
+    if processed_chunks:
+        num_added = app.vector_service.add_processed_chunks(processed_chunks)
+        if num_added > 0: status = "added_to_qdrant"
+    
+    return jsonify({
+        "message": "Document processed.",
+        "status": status,
+        "filename": original_name,
+        "num_chunks_added_to_qdrant": num_added,
+        "raw_text_for_analysis": raw_text or "",
+        "chunks_with_metadata": kg_chunks
+    }), 201
 
 
 @app.route('/academic_search', methods=['POST'])
@@ -592,6 +624,32 @@ def delete_kg_route(user_id, document_name):
         deleted = neo4j_handler.delete_knowledge_graph(user_id, document_name)
         return jsonify({"message": "KG deleted"}) if deleted else create_error_response("KG not found", 404)
     except Exception as e: return create_error_response(f"KG deletion failed: {str(e)}", 500)
+
+@app.route('/query_kg', methods=['POST'])
+def query_kg_route():
+    current_app.logger.info("--- /query_kg Request (Knowledge Graph Search) ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    document_name = data.get('document_name')
+    user_id = data.get('user_id')
+
+    if not all([query_text, document_name, user_id]):
+        return create_error_response("Missing 'query', 'document_name', or 'user_id'", 400)
+
+    try:
+        # Call the Neo4j handler to search the KG
+        facts_from_kg = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
+        
+        return jsonify({"success": True, "facts": facts_from_kg}), 200
+    except neo4j_exceptions.ClientError as e:
+        logger.error(f"Neo4j client error during KG query: {e}", exc_info=True)
+        return create_error_response(f"Database error during KG query: {str(e)}", 500)
+    except Exception as e:
+        logger.error(f"Error during KG query: {e}", exc_info=True)
+        return create_error_response(f"KG query failed: {str(e)}", 500)
+
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])

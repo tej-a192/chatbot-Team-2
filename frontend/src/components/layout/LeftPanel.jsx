@@ -141,7 +141,7 @@ function LeftPanel() {
                 <AnimatePresence>
                     {isKnowledgeBaseOpen && (
                         <motion.div key="knowledge-base-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex-grow flex flex-col overflow-hidden p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner">
-                            {/* CHANGE: Pass 'onSourceAdded' prop here */}
+                            {/* MODIFIED: Pass 'onSourceAdded' prop here */}
                             <DocumentUpload onSourceAdded={handleSourceAdded}  />
                             <div className="mt-3 flex-grow overflow-y-auto custom-scrollbar">
                                 <KnowledgeSourceList

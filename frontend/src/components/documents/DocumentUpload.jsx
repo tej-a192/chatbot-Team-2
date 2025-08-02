@@ -1,3 +1,5 @@
+
+
 // frontend/src/components/documents/DocumentUpload.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../../services/api.js';
@@ -15,7 +17,6 @@ const RAG_STAGES = [
     { name: "Embedding", duration: 4000, message: "Converting content to searchable vectors..." },
     { name: "Analyzing", duration: 3000, message: "Indexing content for optimal retrieval..." },
 ];
-
 // MODIFIED: Renamed 'onUploadSuccess' prop to 'onSourceAdded'
 function DocumentUpload({ onSourceAdded }) { 
     const [selectedFile, setSelectedFile] = useState(null);
