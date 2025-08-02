@@ -1,13 +1,12 @@
-
-
 // server/routes/upload.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs').promises;
 const axios = require('axios');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
 
@@ -15,23 +14,25 @@ const router = express.Router();
 
 // --- Constants & Multer Config ---
 const UPLOAD_DIR = path.join(__dirname, '..', 'assets');
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // Increased to 50MB for media
 const allowedMimeTypes = {
-    'application/pdf': 'docs',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docs',
-    'application/msword': 'docs',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'docs',
-    'application/vnd.ms-powerpoint': 'docs',
-    'text/plain': 'docs', 'text/x-python': 'code', 'application/javascript': 'code',
-    'text/javascript': 'code', 'text/markdown': 'code', 'text/html': 'code',
-    'application/xml': 'code', 'text/xml': 'code', 'application/json': 'code',
-    'text/csv': 'code', 'image/jpeg': 'images', 'image/png': 'images',
-    'image/bmp': 'images', 'image/gif': 'images',
+    // Documents
+    'application/pdf': { type: 'document', processor: 'ai_core' },
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { type: 'document', processor: 'ai_core' },
+    'text/plain': { type: 'document', processor: 'ai_core' },
+    'text/markdown': { type: 'document', processor: 'ai_core' },
+    // Media
+    'audio/mpeg': { type: 'audio', processor: 'media' },
+    'audio/wav': { type: 'audio', processor: 'media' },
+    'video/mp4': { type: 'video', processor: 'media' },
+    'video/quicktime': { type: 'video', processor: 'media' },
+    'image/png': { type: 'image', processor: 'media' },
+    'image/jpeg': { type: 'image', processor: 'media' },
 };
-const allowedExtensions = [
-    '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.txt', '.py', '.js', '.md', 
-    '.html', '.xml', '.json', '.csv', '.log', '.jpg', '.jpeg', '.png', '.bmp', '.gif'
-];
+const allowedExtensions = Object.keys(allowedMimeTypes).flatMap(mime => {
+    const extMap = { 'application/pdf': '.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx', /* etc */ };
+    return extMap[mime] || []; // Simplified, a full map would be needed
+}); // This part can be improved if needed
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -40,11 +41,9 @@ const storage = multer.diskStorage({
         }
         const sanitizedUsername = req.user.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
         const fileMimeType = file.mimetype.toLowerCase();
-        const fileTypeSubfolder = allowedMimeTypes[fileMimeType] || 'others';
+        const fileTypeSubfolder = allowedMimeTypes[fileMimeType]?.type || 'others';
         const destinationPath = path.join(UPLOAD_DIR, sanitizedUsername, fileTypeSubfolder);
-        fs.mkdir(destinationPath, { recursive: true }, (err) => {
-             if (err) cb(err); else cb(null, destinationPath);
-         });
+        fs.mkdir(destinationPath, { recursive: true }).then(() => cb(null, destinationPath)).catch(cb);
     },
     filename: (req, file, cb) => {
         const timestamp = Date.now();
@@ -56,140 +55,99 @@ const storage = multer.diskStorage({
     }
 });
 
-const fileFilter = (req, file, cb) => {
-    if (!req.user) {
-         const err = new multer.MulterError('UNAUTHENTICATED');
-         err.message = 'User not authenticated.';
-         return cb(err, false);
-    }
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    const mimeType = file.mimetype.toLowerCase();
-    if (allowedMimeTypes[mimeType] && allowedExtensions.includes(fileExt)) {
-        cb(null, true);
-    } else {
-        const err = new multer.MulterError('LIMIT_UNEXPECTED_FILE');
-        err.message = `Invalid file type. Allowed: ${allowedExtensions.join(', ')}.`;
-        cb(err, false);
-    }
-};
+const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-
-async function triggerPythonRagProcessing(userId, filePath, originalName) {
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-    if (!pythonServiceUrl) {
-        return { success: false, message: "RAG service URL not configured." };
-    }
-    const addDocumentUrl = `${pythonServiceUrl}/add_document`;
+// Main upload route
+router.post('/', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ message: "No file received." });
+    
+    const userId = req.user._id;
+    const { originalname: originalName, path: serverPath, mimetype } = req.file;
+    
+    let newSource;
     try {
-        const response = await axios.post(addDocumentUrl, { user_id: userId, file_path: filePath, original_name: originalName });
-        const pythonData = response.data;
-        const text = pythonData?.raw_text_for_analysis || null;
-        return {
-            success: !!(text && text.trim()),
-            status: pythonData?.status,
-            message: pythonData?.message || "No message from Python.",
-            text: text,
-            chunksForKg: pythonData?.chunks_with_metadata || []
+        const { type, processor } = allowedMimeTypes[mimetype.toLowerCase()] || {};
+        if (!type || !processor) {
+            throw new Error(`Unsupported file type: ${mimetype}`);
+        }
+
+        newSource = new KnowledgeSource({
+            userId,
+            sourceType: type,
+            title: originalName,
+            serverFilename: path.basename(serverPath),
+            status: 'processing_extraction'
+        });
+        await newSource.save();
+
+        res.status(202).json({ 
+            message: "File accepted. Processing has started in the background.",
+            source: newSource
+        });
+
+        // --- Start background processing ---
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
+
+        let pythonEndpoint = '';
+        let pythonPayload = {};
+
+        if (processor === 'ai_core') {
+            pythonEndpoint = '/add_document';
+            pythonPayload = { user_id: userId.toString(), file_path: serverPath, original_name: originalName };
+        } else if (processor === 'media') {
+            pythonEndpoint = '/process_media_file';
+            pythonPayload = { file_path: serverPath, media_type: type };
+        }
+        
+        const extractionResponse = await axios.post(`${pythonServiceUrl}${pythonEndpoint}`, pythonPayload, { timeout: 600000 }); // 10 min timeout for media
+        
+        const text_content = extractionResponse.data?.text_content || (processor === 'ai_core' ? extractionResponse.data?.raw_text_for_analysis : null);
+        
+        if (!text_content) throw new Error("Failed to extract text from the source.");
+        
+        const sourceDoc = await KnowledgeSource.findById(newSource._id);
+        sourceDoc.textContent = text_content;
+        sourceDoc.status = 'processing_analysis';
+        await sourceDoc.save();
+
+        // Trigger analysis and KG workers...
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        
+        const workerBaseData = {
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
         };
-    } catch (error) {
-        return { success: false, message: `Python RAG call failed: ${error.response?.data?.error || error.message}`};
-    }
-}
-
-router.post('/', (req, res) => {
-    const uploader = upload.single('file');
-
-    uploader(req, res, async function (err) {
-        if (!req.user) {
-            return res.status(401).json({ message: "Authentication error: User context not found." });
-        }
-        if (err) {
-            console.error(`Upload Route: Multer error for user '${req.user.email}': ${err.message}`);
-            return res.status(err instanceof multer.MulterError ? 400 : 500).json({ message: err.message });
-        }
-        if (!req.file) {
-            return res.status(400).json({ message: "No file received or file type rejected." });
-        }
-
-        const userId = req.user._id.toString();
-        const { originalname: originalName, path: tempServerPath } = req.file;
-        if (!tempServerPath) {
-            return res.status(500).json({ message: "File upload failed, temporary path not created." });
-        }
-        const absoluteFilePath = path.resolve(tempServerPath);
-
-        try {
-            const user = await User.findById(userId).select('uploadedDocuments.filename preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
-            if (!user) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(404).json({ message: "User not found." });
-            }
-
-            if (user.uploadedDocuments.some(doc => doc.filename === originalName)) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(409).json({ message: `File '${originalName}' already exists.` });
-            }
-
-            const ragResult = await triggerPythonRagProcessing(userId, absoluteFilePath, originalName);
-
-            if (!ragResult.success) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(422).json({ message: ragResult.message || "Failed to extract text." });
-            }
-            
-            const newDocEntry = {
-                filename: originalName, text: ragResult.text,
-                analysis: {}, uploadedAt: new Date(), ragStatus: ragResult.status,
-                analysisStatus: "pending", kgStatus: "pending"
-            };
-            await User.updateOne({ _id: userId }, { $push: { uploadedDocuments: newDocEntry } });
-            
-            res.status(202).json({
-                message: `File '${originalName}' accepted. Background processing initiated.`,
-                originalname: originalName,
+        
+        const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
+            workerData: { ...workerBaseData, textForAnalysis: text_content }
+        });
+        analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (File: ${originalName}):`, err));
+        
+        // KG worker logic for ai_core processed docs (needs refactor for unified chunks)
+        const chunksForKg = extractionResponse.data?.chunks_with_metadata || [];
+         if (chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
             });
-
-            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-            const llmProviderForWorkers = user.preferredLlmProvider || 'gemini';
-
-            if (llmProviderForWorkers === 'gemini' && !userApiKey) {
-                console.warn(`[Upload Route] User ${userId} selected Gemini but has no API key. Workers may fail.`);
-            }
-            
-            const workerData = { 
-                userId, 
-                originalName, 
-                textForAnalysis: ragResult.text, 
-                llmProvider: llmProviderForWorkers, 
-                ollamaModel: user.ollamaModel,
-                apiKey: userApiKey,
-                ollamaUrl: user.ollamaUrl
-            };
-            const kgWorkerData = { ...workerData, chunksForKg: ragResult.chunksForKg };
-
-            const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { workerData });
-            analysisWorker.on('error', (err) => console.error(`Analysis Worker Error [${originalName}]:`, err));
-
-            if (ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
-                const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { workerData: kgWorkerData });
-                kgWorker.on('error', (err) => console.error(`KG Worker Error [${originalName}]:`, err));
-            } else {
-                 await User.updateOne({ _id: userId, "uploadedDocuments.filename": originalName }, { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks" } });
-            }
-
-            await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Non-critical cleanup error: ${e.message}`));
-
-        } catch (error) {
-            console.error(`Overall Upload Error for ${originalName}:`, error);
-            if (fs.existsSync(tempServerPath)) {
-                await fs.promises.unlink(tempServerPath).catch(e => console.error(`Final Cleanup Error: ${e.message}`));
-            }
-            if (!res.headersSent) {
-                res.status(500).json({ message: "Server error during file processing." });
-            }
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (File: ${originalName}):`, err));
         }
-    });
+
+
+    } catch (error) {
+        console.error(`Error processing uploaded file '${originalName}':`, error);
+        if (newSource) {
+            await KnowledgeSource.updateOne({ _id: newSource._id }, {
+                $set: { status: 'failed', failureReason: error.message }
+            });
+        }
+        // If headers not sent, send error to client. This happens for initial errors.
+        if (!res.headersSent) {
+             res.status(500).json({ message: error.message || "Server error during file processing." });
+        }
+    }
 });
 
 module.exports = router;

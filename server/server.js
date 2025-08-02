@@ -26,7 +26,7 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
-const filesRoutes = require("./routes/files");
+// const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
 const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
@@ -37,7 +37,7 @@ const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
-
+const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -76,7 +76,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
 app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
-app.use("/api/files", filesRoutes);
+// app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/subjects", subjectsRoutes);
 app.use("/api/generate", generationRoutes);
@@ -84,7 +84,8 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
-
+app.use("/api/admin", adminApiRoutes);
+app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);

@@ -2,46 +2,40 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
-const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const AdminDocument = require('../models/AdminDocument');
 
 // @route   GET /api/analysis/:documentFilename
-// @desc    Get analysis data (faq, topics, mindmap) for a specific document
-// @access  Private (requires auth)
+// @desc    Get analysis data for a user's knowledge source or an admin subject
+// @access  Private
 router.get('/:documentFilename', authMiddleware, async (req, res) => {
-    const userId = req.user._id; // From authMiddleware
+    const userId = req.user._id;
     const { documentFilename } = req.params;
-    
+
     if (!documentFilename) {
         return res.status(400).json({ message: 'Document filename parameter is required.' });
     }
 
     try {
-        const user = await User.findById(userId).select('uploadedDocuments');
-        if (!user) {
-            return res.status(404).json({ message: 'User not found.' });
+        let sourceDocument = null;
+
+        // 1. Check user-specific KnowledgeSource by its title
+        sourceDocument = await KnowledgeSource.findOne({ userId, title: documentFilename }).select('analysis').lean();
+        
+        // 2. If not found, fallback to AdminDocument (Subjects) by its originalName
+        if (!sourceDocument) {
+            sourceDocument = await AdminDocument.findOne({ originalName: documentFilename }).select('analysis').lean();
         }
 
-        const document = user.uploadedDocuments.find(doc => doc.filename === documentFilename);
-
-        if (!document) {
-            return res.status(404).json({ message: `Document '${documentFilename}' not found for this user.` });
-        }
-
-        if (!document.analysis) {
-            // This case might happen if the analysis object itself is missing, though schema has defaults.
-            console.warn(`Analysis object missing for document '${documentFilename}', user '${userId}'. Sending empty analysis.`);
-            return res.status(200).json({
-                faq: "",
-                topics: "",
-                mindmap: ""
-            });
+        if (!sourceDocument) {
+            return res.status(404).json({ message: `Document or Subject '${documentFilename}' not found.` });
         }
         
-        // Send the analysis sub-document
-        res.status(200).json(document.analysis);
+        // Send the analysis sub-document, ensuring it's an object even if empty
+        res.status(200).json(sourceDocument.analysis || { faq: "", topics: "", mindmap: "" });
 
     } catch (error) {
-        console.error(`Error fetching analysis for document '${documentFilename}', user '${userId}':`, error);
+        console.error(`Error fetching analysis for '${documentFilename}':`, error);
         res.status(500).json({ message: 'Server error while retrieving document analysis.' });
     }
 });

@@ -237,12 +237,90 @@
 
 
 
+// // server/routes/generation.js
+// const express = require('express');
+// const axios = require('axios');
+// const router = express.Router();
+// const User = require('../models/User');
+// const AdminDocument = require('../models/AdminDocument');
+
+// router.post('/document', async (req, res) => {
+//     const { markdownContent, docType, sourceDocumentName } = req.body;
+//     const userId = req.user._id;
+
+//     if (!markdownContent || !docType || !sourceDocumentName) {
+//         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
+//     }
+
+//     try {
+//         let sourceDocumentText = null;
+
+//         const user = await User.findById(userId).select('uploadedDocuments');
+//         if (user) {
+//             const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
+//             if (userDocument && userDocument.text) {
+//                 sourceDocumentText = userDocument.text;
+//             }
+//         }
+
+//         if (!sourceDocumentText) {
+//             const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
+//             if (adminDocument && adminDocument.text) {
+//                 sourceDocumentText = adminDocument.text;
+//             }
+//         }
+        
+//         if (!sourceDocumentText) {
+//             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+//         }
+
+//         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+//         if (!pythonServiceUrl) {
+//             return res.status(500).json({ message: "Document generation service is not configured." });
+//         }
+
+//         const generationUrl = `${pythonServiceUrl}/generate_document`;
+        
+//         // 1. Ask Python to generate the document and get the filename
+//         const genResponse = await axios.post(generationUrl, {
+//             markdownContent, docType, sourceDocumentText
+//         }, { timeout: 300000 });
+
+//         if (!genResponse.data || !genResponse.data.success) {
+//             throw new Error(genResponse.data.error || "Python service failed to generate the document.");
+//         }
+
+//         const filename = genResponse.data.filename;
+//         const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
+
+//         // 2. Fetch the generated document from Python as a stream (blob)
+//         console.log(`[Generation Route] Fetching generated file from Python: ${downloadUrl}`);
+//         const fileResponse = await axios.get(downloadUrl, {
+//             responseType: 'stream'
+//         });
+
+//         // 3. Stream the file directly back to the client
+//         res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+//         res.setHeader('Content-Type', fileResponse.headers['content-type']);
+//         fileResponse.data.pipe(res);
+
+//     } catch (error) {
+//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
+//         console.error(`[Generation Route] Error: ${errorMsg}`);
+//         res.status(500).json({ message: errorMsg });
+//     }
+// });
+
+// module.exports = router;
+
 // server/routes/generation.js
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const User = require('../models/User');
+const User = require('../models/User'); // Still needed for API key
 const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource'); // <-- Import KnowledgeSource
+const { decrypt } = require('../utils/crypto'); // For user API key
 
 router.post('/document', async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
@@ -254,36 +332,43 @@ router.post('/document', async (req, res) => {
 
     try {
         let sourceDocumentText = null;
+        let apiKeyForRequest = null;
 
-        const user = await User.findById(userId).select('uploadedDocuments');
-        if (user) {
-            const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-            if (userDocument && userDocument.text) {
-                sourceDocumentText = userDocument.text;
+        // 1. Check user-specific KnowledgeSource and get API key
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) {
+                apiKeyForRequest = decrypt(user.encryptedApiKey);
             }
-        }
-
-        if (!sourceDocumentText) {
-            const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
-            if (adminDocument && adminDocument.text) {
-                sourceDocumentText = adminDocument.text;
+        } else {
+            // 2. Fallback to AdminDocument and use server key
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
             }
         }
         
         if (!sourceDocumentText) {
             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
         }
+        if (!apiKeyForRequest) {
+            return res.status(400).json({ message: "API Key for document generation is missing." });
+        }
 
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) {
             return res.status(500).json({ message: "Document generation service is not configured." });
         }
-
+        
         const generationUrl = `${pythonServiceUrl}/generate_document`;
         
-        // 1. Ask Python to generate the document and get the filename
+        // Ask Python to generate the document
         const genResponse = await axios.post(generationUrl, {
-            markdownContent, docType, sourceDocumentText
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
         }, { timeout: 300000 });
 
         if (!genResponse.data || !genResponse.data.success) {
@@ -293,13 +378,9 @@ router.post('/document', async (req, res) => {
         const filename = genResponse.data.filename;
         const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
 
-        // 2. Fetch the generated document from Python as a stream (blob)
-        console.log(`[Generation Route] Fetching generated file from Python: ${downloadUrl}`);
-        const fileResponse = await axios.get(downloadUrl, {
-            responseType: 'stream'
-        });
+        // Fetch the generated document as a stream and pipe it to the client
+        const fileResponse = await axios.get(downloadUrl, { responseType: 'stream' });
 
-        // 3. Stream the file directly back to the client
         res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
         res.setHeader('Content-Type', fileResponse.headers['content-type']);
         fileResponse.data.pipe(res);
@@ -307,7 +388,7 @@ router.post('/document', async (req, res) => {
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
         console.error(`[Generation Route] Error: ${errorMsg}`);
-        res.status(500).json({ message: errorMsg });
+        res.status(error.response?.status || 500).json({ message: errorMsg });
     }
 });
 
