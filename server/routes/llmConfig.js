@@ -54,11 +54,9 @@ router.put("/config", async (req, res) => {
     res.status(200).json({ message: "LLM preferences updated successfully." });
   } catch (error) {
     console.error(`Error updating LLM config for user ${userId}:`, error);
-    res
-      .status(500)
-      .json({
-        message: `Server error while updating LLM preferences: ${error.message}`,
-      });
+    res.status(500).json({
+      message: `Server error while updating LLM preferences: ${error.message}`,
+    });
   }
 });
 

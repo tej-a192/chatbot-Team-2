@@ -2,6 +2,7 @@
 import os
 import sys
 import traceback
+from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
 import logging
 import atexit
 import uuid
@@ -10,11 +11,15 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils 
 
-from flask import Flask, request, jsonify, current_app, send_from_directory, after_this_request
-from pydub import AudioSegment
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
+
+import subprocess
+import tempfile
+import shutil
+import json
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,14 +37,58 @@ try:
     from neo4j import exceptions as neo4j_exceptions
     import document_generator
     import podcast_generator
-    import academic_search
-    import knowledge_graph_generator
     import google.generativeai as genai
-    from prompts import (
-        CODE_ANALYSIS_PROMPT_TEMPLATE,
-        TEST_CASE_GENERATION_PROMPT_TEMPLATE,
-        EXPLAIN_ERROR_PROMPT_TEMPLATE
-    )
+    from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
+    import quiz_utils
+    from academic_search import search_all_apis as academic_search
+
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        LLM_MODEL = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+    else:
+        LLM_MODEL = None
+        logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
+
+    def llm_wrapper(prompt, api_key=None):
+        """
+        A flexible wrapper for the Gemini API that can use a provided per-request API key
+        or fall back to the server's global key.
+        """
+        key_to_use = api_key or config.GEMINI_API_KEY
+        if not key_to_use:
+            raise ConnectionError("Gemini API Key is not configured for this request.")
+
+        genai.configure(api_key=key_to_use)
+        
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        model_instance = genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
+
+        for attempt in range(3):
+            try:
+                response = model_instance.generate_content(prompt)
+                if response.parts:
+                    return "".join(part.text for part in response.parts if hasattr(part, 'text'))
+                elif response.prompt_feedback and response.prompt_feedback.block_reason:
+                     raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
+                else:
+                    logger.warning("LLM returned empty response without explicit block reason.")
+                    return ""
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                if attempt == 2: raise
+        return ""
+
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}.")
     sys.exit(1)
@@ -51,67 +100,7 @@ GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
 app.config['GENERATED_DOCS_DIR'] = GENERATED_DOCS_DIR
 
-LANGUAGE_CONFIG = {
-    "python": {
-        "filename": "script.py",
-        "compile_cmd": None,
-        "run_cmd": ["python", "script.py"]
-    },
-    "java": {
-        "filename": "Main.java",
-        "compile_cmd": ["javac", "Main.java"],
-        "run_cmd": ["java", "Main"]
-    },
-    "c": {
-        "filename": "program.c",
-        "compile_cmd": ["gcc", "program.c", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    },
-    "cpp": {
-        "filename": "program.cpp",
-        "compile_cmd": ["g++", "program.cpp", "-o", "program"],
-        "run_cmd": ["./program"] if os.name != 'nt' else ["program.exe"]
-    }
-}
-
-# --- Dynamic LLM Initialization & Wrapper ---
-def get_llm_model(api_key: str):
-    """Dynamically creates a GenerativeModel instance with the provided API key."""
-    if not api_key:
-        raise ValueError("An API key is required to initialize the LLM for this request.")
-    
-    genai.configure(api_key=api_key)
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
-    return genai.GenerativeModel(config.GEMINI_MODEL_NAME, safety_settings=safety_settings)
-
-def llm_wrapper(prompt: str, api_key: str):
-    """Wrapper that takes an api_key to initialize the model for each call."""
-    if not api_key:
-        raise ConnectionError("Gemini API Key was not provided for this operation.")
-    
-    llm_model = get_llm_model(api_key)
-    
-    for attempt in range(3):
-        try:
-            response = llm_model.generate_content(prompt)
-            if response.parts:
-                return "".join(part.text for part in response.parts if hasattr(part, 'text'))
-            elif response.prompt_feedback and response.prompt_feedback.block_reason:
-                 raise ValueError(f"Prompt blocked by API. Reason: {response.prompt_feedback.block_reason_message}")
-            else:
-                logger.warning("LLM returned empty response without explicit block reason.")
-                return ""
-        except Exception as e:
-            logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
-            if attempt == 2: raise
-    return ""
-
-# --- Initialize other services ---
+# Initialize services
 vector_service = None
 try:
     vector_service = VectorDBService()
@@ -135,6 +124,33 @@ def create_error_response(message, status_code=500, details=None):
     return jsonify(response_payload), status_code
 
 # === API Endpoints ===
+
+# This config is now cleaner. The platform-specific logic is handled in the route.
+LANGUAGE_CONFIG = {
+    "python": {
+        "filename": "main.py",
+        "compile_cmd": None,
+        "run_cmd": [sys.executable, "main.py"]
+    },
+    "java": {
+        "filename": "Main.java",
+        "compile_cmd": ["javac", "-Xlint:all", "Main.java"],
+        "run_cmd": ["java", "Main"]
+    },
+    "c": {
+        "filename": "main.c",
+        "compile_cmd": ["gcc", "main.c", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["main"] # Just the base name
+    },
+    "cpp": {
+        "filename": "main.cpp",
+        "compile_cmd": ["g++", "main.cpp", "-o", "main", "-Wall", "-Wextra", "-pedantic"],
+        "run_cmd": ["main"] # Just the base name
+    }
+}
+
+
+# --- (START) Code Executor End Points ---
 
 @app.route('/execute_code', methods=['POST'])
 def execute_code():
@@ -179,8 +195,23 @@ def execute_code():
             case_result = { "input": case_input, "expected": expected_output, "output": "", "error": None, "status": "fail" }
 
             try:
+                # --- THIS IS THE FIX ---
+                # Dynamically build the command with an absolute path for compiled languages
+                run_command = lang_config["run_cmd"][:] # Make a copy
+
+                if language in ["c", "cpp"]:
+                    executable_name = run_command[0]
+                    if os.name == 'nt':
+                        executable_name += '.exe'
+                    # Create the full, unambiguous path to the executable
+                    absolute_executable_path = os.path.join(temp_dir, executable_name)
+                    run_command[0] = absolute_executable_path
+                # --- END OF FIX ---
+
                 run_process = subprocess.run(
-                    lang_config["run_cmd"], cwd=temp_dir, input=case_input,
+                    run_command, # Use the potentially modified command
+                    cwd=temp_dir,
+                    input=case_input,
                     capture_output=True, text=True, timeout=5, encoding='utf-8'
                 )
                 stdout = run_process.stdout.strip().replace('\r\n', '\n')
@@ -211,6 +242,8 @@ def execute_code():
 
     return jsonify({"results": results}), 200
 
+# ... (the rest of the file remains unchanged) ...
+
 @app.route('/analyze_code', methods=['POST'])
 def analyze_code_route():
     data = request.get_json()
@@ -218,8 +251,8 @@ def analyze_code_route():
     
     code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
     
-    if not all([code, language, api_key]):
-        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+    if not all([code, language]):
+        return create_error_response("Missing 'code' or 'language'", 400)
         
     try:
         prompt = CODE_ANALYSIS_PROMPT_TEMPLATE.format(language=language, code=code)
@@ -235,8 +268,8 @@ def generate_test_cases_route():
     
     code, language, api_key = data.get('code'), data.get('language'), data.get('apiKey')
     
-    if not all([code, language, api_key]):
-        return create_error_response("Missing 'code', 'language', or 'apiKey'", 400)
+    if not all([code, language]):
+        return create_error_response("Missing 'code' or 'language'", 400)
 
     try:
         prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(language=language, code=code)
@@ -258,8 +291,8 @@ def explain_error_route():
     
     code, language, error_message, api_key = data.get('code'), data.get('language'), data.get('errorMessage'), data.get('apiKey')
     
-    if not all([code, language, error_message, api_key]):
-        return create_error_response("Missing 'code', 'language', 'errorMessage', or 'apiKey'", 400)
+    if not all([code, language, error_message]):
+        return create_error_response("Missing 'code', 'language', or 'errorMessage'", 400)
         
     try:
         prompt = EXPLAIN_ERROR_PROMPT_TEMPLATE.format(language=language, code=code, error_message=error_message)
@@ -267,6 +300,68 @@ def explain_error_route():
         return jsonify({"explanation": explanation}), 200
     except Exception as e:
         return create_error_response(f"Failed to explain error: {str(e)}", 500)
+
+# --- (END) Code Executor End Points ---
+
+# --- (START) Quiz Generator End Points ---
+@app.route('/generate_quiz', methods=['POST'])
+def generate_quiz_route():
+    if 'file' not in request.files:
+        return create_error_response("No file part in the request", 400)
+    
+    file = request.files['file']
+    quiz_option = request.form.get('quizOption', 'standard')
+    api_key = request.form.get('api_key')
+    
+    quiz_option_map = {
+        'quick': 5,
+        'standard': 10,
+        'deep_dive': 15,
+        'comprehensive': 20
+    }
+    num_questions = quiz_option_map.get(quiz_option, 10) # Default to 10
+
+    if file.filename == '':
+        return create_error_response("No selected file", 400)
+    if not api_key:
+        return create_error_response("API Key is required for quiz generation", 400)
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        filename = werkzeug_utils.secure_filename(file.filename)
+        file_path = os.path.join(temp_dir, filename)
+        file.save(file_path)
+
+        logger.info(f"Quiz Gen: Processing uploaded file '{filename}' for text extraction.")
+        document_text = quiz_utils.extract_text_for_quiz(file_path)
+
+        if not document_text or not document_text.strip():
+            return create_error_response("Could not extract any text from the provided document.", 422)
+
+        prompt = QUIZ_GENERATION_PROMPT_TEMPLATE.format(
+            num_questions=num_questions,
+            document_text=document_text
+        )
+        
+        logger.info(f"Quiz Gen: Sending prompt to LLM for {num_questions} questions.")
+        response_text = llm_wrapper(prompt, api_key)
+        
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("LLM response did not contain a valid JSON array for the quiz.")
+        
+        quiz_data = json.loads(json_match.group(0))
+        logger.info(f"Quiz Gen: Successfully generated and parsed {len(quiz_data)} questions.")
+        
+        return jsonify({"quiz": quiz_data}), 200
+
+    except Exception as e:
+        logger.error(f"Error during quiz generation: {e}", exc_info=True)
+        return create_error_response(f"Quiz Generation failed: {str(e)}", 500)
+    finally:
+        shutil.rmtree(temp_dir)
+
+# --- (END) Quiz Generator End Points ---
 
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
@@ -360,7 +455,7 @@ def academic_search_route():
     data = request.get_json()
     if not data or 'query' not in data: return create_error_response("Missing 'query'", 400)
     try:
-        results = academic_search.search_all_apis(data['query'], max_results_per_api=data.get('max_results', 3))
+        results = academic_search(data['query'], max_results_per_api=data.get('max_results', 3))
         return jsonify({"success": True, "results": results}), 200
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
@@ -420,28 +515,6 @@ def export_podcast_route():
     except Exception as e:
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
-
-@app.route('/generate_kg_from_text', methods=['POST'])
-def generate_kg_from_text_route():
-    current_app.logger.info("--- /generate_kg_from_text Request ---")
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    
-    document_text = data.get('document_text')
-    api_key = data.get('api_key')
-    
-    if not document_text or not api_key:
-        return create_error_response("Missing 'document_text' or 'api_key' in request body", 400)
-    
-    try:
-        graph_data = knowledge_graph_generator.generate_graph_from_text(
-            document_text, 
-            lambda p: llm_wrapper(p, api_key)
-        )
-        return jsonify({"success": True, "graph_data": graph_data}), 200
-    except Exception as e:
-        logger.error(f"Error during on-the-fly KG generation: {e}", exc_info=True)
-        return create_error_response(f"KG Generation failed: {str(e)}", 500)
 
 @app.route('/generate_document', methods=['POST'])
 def generate_document_route():

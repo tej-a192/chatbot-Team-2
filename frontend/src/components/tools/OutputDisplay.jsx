@@ -16,26 +16,45 @@ const createMarkup = (markdownText) => {
 
 
 const OutputDisplay = ({ results, compilationError, code, language }) => {
-    const [explanations, setExplanations] = useState({});
-    const [isLoadingExplanation, setIsLoadingExplanation] = useState(null); // Tracks index
+    const [explanation, setExplanation] = useState(null);
+    const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+    const [explanationFor, setExplanationFor] = useState(null); // 'compilation' or test case index
 
-    const handleExplainError = async (index, errorMessage) => {
-        setIsLoadingExplanation(index);
+    const handleExplainError = async (errorContext, errorMessage) => {
+        setIsLoadingExplanation(true);
+        setExplanation(null);
+        setExplanationFor(errorContext);
         try {
             const response = await api.explainError({ code, language, errorMessage });
-            setExplanations(prev => ({ ...prev, [index]: response.explanation }));
+            setExplanation(response.explanation);
         } catch (err) {
             toast.error(err.response?.data?.message || "Failed to get explanation.");
         } finally {
-            setIsLoadingExplanation(null);
+            setIsLoadingExplanation(false);
         }
     };
 
     if (compilationError) {
         return (
             <div className="p-4 bg-red-900/10 text-red-400 border-t border-red-500/30 h-full flex flex-col">
-                <h3 className="text-lg font-semibold mb-2 flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
+                <div className="flex justify-between items-center mb-2 flex-shrink-0">
+                    <h3 className="text-lg font-semibold flex items-center gap-2"><AlertTriangle /> Compilation Error</h3>
+                    {!explanation && (
+                        <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError('compilation', compilationError)} isLoading={isLoadingExplanation && explanationFor === 'compilation'}>
+                            Explain Error
+                        </Button>
+                    )}
+                </div>
                 <pre className="flex-grow bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono overflow-auto custom-scrollbar">{compilationError}</pre>
+                {isLoadingExplanation && explanationFor === 'compilation' && (
+                    <div className="mt-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
+                )}
+                {explanation && explanationFor === 'compilation' && (
+                    <div className="mt-2 p-3 bg-primary/10 rounded-md border border-primary/30 flex-shrink-0">
+                        <h5 className="font-bold text-sm mb-1 text-primary dark:text-primary-light flex items-center gap-1.5"><Sparkles size={14}/> AI Explanation</h5>
+                        <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanation)} />
+                    </div>
+                )}
             </div>
         );
     }
@@ -83,8 +102,8 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                                 <div className="md:col-span-2">
                                     <div className="flex justify-between items-center">
                                         <strong className="block mb-1 text-red-500 dark:text-red-400">Error:</strong>
-                                        {!explanations[index] && (
-                                            <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError(index, res.error)} isLoading={isLoadingExplanation === index}>
+                                        {explanationFor !== index && (
+                                            <Button size="sm" variant="ghost" className="!text-xs" leftIcon={<Sparkles size={12}/>} onClick={() => handleExplainError(index, res.error)} isLoading={isLoadingExplanation && explanationFor === index}>
                                                 Explain Error
                                             </Button>
                                         )}
@@ -92,13 +111,13 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                                     <pre className="bg-red-900/20 p-2 rounded text-red-400 whitespace-pre-wrap font-mono">{res.error}</pre>
                                 </div>
                             )}
-                            {isLoadingExplanation === index && (
+                            {isLoadingExplanation && explanationFor === index && (
                                 <div className="md:col-span-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
                             )}
-                            {explanations[index] && (
+                            {explanation && explanationFor === index && (
                                 <div className="md:col-span-2 mt-2 p-3 bg-primary/10 rounded-md border border-primary/30">
                                     <h5 className="font-bold text-sm mb-1 text-primary dark:text-primary-light flex items-center gap-1.5"><Sparkles size={14}/> AI Explanation</h5>
-                                    <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanations[index])} />
+                                    <div className="prose prose-sm dark:prose-invert max-w-none text-text-light dark:text-text-dark" dangerouslySetInnerHTML={createMarkup(explanation)} />
                                 </div>
                             )}
                         </div>

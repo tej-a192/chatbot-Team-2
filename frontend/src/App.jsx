@@ -15,6 +15,7 @@ import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
 import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
 import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
+import QuizGeneratorPage from './components/tools/QuizGeneratorPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
 import { GraduationCap } from 'lucide-react';
@@ -278,6 +279,7 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
+                
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
@@ -285,6 +287,10 @@ function App() {
                     path="/study-plan"
                     element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
                 />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+                    <QuizGeneratorPage /> : <Navigate to="/" />} 
+                />
+                
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
