@@ -2,7 +2,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../core/Modal';
-import { Code, TestTubeDiagonal } from 'lucide-react'; // Add more icons as you add tools
+import { Code, FileQuestion } from 'lucide-react';
 const availableTools = [
     {
     title: 'Secure Code Executor',
@@ -11,14 +11,14 @@ const availableTools = [
     path: '/tools/code-executor',
     status: 'active'
     },
-    {
-    title: 'API Endpoint Tester',
-    description: 'A tool for testing and validating API endpoints will be available soon.',
-    icon: TestTubeDiagonal,
-    path: '#',
-    status: 'soon'
+     {
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
+        icon: FileQuestion,
+        path: '/tools/quiz-generator',
+        status: 'active'
     },
-// Add more tools here in the future
+
 ];
 const ToolsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();

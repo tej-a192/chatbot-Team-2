@@ -28,10 +28,11 @@ router.get('/profile', async (req, res) => {
 // @desc    Update the current user's profile data
 // @access  Private
 router.put('/profile', async (req, res) => {
-    const { name, college, universityNumber, degreeType, branch, year } = req.body;
+    // 1. Destructure all possible profile fields, including the new ones
+    const { name, college, universityNumber, degreeType, branch, year, learningStyle, currentGoals } = req.body;
 
-    // Basic backend validation
-    if (!name || !college || !universityNumber || !degreeType || !branch || !year) {
+    // 2. Update validation to include the new required fields
+    if (!name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
         return res.status(400).json({ message: 'All profile fields are required.' });
     }
 
@@ -41,17 +42,22 @@ router.put('/profile', async (req, res) => {
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // Update the profile sub-document
+        // 3. Update the profile sub-document with all fields
+        // This ensures a complete and consistent profile object is always saved.
         user.profile = {
             name,
             college,
             universityNumber,
             degreeType,
             branch,
-            year
+            year,
+            learningStyle,
+            currentGoals: currentGoals || ''
         };
+        // The performanceMetrics field is intentionally not updated here, as it's managed by the system.
 
         await user.save();
+        
         if (redisClient && redisClient.isOpen) {
             const cacheKey = `user:${req.user._id}`;
             await redisClient.del(cacheKey);
@@ -67,5 +73,6 @@ router.put('/profile', async (req, res) => {
         res.status(500).json({ message: 'Server error while updating profile.' });
     }
 });
+
 
 module.exports = router;

@@ -14,11 +14,37 @@ import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
 import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
 import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
+import QuizGeneratorPage from './components/tools/QuizGeneratorPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
+import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Button from './components/core/Button.jsx';
 
-function MainAppLayout({ orchestratorStatus }) {
+function SessionLoadingModal() {
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]">
+            <motion.div
+                key="session-loading-modal"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl p-8 w-full max-w-md text-center"
+            >
+                <div className="flex justify-center items-center mb-4">
+                    <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-b-4 border-primary"></div>
+                </div>
+                <h2 className="text-xl font-bold text-text-light dark:text-text-dark mb-2">Finalizing Session...</h2>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                    Summarizing key points and identifying topics for your future recommendations.
+                </p>
+            </motion.div>
+        </div>
+    );
+}
+
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -29,7 +55,7 @@ function MainAppLayout({ orchestratorStatus }) {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
-
+    
     const handleChatProcessingStatusChange = (isLoading) => {
         setIsChatProcessing(isLoading);
     };
@@ -37,20 +63,6 @@ function MainAppLayout({ orchestratorStatus }) {
     const handleRegularUserLogout = () => {
         regularUserLogout();
         setGlobalSessionId(null);
-    };
-
-    const handleNewChat = async () => {
-        try {
-            const data = await api.startNewSession(currentSessionId); 
-            if (data && data.newSessionId) {
-                setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-            } else {
-                toast.error("Could not start new chat session.");
-            }
-        } catch (error) {
-            toast.error(`Failed to start new chat: ${error.message}`);
-        }
     };
 
     const handleSelectSessionFromHistory = (sessionId) => {
@@ -70,17 +82,16 @@ function MainAppLayout({ orchestratorStatus }) {
         }
         try {
             const sessionData = await api.getChatHistory(sid);
-            
-            // --- THIS IS THE CORRECTED LOGIC ---
-            // The API now returns messages pre-formatted with `sender`.
-            // We no longer need to map or transform the data here.
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
-            // --- END OF CORRECTION ---
-
         } catch (error) {
             toast.error(`History load failed: ${error.message}`);
+            // If a session is not found, start a new one.
+            if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found. Starting a new session.");
+                handleNewChat();
+            }
         }
-    }, [regularUserTokenValue]);
+    }, [regularUserTokenValue, handleNewChat]); // Added handleNewChat dependency
 
     useEffect(() => {
         if (currentSessionId && regularUserTokenValue) {
@@ -91,55 +102,132 @@ function MainAppLayout({ orchestratorStatus }) {
     }, [currentSessionId, regularUserTokenValue, fetchChatHistory]);
 
     return (
-        <>
-            <TopNav 
-                user={regularUser} 
-                onLogout={handleRegularUserLogout} 
-                onNewChat={handleNewChat} 
-                onHistoryClick={() => setIsHistoryModalOpen(true)} 
-                orchestratorStatus={orchestratorStatus}
-                isChatProcessing={isChatProcessing}
-            />
-            <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
-                <AnimatePresence mode="wait">
-                    {isLeftPanelOpen ? (
-                        <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <LeftPanel />
-                        </motion.aside>
-                    ) : ( <LeftCollapsedNav /> )}
-                </AnimatePresence>
-                <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
-                    <CenterPanel 
-                        messages={appStateMessages} 
-                        setMessages={setAppStateMessages} 
-                        currentSessionId={currentSessionId}
-                        onChatProcessingChange={handleChatProcessingStatusChange}
-                    />
-                </main>
-                <AnimatePresence mode="wait">
-                    {isRightPanelOpen ? (
-                        <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                            <RightPanel />
-                        </motion.aside>
-                    ) : ( <RightCollapsedNav /> )}
-                </AnimatePresence>
-            </div>
-            <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
-        </>
+    <>
+        <AnimatePresence>
+            {isSessionLoading && <SessionLoadingModal />}
+        </AnimatePresence>
+
+        <TopNav 
+            user={regularUser} 
+            onLogout={handleRegularUserLogout} 
+            onNewChat={handleNewChat} 
+            onHistoryClick={() => setIsHistoryModalOpen(true)} 
+            orchestratorStatus={orchestratorStatus}
+            isChatProcessing={isChatProcessing}
+        />
+        <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+            <AnimatePresence mode="wait">
+                {isLeftPanelOpen ? (
+                    <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <LeftPanel />
+                    </motion.aside>
+                ) : ( <LeftCollapsedNav /> )}
+            </AnimatePresence>
+            <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+                <CenterPanel 
+                    messages={appStateMessages} 
+                    setMessages={setAppStateMessages} 
+                    currentSessionId={currentSessionId}
+                    onChatProcessingChange={handleChatProcessingStatusChange}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
+                />
+            </main>
+            <AnimatePresence mode="wait">
+                {isRightPanelOpen ? (
+                    <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+                        <RightPanel />
+                    </motion.aside>
+                ) : ( <RightCollapsedNav /> )}
+            </AnimatePresence>
+        </div>
+        <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
+    </>
     );
 }
 
 function App() {
     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
-    const { theme, setSessionId: setGlobalSessionId, currentSessionId, isAdminSessionActive } = useAppState();
+    const { 
+    theme, 
+    setSessionId: setGlobalSessionId, 
+    currentSessionId, 
+    isAdminSessionActive,
+    initialPromptForNewSession,      
+    setInitialPromptForNewSession, 
+    initialActivityForNewSession,    
+    setInitialActivityForNewSession
+} = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
     const [appInitializing, setAppInitializing] = useState(true);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+    const [isSessionLoading, setIsSessionLoading] = useState(false);
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+
+    const handleNewChat = useCallback(async (callback) => {
+        setIsSessionLoading(true);
+        try {
+            const data = await api.startNewSession(currentSessionId); 
+            if (data && data.newSessionId) {
+                setGlobalSessionId(data.newSessionId);
+                toast.success("New chat started!");
+
+                if (data.studyPlanSuggestion) {
+                    const { topic, reason } = data.studyPlanSuggestion;
+                    toast.custom((t) => (
+                        <motion.div
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
+                        >
+                            <div className="flex items-start">
+                                <div className="flex-shrink-0 pt-0.5">
+                                    <GraduationCap className="h-6 w-6 text-primary" />
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
+                                    <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
+                                    <div className="mt-4 flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            onClick={() => {
+                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
+                                                toast.dismiss(t.id);
+                                            }}
+                                        >
+                                            Create Plan for "{topic}"
+                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
+                                            Dismiss
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    ), {
+                        id: `study-plan-toast-${topic}`,
+                        duration: Infinity,
+                    });
+                }
+                
+                if (callback) callback(data.newSessionId);
+
+            } else {
+                toast.error(data.message || "Could not start new chat session.");
+            }
+        } catch (error) {
+            toast.error(`Failed to start new chat: ${error.message}`);
+        } finally {
+            setIsSessionLoading(false);
+        }
+    }, [currentSessionId, setGlobalSessionId, navigate]);
 
     useEffect(() => {
         if (isAdminSessionActive) {
@@ -159,26 +247,18 @@ function App() {
             setShowAuthModal(false);
             if (location.pathname.startsWith('/admin')) {
                 navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools')) { 
-                api.startNewSession(null).then(data => {
-                    if (data && data.newSessionId) {
-                        setGlobalSessionId(data.newSessionId);
-                    }
-                });
+            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
+                handleNewChat();
             }
         } else if (!location.pathname.startsWith('/admin')) {
             setShowAuthModal(true);
         }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId]);
+    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            api.startNewSession(null).then(data => {
-                if (data && data.newSessionId) {
-                    setGlobalSessionId(data.newSessionId);
-                }
-            });
+            handleNewChat();
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -199,12 +279,30 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
+                
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
+                <Route
+                    path="/study-plan"
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
+                />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+                    <QuizGeneratorPage /> : <Navigate to="/" />} 
+                />
+                
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
-            </Routes>
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                    orchestratorStatus={orchestratorStatus} 
+                    navigate={navigate} 
+                    handleNewChat={handleNewChat} 
+                    isSessionLoading={isSessionLoading}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
+                /> : null} />
+                </Routes>
         </div>
     );
 }

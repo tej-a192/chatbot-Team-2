@@ -221,6 +221,43 @@ const api = {
     const response = await apiClient.post("/tools/explain-error", payload);
     return response.data; // Should be { explanation: "..." }
   },
+  getRecommendations: async (sessionId) => {
+    const response = await apiClient.get(`/learning/recommendations/${sessionId}`);
+    return response.data; // Should be { recommendations: [...] }
+  },
+
+  findDocumentForTopic: async (topic) => {
+    const response = await apiClient.post('/learning/find-document', { topic });
+    return response.data; // Should be { documentName: "..." }
+  },
+  getLearningPaths: async () => {
+    const response = await apiClient.get('/learning/paths');
+    return response.data; // Should be an array of learning path objects
+  },
+
+  generateLearningPath: async (goal, context = null) => {
+    const response = await apiClient.post('/learning/paths/generate', { goal, context });
+    return response.data; // Should be the newly created learning path object
+  },
+
+  updateModuleStatus: async (pathId, moduleId, status) => {
+    const response = await apiClient.put(`/learning/paths/${pathId}/modules/${moduleId}`, { status });
+    return response.data; // Should be the entire updated learning path object
+  },
+
+  generateQuiz: async (file, quizOption) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("quizOption", quizOption); // <<< Send the descriptive string
+
+    const response = await apiClient.post("/tools/generate-quiz", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 300000,
+    });
+    return response.data; // Should be { quiz: [...] }
+  },
 };
 
 export default api;

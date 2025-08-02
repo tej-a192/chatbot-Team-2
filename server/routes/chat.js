@@ -1,10 +1,11 @@
 // server/routes/chat.js
 const express = require('express');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
-const { createOrUpdateSummary } = require('../services/summarizationService');
+const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
@@ -44,6 +45,10 @@ router.post('/message', async (req, res) => {
     } = req.body;
     
     const userId = req.user._id;
+
+    console.log(`%c[DEBUG | POST /message] Request Received`, 'color: #FFD700; font-weight: bold;');
+    console.log(`  - Session ID from Client:`, sessionId);
+    console.log(`  - User ID:`, userId.toString());
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
@@ -132,6 +137,10 @@ router.post('/message', async (req, res) => {
 
             streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
             
+            console.log(`%c[DEBUG | POST /message] Executing DB Update`, 'color: #FFD700; font-weight: bold;');
+            console.log(`  - Action: findOneAndUpdate (This will ADD messages to the existing session)`);
+            console.log(`  - Target Session ID:`, sessionId);
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
@@ -156,12 +165,20 @@ router.post('/message', async (req, res) => {
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
             };
-
+            console.log("---------------------------------------");
+            console.log(`[DB WRITE | /message] PRE-SAVE for Session ${sessionId}`);
+            console.log(`  - Attempting to atomically $push user message: "${userMessageForDb.parts[0].text.substring(0, 50)}..."`);
+            console.log(`  - Attempting to atomically $push AI response: "${aiMessageForDbAndClient.text.substring(0, 50)}..."`);
+            console.log("---------------------------------------");
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
                 { upsert: true, new: true }
             );
+            console.log("---------------------------------------");
+            console.log(`[DB WRITE | /message] POST-SAVE for Session ${sessionId}`);
+            console.log(`  - findOneAndUpdate operation completed successfully.`);
+            console.log("---------------------------------------");
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForDbAndClient });
@@ -184,60 +201,104 @@ router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
-    let contextSummaryForNewSession = "";
+    
+    // This will hold our final response payload
+    const responsePayload = {
+        message: 'New session started.',
+        newSessionId: newSessionId,
+        studyPlanSuggestion: null // Default to null
+    };
 
     try {
-        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean();
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-        const userOllamaUrl = user?.ollamaUrl || null;
-        let userApiKey = null;
-        if (llmProvider === 'gemini') {
-            userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
-
-        // --- THIS IS THE FIX ---
-        // 1. If there was a previous session, summarize IT and save that summary.
         if (previousSessionId) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
-            if (previousSession && previousSession.messages?.length > 0) {
-                console.log(`[New Chat] Summarizing previous session ${previousSessionId} before creating new one.`);
-                const summaryForOldSession = await createOrUpdateSummary(
-                    previousSession.messages,
-                    previousSession.summary, // Pass its own summary in case it's a continuation
-                    llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
+            
+            if (previousSession && previousSession.messages?.length > 1) {
+                console.log(`[Chat Route] Finalizing previous session '${previousSessionId}'...`);
                 
-                // Save the generated summary to the *old* session document.
-                previousSession.summary = summaryForOldSession;
-                await previousSession.save();
-                console.log(`[New Chat] Saved summary to previous session ${previousSessionId}.`);
-            }
-        }
-        
-        // 2. Now, create a new, broader summary for the NEW session's context.
-        // This gives the new session memory of the last 5 conversations.
-        const lastSessions = await ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean();
-        if (lastSessions && lastSessions.length > 0) {
-            const messagesForNewSummary = lastSessions.flatMap(session => session.messages);
-            if (messagesForNewSummary.length > 0) {
-                 console.log(`[New Chat] Creating context summary for new session from the last ${lastSessions.length} sessions.`);
-                contextSummaryForNewSession = await createOrUpdateSummary(
-                    messagesForNewSummary, null, llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
-            }
-        }
-        // --- END OF FIX ---
+                const user = await User.findById(userId).select('profile preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
+                const llmConfig = {
+                    llmProvider: user?.preferredLlmProvider || 'gemini',
+                    ollamaModel: user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL,
+                    apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+                    ollamaUrl: user?.ollamaUrl || null
+                };
 
-    } catch (summaryError) {
-        console.error(`Could not create summary from last sessions:`, summaryError);
-    }
-    
-    try {
-        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: contextSummaryForNewSession });
-        res.status(200).json({ message: 'New session started.', newSessionId });
-    } catch (dbError) {
-        res.status(500).json({ message: 'Failed to create new session.' });
+                const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
+                    previousSession.messages, previousSession.summary,
+                    llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
+                );
+
+                await ChatHistory.updateOne(
+                    { sessionId: previousSessionId, userId: userId },
+                    { $set: { summary: summary } }
+                );
+
+                if (knowledgeGaps && knowledgeGaps.size > 0) {
+                    user.profile.performanceMetrics.clear();     
+                    knowledgeGaps.forEach((score, topic) => {
+                        user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
+                    });
+                    await user.save(); 
+                    console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
+
+                    // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
+                    // Find the single most significant knowledge gap (lowest score)
+                    let mostSignificantGap = null;
+                    let lowestScore = 1.1; // Start higher than max possible score
+
+                    knowledgeGaps.forEach((score, topic) => {
+                        if (score < lowestScore) {
+                            lowestScore = score;
+                            mostSignificantGap = topic;
+                        }
+                    });
+
+                    // If we found a significant gap (e.g., score < 0.6), create the suggestion object
+                    if (mostSignificantGap && lowestScore < 0.6) {
+                        console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
+                        responsePayload.studyPlanSuggestion = {
+                            topic: mostSignificantGap,
+                            reason: `Analysis of your last session shows this is a key area for improvement.`
+                        };
+                    }
+                    // --- END OF NEW LOGIC ---
+                }
+                
+                if (keyTopics && keyTopics.length > 0) {
+                    const primaryTopic = keyTopics[0];
+                    console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
+                    responsePayload.studyPlanSuggestion = {
+                        topic: primaryTopic,
+                        reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
+                    };
+                }
+
+                if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
+                    const cacheKey = `recommendations:${newSessionId}`;
+                    await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
+                    console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
+                }
+            }
+        }
+
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+        console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
+        // Send the final payload, which may or may not include the suggestion
+        res.status(200).json(responsePayload);
+
+    } catch (error) {
+        console.error(`Error during finalize-and-create-new process:`, error);
+        if (!res.headersSent) {
+            try {
+                // Failsafe: even if analysis fails, still give the user a new session
+                await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+                responsePayload.message = 'New session started, but analysis of previous session failed.';
+                res.status(200).json(responsePayload);
+            } catch (fallbackError) {
+                 res.status(500).json({ message: 'A critical error occurred while creating a new session.' });
+            }
+        }
     }
 });
 
@@ -257,49 +318,14 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
-    const userId = req.user._id;
-    const cacheKey = `session:${sessionId}`;
-    const CACHE_TTL_SECONDS = 3600;
     try {
-        // 1. Check Redis Cache First
-        if (redisClient && redisClient.isOpen) {
-            const cachedSession = await redisClient.get(cacheKey);
-            if (cachedSession) {
-                console.log(`[Chat History] Cache HIT for session ${sessionId}`);
-                return res.status(200).json(JSON.parse(cachedSession));
-            }
-            console.log(`[Chat History] Cache MISS for session ${sessionId}`);
-        }
-
-        // 2. If miss, fetch from MongoDB
-        const session = await ChatHistory.findOne({ sessionId, userId }).lean();
-        if (!session) {
-            return res.status(404).json({ message: 'Chat session not found.' });
-        }
-        
-        const messagesForFrontend = (session.messages || []).map(msg => ({ 
-            id: msg._id || uuidv4(), 
-            sender: msg.role === 'model' ? 'bot' : 'user', 
-            text: msg.parts?.[0]?.text || '', 
-            thinking: msg.thinking, 
-            references: msg.references, 
-            timestamp: msg.timestamp, 
-            source_pipeline: msg.source_pipeline 
-        }));
-        
-        const responsePayload = { ...session, messages: messagesForFrontend };
-
-        // 3. Store the result in Redis for next time
-        if (redisClient && redisClient.isOpen) {
-            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(responsePayload)).catch(err => {
-                console.error(`Redis SETEX error for session ${sessionId}:`, err);
-            });
-        }
-
-        res.status(200).json(responsePayload);
+        const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
+        if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
+        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+        res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to retrieve chat session.' });
+        console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
+        res.status(500).json({ message: 'Failed to retrieve chat session details.' });
     }
 });
 

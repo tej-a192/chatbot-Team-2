@@ -283,41 +283,191 @@
     @apply px-4 py-3 text-sm font-semibold border-b;
     @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
   }
+
+  .panel-resize-handle {
+      @apply relative bg-transparent;
+  }
+  
+  .panel-resize-handle::after {
+    content: '';
+    @apply absolute inset-0 transition-colors duration-200;
+  }
+
+  .panel-resize-handle[data-active='true']::after {
+    @apply bg-primary/50;
+  }
+
+  /* --- NEW: Twinkling Title Effect --- */
+  .twinkling-title {
+    animation: twinkle-effect 4s ease-in-out infinite;
+  }
 }
-  /* --- ADDED THIS SECTION --- */
-  @keyframes shimmer {
+
+@layer utilities {
+  /* --- NEW: Keyframes --- */
+  @keyframes twinkle-effect {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+      text-shadow: 0 0 8px theme('colors.orange.400' / 0.5);
+    }
+    50% {
+      opacity: 0.85;
+      transform: scale(0.98);
+      text-shadow: 0 0 16px theme('colors.amber.400' / 0.7);
+    }
+  }
+}
+
+
+/* In frontend/src/index.css, add this at the end */
+
+@layer utilities {
+  /* Keyframes for the border rotation */
+  @keyframes spin-border {
     0% {
-      background-position: -200% 0;
+      --angle: 0deg;
     }
     100% {
-      background-position: 200% 0;
+      --angle: 360deg;
     }
   }
 
-  .shimmer-text {
-    /* Set the gradient that will shimmer through the text */
-    background: linear-gradient(
-      90deg,
-      theme('colors.transparent') 25%,
-      theme('colors.gray.400 / 0.5') 50%,
-      theme('colors.transparent') 75%
-    );
-    background-size: 200% 100%;
-    
-    animation: shimmer 1.5s linear infinite;
-
-    -webkit-background-clip: text;
-    background-clip: text;
-    
-    color: transparent;
+  /* Keyframes for the twinkling/shining effect on text and icons */
+  @keyframes twinkle-effect {
+    0%, 100% {
+      opacity: 1;
+      text-shadow: 0 0 8px currentColor, 0 0 10px currentColor;
+    }
+    50% {
+      opacity: 0.85;
+      text-shadow: 0 0 12px currentColor, 0 0 16px currentColor;
+    }
   }
 
-  html.dark .shimmer-text {
-    background: linear-gradient(
-      90deg,
-      theme('colors.transparent') 25%,
-      theme('colors.gray.500 / 0.6') 50%,
-      theme('colors.transparent') 75%
-    );
-    background-size: 200% 100%;
+  /* Utility class to apply the twinkling animation */
+  .twinkling-text {
+    animation: twinkle-effect 4s ease-in-out infinite;
   }
+
+  /* 
+    This is the core of the rotating border effect.
+    We register '--angle' as a CSS property that can be animated.
+    This is a modern CSS feature that makes this animation smooth and performant.
+  */
+  @property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  @keyframes sweep-underline {
+  from {
+    transform: translateX(-101%); /* Start completely off-screen to the left */
+  }
+  to {
+    transform: translateX(101%); /* End completely off-screen to the right */
+  }
+}
+
+/* --- Utility class for the animated underline --- */
+.animated-underline {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 4px;
+  overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+}
+
+/* REVISED PSEUDO-ELEMENT for a smooth sweep */
+.animated-underline::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%; /* The gradient bar is the same width as the text */
+  height: 2px;
+  background: linear-gradient(
+    90deg, 
+    transparent, /* Start transparent */
+    theme('colors.orange.500'),
+    theme('colors.red.500'),
+    theme('colors.amber.400'),
+    transparent /* End transparent */
+  );
+  animation: sweep-underline 4s linear infinite;
+}
+
+/* --- Keyframes for the fiery "Hot" tag effect --- */
+@keyframes fire-flicker {
+  0%, 100% {
+    transform: scale(1, 1);
+    box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
+  }
+  50% {
+    transform: scale(1.05, 1.05);
+    box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
+  }
+}
+
+/* --- Utility class for the fire animation --- */
+.fire-tag-animation {
+  animation: fire-flicker 2.5s ease-in-out infinite;
+}
+}
+
+
+
+@layer utilities {
+  /* --- Keyframes for the sweeping underline effect --- */
+  @keyframes sweep-underline {
+    from {
+      transform: translateX(-101%); /* Start completely off-screen to the left */
+    }
+    to {
+      transform: translateX(101%); /* End completely off-screen to the right */
+    }
+  }
+
+  /* --- Utility class for the animated underline --- */
+  .animated-underline {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 4px;
+    overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+  }
+
+  .animated-underline::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%; /* The gradient bar is the same width as the text */
+    height: 2px;
+    background: linear-gradient(
+      90deg, 
+      transparent,
+      theme('colors.orange.500'),
+      theme('colors.red.500'),
+      theme('colors.amber.400'),
+      transparent
+    );
+    animation: sweep-underline 4s linear infinite;
+  }
+
+  /* --- Keyframes for the fiery "Hot" tag effect --- */
+  @keyframes fire-flicker {
+    0%, 100% {
+      transform: scale(1, 1);
+      box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
+    }
+    50% {
+      transform: scale(1.05, 1.05);
+      box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
+    }
+  }
+
+  /* --- Utility class for the fire animation --- */
+  .fire-tag-animation {
+    animation: fire-flicker 2.5s ease-in-out infinite;
+  }
+}

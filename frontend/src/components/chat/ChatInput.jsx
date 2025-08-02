@@ -1,8 +1,7 @@
-
-
 // frontend/src/components/chat/ChatInput.jsx
+import { useAppState } from '../../contexts/AppStateContext.jsx';
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react'; // Ensure BookMarked is imported
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
@@ -15,16 +14,26 @@ function ChatInput({
     isLoading,
     useWebSearch,
     setUseWebSearch,
-    useAcademicSearch, // This prop is now used
-    setUseAcademicSearch, // This prop is now used
+    useAcademicSearch,
+    setUseAcademicSearch,
     criticalThinkingEnabled,
-    setCriticalThinkingEnabled
+    setCriticalThinkingEnabled,
+    initialPrompt,
+    setInitialPromptForNewSession
 }) {
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+    useEffect(() => {
+    if (initialPrompt) {
+        console.log("[ChatInput] Received initial prompt via props:", initialPrompt);
+        setInputValue(initialPrompt); // Set the text in the input box
+        setInitialPromptForNewSession(null); // Clear the global state immediately
+    }
+    }, [initialPrompt, setInitialPromptForNewSession]);
 
     useEffect(() => {
         if (transcript) {
@@ -72,7 +81,6 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
-    // --- THIS IS THE NEW HANDLER ---
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
@@ -103,7 +111,6 @@ function ChatInput({
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             className="absolute bottom-full left-0 mb-2 w-56 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
-                            {/* Web Search Button */}
                             <button
                                 onClick={handleWebSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -115,8 +122,6 @@ function ChatInput({
                                 <Globe size={16} />
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
-
-                            {/* --- THIS IS THE NEW ACADEMIC SEARCH BUTTON --- */}
                             <button
                                 onClick={handleAcademicSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -128,7 +133,6 @@ function ChatInput({
                                 <BookMarked size={16} />
                                 {useAcademicSearch ? 'Disable Academic Search' : 'Enable Academic Search'}
                             </button>
-                             
                              <button
                                 onClick={() => {toast("File attachment coming soon!", { icon: "📎" }); setIsMenuOpen(false);}}
                                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -140,7 +144,6 @@ function ChatInput({
                     )}
                     </AnimatePresence>
                 </div>
-
                 <textarea
                     ref={textareaRef}
                     value={inputValue}

@@ -1,9 +1,35 @@
 // server/routes/tools.js
 const express = require("express");
 const axios = require("axios");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const FormData = require("form-data");
 const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
+
+// --- THIS IS THE FIX ---
+// We switch from a simple 'dest' to a 'storage' configuration
+// to gain control over the temporary filename and preserve the extension.
+const quizStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const tempDir = path.join(__dirname, "..", "temp_uploads");
+    // Ensure the temp directory exists
+    fs.mkdir(tempDir, { recursive: true }, (err) => cb(err, tempDir));
+  },
+  filename: function (req, file, cb) {
+    // Create a unique filename while preserving the original file's extension
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const extension = path.extname(file.originalname);
+    cb(null, file.fieldname + "-" + uniqueSuffix + extension);
+  },
+});
+
+const quizUpload = multer({
+  storage: quizStorage, // Use our new storage engine
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB limit
+});
 
 async function getApiKeyForRequest(userId) {
   try {
@@ -26,20 +52,17 @@ async function getApiKeyForRequest(userId) {
     );
   }
 
-  // Fallback to the server's global key if the user key isn't available/applicable
   const serverKey = process.env.GEMINI_API_KEY;
   if (serverKey) {
-    // console.log(`[Tools Route] Using server's fallback GEMINI_API_KEY.`);
     return serverKey;
   }
 
-  // If neither key is available, throw the final error.
   throw new Error(
     "No valid API key is configured for this AI feature on the server, and the user has not provided one."
   );
 }
 
-// @route   POST /api/tools/execute
+// ... (existing tool routes like /execute, /analyze-code, etc. remain the same) ...
 router.post("/execute", async (req, res) => {
   const { language, code, testCases } = req.body;
   if (!code || !language) {
@@ -66,7 +89,6 @@ router.post("/execute", async (req, res) => {
   }
 });
 
-// @route   POST /api/tools/analyze-code
 router.post("/analyze-code", async (req, res) => {
   const { language, code } = req.body;
   if (!code || !language) {
@@ -91,7 +113,6 @@ router.post("/analyze-code", async (req, res) => {
   }
 });
 
-// @route   POST /api/tools/generate-test-cases
 router.post("/generate-test-cases", async (req, res) => {
   const { language, code } = req.body;
   if (!code || !language) {
@@ -116,7 +137,6 @@ router.post("/generate-test-cases", async (req, res) => {
   }
 });
 
-// @route   POST /api/tools/explain-error
 router.post("/explain-error", async (req, res) => {
   const { language, code, errorMessage } = req.body;
   if (!code || !language || !errorMessage) {
@@ -140,6 +160,67 @@ router.post("/explain-error", async (req, res) => {
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message;
     res.status(error.response?.status || 500).json({ message: errorMsg });
+  }
+});
+
+// @route   POST /api/tools/generate-quiz
+// @desc    Generate a quiz from an uploaded document
+// @access  Private
+router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
+  const { quizOption } = req.body;
+  const file = req.file;
+
+  if (!file) {
+    return res
+      .status(400)
+      .json({ message: "A file is required to generate a quiz." });
+  }
+  if (!quizOption) {
+    await fs.promises.unlink(file.path);
+    return res
+      .status(400)
+      .json({ message: "Quiz option is required." });
+  }
+
+  const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    await fs.promises.unlink(file.path);
+    return res
+      .status(500)
+      .json({ message: "Quiz generation service is not configured." });
+  }
+
+  const generationUrl = `${pythonServiceUrl}/generate_quiz`;
+  const form = new FormData();
+  form.append("file", fs.createReadStream(file.path));
+  form.append("quiz_option", quizOption);
+
+  try {
+    const apiKey = await getApiKeyForRequest(req.user._id);
+    form.append("api_key", apiKey);
+
+    console.log(
+      `[Node Quiz] Forwarding quiz generation request to Python service.`
+    );
+    const pythonResponse = await axios.post(generationUrl, form, {
+      headers: form.getHeaders(),
+      timeout: 300000,
+    });
+
+    res.status(200).json(pythonResponse.data);
+  } catch (error) {
+    const errorMsg =
+      error.response?.data?.error ||
+      error.message ||
+      "Failed to generate quiz.";
+    console.error(`[Node Quiz] Error calling Python service: ${errorMsg}`);
+    res.status(error.response?.status || 500).json({ message: errorMsg });
+  } finally {
+    await fs.promises
+      .unlink(file.path)
+      .catch((err) =>
+        console.error(`Failed to delete temp quiz file: ${err.message}`)
+      );
   }
 });
 

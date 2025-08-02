@@ -13,17 +13,18 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         query: query,
         k: k,
         user_id: "agent_user", // The user is validated in Node.js; agent uses a generic ID for Python
-        documentContextName: documentContextName || null
+        documentContextName: documentContextName || null,
+        // CRITICAL FIX: Ensure filter is always an object, even if empty.
+        // The Python service expects the key to exist.
+        filter: clientFilter || {} 
     };
-    
-    if (clientFilter) {
-        payload.filter = clientFilter;
-    }
 
     try {
-        const response = await axios.post(searchUrl, payload, { timeout: 30000 });
+        const response = await axios.post(searchUrl, payload, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: process.env.PYTHON_RAG_TIMEOUT || 30000
+        });
         
-        // --- THIS IS THE NEW LOGIC ---
         const relevantDocs = response.data?.retrieved_documents_list || [];
         
         const references = relevantDocs.map((doc, index) => ({
@@ -34,18 +35,19 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         
         const toolOutput = relevantDocs.length > 0
             ? response.data.formatted_context_snippet
-            : "No relevant context was found in the specified documents for this query.";
+            : "No relevant documents were found for this topic."; // More specific message
         
-        // Return the consistent object format
-        return { references, toolOutput };
-        // --- END OF NEW LOGIC ---
+        return { references, toolOutput, retrieved_documents_list: relevantDocs }; // Pass full list back
 
     } catch (error) {
-        const errorMsg = error.response?.data?.error || `Python Service Error: ${error.message}`;
-        console.error(`[toolExecutionService] Error calling RAG service:`, errorMsg);
+        let errorMsg = error.message;
+        if (error.response?.data?.error) errorMsg = `Python Service Error: ${error.response.data.error}`;
+        else if (error.code === 'ECONNABORTED') errorMsg = 'Python RAG service request timed out.';
+        console.error(`[toolExecutionService] Error calling Python RAG service at ${searchUrl}:`, errorMsg);
         throw new Error(errorMsg);
     }
 }
+
 
 async function queryKgService(query, documentName, userId) {
     if (!PYTHON_SERVICE_URL) {
