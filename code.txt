@@ -11072,6 +11072,169 @@ function DocumentUpload({ onUploadSuccess }) {
 export default DocumentUpload;
 ```
 
+`frontend/src/components/documents/KnowledgeSourceList.jsx`
+
+```javascript
+// frontend/src/components/documents/KnowledgeSourceList.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+import {
+    FileText, CheckCircle, Loader2, AlertTriangle, Trash2,
+    Youtube, Globe, Library
+} from 'lucide-react';
+import IconButton from '../core/IconButton.jsx';
+import { formatDistanceToNow } from 'date-fns';
+
+const getSourceIcon = (sourceType) => {
+    const icons = {
+        'document': FileText,
+        'youtube': Youtube,
+        'webpage': Globe,
+        'subject': Library, // Admin-provided subject
+        'audio': FileText,
+        'video': FileText,
+        'image': FileText
+    };
+    return icons[sourceType] || FileText;
+};
+
+// --- THIS IS THE FIX ---
+// A robust function to format dates that handles invalid inputs gracefully.
+const formatRelativeTime = (dateString) => {
+    if (!dateString) {
+        return 'date unknown';
+    }
+    try {
+        const date = new Date(dateString);
+        // The isNaN check is a reliable way to see if a Date object is valid.
+        if (isNaN(date.getTime())) {
+            return 'invalid date';
+        }
+        return formatDistanceToNow(date, { addSuffix: true });
+    } catch (e) {
+        console.error("Date formatting error:", e);
+        return 'date error';
+    }
+};
+// --- END OF FIX ---
+
+function KnowledgeSourceList({ onSelectSource, selectedSource, onRefreshNeeded }) {
+    const [sources, setSources] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    const fetchSources = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const response = await api.getKnowledgeSources();
+            setSources(Array.isArray(response) ? response : []);
+        } catch (err) {
+            setError(err.message || "Failed to fetch knowledge sources.");
+            toast.error("Could not load knowledge base.");
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchSources();
+    }, [fetchSources, onRefreshNeeded]); // Refresh when the key changes
+
+    const handleDelete = async (sourceId, sourceTitle, sourceType) => {
+        if (sourceType === 'subject') return; // Should not happen as button is disabled
+        if (!window.confirm(`Are you sure you want to delete "${sourceTitle}"? This will remove it and all its associated data.`)) return;
+        
+        const toastId = toast.loading(`Deleting ${sourceTitle}...`);
+        try {
+            // Distinguish between legacy user doc and new knowledge source
+            if (sourceType === 'document' && !sourceId.startsWith('admin_')) {
+                 await api.deleteFile(sourceTitle); // Legacy docs are deleted by filename
+            } else {
+                 await api.deleteKnowledgeSource(sourceId);
+            }
+           
+            toast.success(`"${sourceTitle}" deleted.`, { id: toastId });
+            fetchSources(); // Re-fetch the list
+            if (selectedSource === sourceTitle) {
+                onSelectSource(null);
+            }
+        } catch (err) {
+            toast.error(`Delete failed: ${err.message}`, { id: toastId });
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center p-4 text-text-muted-light dark:text-text-muted-dark">
+                <Loader2 size={20} className="animate-spin mr-2" /> Loading knowledge base...
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2">
+                <AlertTriangle size={18} /> {error}
+                <button onClick={fetchSources} className="ml-auto text-xs underline hover:text-red-400">Retry</button>
+            </div>
+        );
+    }
+
+    if (sources.length === 0) {
+        return <p className="text-center text-xs text-text-muted-light dark:text-text-muted-dark p-4">Your knowledge base is empty.</p>;
+    }
+
+    return (
+        <div className="space-y-1.5 text-xs custom-scrollbar pr-1">
+            {sources.map(source => {
+                const isSelected = selectedSource === source.title;
+                const isProcessing = source.status && source.status.startsWith('processing');
+                const isFailed = source.status === 'failed';
+                const isSelectable = source.status === 'completed';
+                const Icon = getSourceIcon(source.sourceType);
+
+                return (
+                    <div
+                        key={source._id}
+                        onClick={() => isSelectable && onSelectSource(isSelected ? null : source.title)}
+                        className={`p-2.5 bg-surface-light dark:bg-gray-800 border rounded-md flex items-center justify-between transition-all duration-150
+                                    ${isSelectable ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-80'}
+                                    ${isSelected ? 'ring-2 ring-primary dark:ring-primary-light shadow-lg border-primary dark:border-primary-light' : 'border-border-light dark:border-border-dark'}`}
+                        title={isSelectable ? `Select ${source.title}` : `Status: ${source.status}`}
+                    >
+                        <div className="flex items-center gap-2 truncate">
+                            {isSelected ? <CheckCircle size={16} className="text-green-500 flex-shrink-0" /> : <Icon size={16} className="text-primary dark:text-primary-light flex-shrink-0" />}
+                            <div className="truncate">
+                                <span className={`block truncate ${isSelected ? 'font-semibold text-primary dark:text-primary-light' : 'text-text-light dark:text-text-dark'}`}>{source.title}</span>
+                                <span className="text-[0.7rem] text-text-muted-light dark:text-text-muted-dark">
+                                    {/* --- THIS IS THE FIX --- */}
+                                    {formatRelativeTime(source.createdAt)}
+                                    {/* --- END OF FIX --- */}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                             {isProcessing && <Loader2 size={14} className="animate-spin text-accent" />}
+                             {isFailed && <AlertTriangle size={14} className="text-red-500" title="Processing failed" />}
+                             {source.sourceType !== 'subject' && (
+                                <IconButton icon={Trash2} size="sm" variant="ghost" title="Delete"
+                                    onClick={(e) => { e.stopPropagation(); handleDelete(source._id, source.title, source.sourceType); }}
+                                    className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 p-1"
+                                />
+                             )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+export default KnowledgeSourceList;
+```
+
 `frontend/src/components/documents/SubjectList.jsx`
 
 ```javascript
@@ -15778,6 +15941,72 @@ const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
 module.exports = ChatHistory;
 ```
 
+`server/models/KnowledgeSource.js`
+
+```javascript
+// server/models/KnowledgeSource.js
+const mongoose = require('mongoose');
+
+const AnalysisSchema = new mongoose.Schema({
+    faq: { type: String, default: "" },
+    topics: { type: String, default: "" },
+    mindmap: { type: String, default: "" },
+}, { _id: false });
+
+const KnowledgeSourceSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true,
+    },
+    sourceType: {
+        type: String,
+        enum: ['document', 'youtube', 'webpage', 'audio', 'video', 'image'],
+        required: true,
+    },
+    title: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    // Only for URL-based sources
+    sourceUrl: {
+        type: String,
+        trim: true,
+    },
+    // Only for file-based sources
+    serverFilename: {
+        type: String,
+    },
+    status: {
+        type: String,
+        enum: ['processing_extraction', 'processing_analysis', 'completed', 'failed'],
+        default: 'processing_extraction',
+    },
+    failureReason: {
+        type: String,
+    },
+    textContent: {
+        type: String,
+    },
+    analysis: {
+        type: AnalysisSchema,
+        default: () => ({}),
+    },
+    kgStatus: {
+        type: String,
+        default: "pending", // pending, processing, completed, failed_extraction, skipped_no_chunks, failed_critical
+    },
+}, { timestamps: true }); // Adds createdAt and updatedAt automatically
+
+KnowledgeSourceSchema.index({ userId: 1, title: 1 }, { unique: true });
+
+const KnowledgeSource = mongoose.model('KnowledgeSource', KnowledgeSourceSchema);
+
+module.exports = KnowledgeSource;
+```
+
 `server/models/User.js`
 
 ```javascript
@@ -17672,6 +17901,40 @@ try:
     LANGCHAIN_SPLITTER_AVAILABLE = True
 except ImportError: LANGCHAIN_SPLITTER_AVAILABLE, RecursiveCharacterTextSplitter = False, None
 
+
+
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE, yt_dlp = False, None
+    
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE, whisper = False, None
+    
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE, sync_playwright = False, None
+    
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE, BeautifulSoup = False, None
+    
+try:
+    import ffmpeg
+    FFMPEG_PYTHON_AVAILABLE = True
+except ImportError:
+    FFMPEG_PYTHON_AVAILABLE, ffmpeg = False, None
+
+
+    
 # ─── Optional: Preload SpaCy & Embedding Model ───────
 nlp_spacy_core, SPACY_MODEL_LOADED = None, False
 try:
@@ -17688,6 +17951,16 @@ try:
     EMBEDDING_MODEL_LOADED = True
 except Exception as e:
     logger.warning(f"Failed to load Sentence Transformer model '{DOCUMENT_EMBEDDING_MODEL_NAME}': {e}")
+
+whisper_model, WHISPER_MODEL_LOADED = None, False
+try:
+    import whisper
+    # Using 'base' model is a good balance. Could be configured via .env in the future.
+    whisper_model = whisper.load_model("base")
+    WHISPER_MODEL_LOADED = True
+    logger.info("Successfully pre-loaded Whisper 'base' model.")
+except Exception as e:
+    logger.warning(f"Failed to pre-load Whisper model: {e}. Transcription will fail.")
 ```
 
 `server/rag_service/document_generator.py`
@@ -18107,64 +18380,48 @@ import re
 import tempfile
 import shutil
 import logging
+import time
 from typing import Tuple, Optional
 
 # --- Tool Imports ---
-try:
-    import yt_dlp
-    YTDLP_AVAILABLE = True
-except ImportError:
-    YTDLP_AVAILABLE = False
+# REMOVE the local try/except blocks for imports. We now rely on config.
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-try:
-    import whisper
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-
-try:
-    from playwright.sync_api import sync_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
+# --- THIS IS THE FIX: Import the central config ---
+import config
+# --- END OF FIX ---
 
 logger = logging.getLogger(__name__)
 
+
 # --- YouTube Processing ---
 def _extract_youtube_text(url: str) -> Tuple[Optional[str], Optional[str]]:
-    if not YTDLP_AVAILABLE or not WHISPER_AVAILABLE:
-        raise ImportError("YouTube processing requires 'yt-dlp' and 'openai-whisper'.")
+    # --- FIX: Reference config for availability and library objects ---
+    if not config.YTDLP_AVAILABLE or not config.WHISPER_MODEL_LOADED:
+        raise ImportError("YouTube processing requires 'yt-dlp' and the Whisper model to be loaded.")
+    # --- END FIX ---
     
     logger.info(f"Processing YouTube URL: {url}")
     temp_dir = tempfile.mkdtemp()
     try:
+        audio_filename_template = os.path.join(temp_dir, 'audio.%(ext)s')
         ydl_opts = {
             'format': 'm4a/bestaudio/best',
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'outtmpl': audio_filename_template,
             'noplaylist': True,
             'quiet': True,
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'wav'}],
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
+        # --- FIX: Reference config for library object ---
+        with config.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # --- END FIX ---
             info_dict = ydl.extract_info(url, download=True)
             video_title = info_dict.get('title', 'YouTube Video')
-            # yt-dlp might change the extension, find the resulting file
-            base_filename = ydl.prepare_filename(info_dict)
-            audio_file_path = os.path.splitext(base_filename)[0] + '.wav'
-            
-            if not os.path.exists(audio_file_path):
-                 # Fallback if ffmpeg didn't produce wav
-                 audio_file_path = base_filename
+            audio_file_path = os.path.join(temp_dir, 'audio.wav')
 
         logger.info(f"Transcribing audio for '{video_title}' with Whisper...")
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_file_path, fp16=False)
+        result = config.whisper_model.transcribe(audio_file_path, fp16=False)
         transcribed_text = result['text']
         
         logger.info(f"Transcription complete for '{video_title}'. Text length: {len(transcribed_text)}")
@@ -18176,55 +18433,71 @@ def _extract_youtube_text(url: str) -> Tuple[Optional[str], Optional[str]]:
         shutil.rmtree(temp_dir)
 
 # --- Webpage Content Processing ---
-def _extract_webpage_text(url: str) -> Tuple[Optional[str], Optional[str]]:
-    if not PLAYWRIGHT_AVAILABLE or not BS4_AVAILABLE:
+def _extract_webpage_text(url: str, retries: int = 2) -> Tuple[Optional[str], Optional[str]]:
+    # --- FIX: Reference config for availability and library objects ---
+    if not config.PLAYWRIGHT_AVAILABLE or not config.BS4_AVAILABLE:
         raise ImportError("Webpage processing requires 'playwright' and 'beautifulsoup4'.")
+    # --- END FIX ---
 
     logger.info(f"Processing webpage URL: {url}")
-    with sync_playwright() as p:
+    
+    for attempt in range(retries):
+        logger.info(f"Scraping attempt {attempt + 1}/{retries} for URL: {url}")
         try:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, wait_until='networkidle', timeout=30000)
-            
-            page_title = page.title() or url
-            html_content = page.content()
-            browser.close()
+            # --- FIX: Reference config for library object ---
+            with config.sync_playwright() as p:
+            # --- END FIX ---
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                )
+                page = context.new_page()
+                page.goto(url, wait_until='load', timeout=45000)
+                
+                page_title = page.title() or url
+                html_content = page.content()
+                browser.close()
 
-            logger.info(f"Successfully fetched content for '{page_title}'")
-            
-            soup = BeautifulSoup(html_content, "html.parser")
-            for element in soup(["script", "style", "nav", "footer", "aside", "header", "form"]):
-                element.decompose()
-            
-            body = soup.find('body')
-            if body:
-                text = body.get_text(separator='\n', strip=True)
-                cleaned_text = re.sub(r'\n{3,}', '\n\n', text)
-            else:
-                cleaned_text = ""
-            
-            logger.info(f"Extracted and cleaned text from '{page_title}'. Length: {len(cleaned_text)}")
-            return cleaned_text, page_title
+                logger.info(f"Successfully fetched content for '{page_title}'")
+                
+                # --- FIX: Reference config for library object ---
+                soup = config.BeautifulSoup(html_content, "html.parser")
+                # --- END FIX ---
+                for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "iframe"]):
+                    element.decompose()
+                
+                body = soup.find('body')
+                if body:
+                    text = body.get_text(separator='\n', strip=True)
+                    cleaned_text = re.sub(r'\n{3,}', '\n\n', text)
+                else:
+                    cleaned_text = ""
+                
+                logger.info(f"Extracted and cleaned text from '{page_title}'. Length: {len(cleaned_text)}")
+                return cleaned_text, page_title
+
+        except PlaywrightTimeoutError as e:
+            logger.warning(f"Attempt {attempt + 1} timed out for URL {url}. Error: {e}")
+            if attempt + 1 == retries:
+                logger.error(f"All {retries} scraping attempts failed for URL {url}.")
+                raise ConnectionError(f"Failed to scrape webpage after {retries} attempts: Timeout")
+            time.sleep(2)
         except Exception as e:
-            logger.error(f"Playwright/BS4 error processing URL {url}: {e}")
-            raise ConnectionError(f"Failed to scrape webpage: {e}")
+            logger.error(f"Playwright/BS4 error on attempt {attempt + 1} for URL {url}: {e}")
+            if attempt + 1 == retries:
+                 raise ConnectionError(f"Failed to scrape webpage after {retries} attempts: {e}")
+            time.sleep(2)
 
 # --- Main Orchestrator for URLs ---
 def process_url_source(url: str, user_id: str) -> Tuple[Optional[str], str, str]:
-    """
-    Orchestrates processing for any URL, dispatching to the correct handler.
-    Returns: (extracted_text, final_title, source_type)
-    """
+    # ... (rest of the function is the same, no changes needed here)
     logger.info(f"Knowledge Engine: Orchestrating URL processing for '{url}'")
     
     raw_text, final_title, source_type = None, url, 'webpage'
-
     youtube_regex = (
         r'(https?://)?(www\.)?'
         '(youtube|youtu|youtube-nocookie)\.(com|be)/'
         '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
-    
     is_youtube = re.match(youtube_regex, url)
 
     if is_youtube:
@@ -18315,43 +18588,22 @@ import shutil
 import logging
 from typing import Optional
 
-# --- Tool Imports ---
-try:
-    import whisper
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-
-# --- THIS IS THE NEW IMPORT ---
-try:
-    import ffmpeg
-    FFMPEG_PYTHON_AVAILABLE = True
-except ImportError:
-    FFMPEG_PYTHON_AVAILABLE = False
-
-try:
-    from PIL import Image
-    import pytesseract
-    PYTESSERACT_AVAILABLE = True
-except ImportError:
-    PYTESSERACT_AVAILABLE = False
-
+# --- Tool Imports are now centralized ---
 import config
 
 logger = logging.getLogger(__name__)
 
-if PYTESSERACT_AVAILABLE and config.TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
+if config.PYTESSERACT_AVAILABLE and config.TESSERACT_CMD:
+    config.pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
 
 def process_uploaded_audio(file_path: str) -> Optional[str]:
     """Transcribes audio content from a given file path."""
-    if not WHISPER_AVAILABLE:
-        raise ImportError("Audio processing requires 'openai-whisper'.")
+    if not config.WHISPER_MODEL_LOADED:
+        raise ImportError("Audio processing requires the Whisper model to be loaded.")
     
     logger.info(f"Transcribing audio file: {os.path.basename(file_path)}")
     try:
-        model = whisper.load_model("base")
-        result = model.transcribe(file_path, fp16=False)
+        result = config.whisper_model.transcribe(file_path, fp16=False)
         transcribed_text = result['text']
         logger.info(f"Transcription complete for audio file. Text length: {len(transcribed_text)}")
         return transcribed_text
@@ -18359,59 +18611,51 @@ def process_uploaded_audio(file_path: str) -> Optional[str]:
         logger.error(f"Whisper error processing audio file {file_path}: {e}")
         raise IOError(f"Failed to transcribe audio file: {e}")
 
-# --- THIS FUNCTION IS RE-ENGINEERED ---
 def process_uploaded_video(file_path: str) -> Optional[str]:
     """Extracts audio from a video file and transcribes it using ffmpeg-python."""
-    if not FFMPEG_PYTHON_AVAILABLE:
-        raise ImportError("Video processing requires 'ffmpeg-python'.")
+    if not config.FFMPEG_PYTHON_AVAILABLE:
+        raise ImportError("Video processing requires 'ffmpeg-python' and a system installation of ffmpeg.")
 
     logger.info(f"Processing video file for audio extraction: {os.path.basename(file_path)}")
     temp_dir = tempfile.mkdtemp()
-    # Use .wav format for high compatibility with whisper
     temp_audio_path = os.path.join(temp_dir, "extracted_audio.wav")
     try:
-        # Use ffmpeg-python to create and run the command
-        # This is equivalent to: ffmpeg -i "input_video.mp4" -vn -acodec pcm_s16le -ar 16000 -ac 1 "output_audio.wav"
         (
-            ffmpeg
+            config.ffmpeg
             .input(file_path)
             .output(
                 temp_audio_path,
-                acodec='pcm_s16le', # Use WAV codec
-                ar=16000,          # Set audio rate to 16kHz (recommended for whisper)
-                ac=1               # Set to mono audio
+                acodec='pcm_s16le',
+                ar=16000,
+                ac=1
             )
             .run(cmd=['ffmpeg', '-nostdin'], capture_stdout=True, capture_stderr=True, quiet=True)
         )
         
         logger.info(f"Audio extracted to temporary file. Now transcribing.")
         return process_uploaded_audio(temp_audio_path)
-    except ffmpeg.Error as e:
-        # This will capture errors from the ffmpeg command itself
-        logger.error(f"FFmpeg error processing video file {file_path}:")
-        # The error output from the command is in stderr
-        logger.error(e.stderr.decode())
+    except config.ffmpeg.Error as e:
+        logger.error(f"FFmpeg error processing video file {file_path}:\n{e.stderr.decode()}")
         raise IOError(f"Failed to extract audio from video using FFmpeg.")
     except Exception as e:
         logger.error(f"General error processing video file {file_path}: {e}")
         raise IOError(f"An unexpected error occurred during video processing: {e}")
     finally:
         shutil.rmtree(temp_dir)
-# --- END OF RE-ENGINEERED FUNCTION ---
 
 def process_uploaded_image(file_path: str) -> Optional[str]:
     """Performs OCR on an image file to extract text."""
-    if not PYTESSERACT_AVAILABLE:
+    if not config.PYTESSERACT_AVAILABLE:
         raise ImportError("Image processing requires 'pytesseract' and 'Pillow'.")
     
     logger.info(f"Performing OCR on image file: {os.path.basename(file_path)}")
     try:
-        img = Image.open(file_path)
+        img = config.Image.open(file_path)
         processed_img = img.convert('L')
-        text = pytesseract.image_to_string(processed_img)
+        text = config.pytesseract.image_to_string(processed_img)
         logger.info(f"OCR complete for image file. Text length: {len(text)}")
         return text
-    except pytesseract.TesseractNotFoundError:
+    except config.TESSERACT_ERROR:
         logger.critical("Tesseract executable not found or not configured correctly in config.py.")
         raise
     except Exception as e:
@@ -21031,6 +21275,139 @@ router.get('/visualize/:documentName', async (req, res) => {
 module.exports = router;
 ```
 
+`server/routes/knowledgeSource.js`
+
+```javascript
+// server/routes/knowledgeSource.js
+const express = require('express');
+const router = express.Router();
+const { Worker } = require('worker_threads');
+const path = require('path');
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
+
+// @route   POST /api/knowledge-sources
+// @desc    Add a new URL-based knowledge source
+// @access  Private
+router.post('/', async (req, res) => {
+    const { type, content } = req.body;
+    const userId = req.user._id;
+
+    if (type !== 'url' || !content) {
+        return res.status(400).json({ message: "Request must be for type 'url' and include 'content'." });
+    }
+
+    let newSource;
+    try {
+        // Create initial record in DB to track progress
+        newSource = new KnowledgeSource({
+            userId,
+            sourceType: 'webpage', // Default, Python will confirm if it's YouTube
+            title: content, // Use URL as initial title
+            sourceUrl: content,
+            status: 'processing_extraction',
+        });
+        await newSource.save();
+
+        // Immediately respond to the user so the UI doesn't hang
+        res.status(202).json({ 
+            message: "URL received. Processing has started in the background.",
+            source: newSource 
+        });
+        
+        // --- Start background processing ---
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
+
+        // 1. Call Python to extract text
+        const extractionResponse = await axios.post(`${pythonServiceUrl}/process_url`, {
+            url: content,
+            user_id: userId.toString(),
+        }, { timeout: 300000 }); // 5 min timeout for scraping/transcription
+
+        const { text_content, title, source_type } = extractionResponse.data;
+        
+        // 2. Update the source document with extracted text
+        const sourceDoc = await KnowledgeSource.findById(newSource._id);
+        sourceDoc.textContent = text_content;
+        sourceDoc.title = title;
+        sourceDoc.sourceType = source_type;
+        sourceDoc.status = 'processing_analysis';
+        await sourceDoc.save();
+
+        // 3. Trigger analysis and KG workers (similar to upload route)
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        
+        if (llmProvider === 'gemini' && !userApiKey) {
+            throw new Error(`User ${userId} selected Gemini but has no API key.`);
+        }
+
+        const workerBaseData = {
+            sourceId: sourceDoc._id.toString(),
+            userId: userId.toString(),
+            originalName: title,
+            llmProvider,
+            ollamaModel: user.ollamaModel,
+            apiKey: userApiKey,
+            ollamaUrl: user.ollamaUrl
+        };
+        
+        // Analysis Worker for FAQ, Topics, etc.
+        const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
+            workerData: { ...workerBaseData, textForAnalysis: text_content }
+        });
+        analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (URL: ${title}):`, err));
+
+        // KG Worker needs to run AFTER analysis, so we'll need a more robust system later.
+        // For now, we'll just log this limitation.
+        console.log(`[knowledgeSource.js] TODO: Implement sequential or dependent worker system for KG after ai_core processing.`);
+
+
+    } catch (error) {
+        console.error(`Error processing URL source '${content}':`, error);
+        if (newSource) {
+            await KnowledgeSource.updateOne({ _id: newSource._id }, {
+                $set: { status: 'failed', failureReason: error.message }
+            });
+        }
+    }
+});
+
+// @route   GET /api/knowledge-sources
+// @desc    Get all knowledge sources for the user (files, urls) and admin (subjects)
+// @access  Private
+router.get('/', async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const userSourcesPromise = KnowledgeSource.find({ userId }).sort({ createdAt: -1 }).lean();
+        const adminSubjectsPromise = AdminDocument.find().sort({ originalName: 1 }).select('originalName').lean();
+
+        const [userSources, adminSubjects] = await Promise.all([userSourcesPromise, adminSubjectsPromise]);
+
+        const formattedAdminSubjects = adminSubjects.map(doc => ({
+            _id: `admin_${doc._id}`, // Create a unique ID for the frontend key
+            sourceType: 'subject',
+            title: doc.originalName,
+            status: 'completed'
+        }));
+
+        res.json([...formattedAdminSubjects, ...userSources]);
+    } catch (error) {
+        console.error("Error fetching all knowledge sources:", error);
+        res.status(500).json({ message: "Server error while fetching knowledge sources." });
+    }
+});
+
+
+module.exports = router;
+```
+
 `server/routes/llmConfig.js`
 
 ```javascript
@@ -21479,16 +21856,15 @@ module.exports = router;
 `server/routes/upload.js`
 
 ```javascript
-
-
 // server/routes/upload.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs').promises;
 const axios = require('axios');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
 
@@ -21496,23 +21872,25 @@ const router = express.Router();
 
 // --- Constants & Multer Config ---
 const UPLOAD_DIR = path.join(__dirname, '..', 'assets');
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // Increased to 50MB for media
 const allowedMimeTypes = {
-    'application/pdf': 'docs',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docs',
-    'application/msword': 'docs',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'docs',
-    'application/vnd.ms-powerpoint': 'docs',
-    'text/plain': 'docs', 'text/x-python': 'code', 'application/javascript': 'code',
-    'text/javascript': 'code', 'text/markdown': 'code', 'text/html': 'code',
-    'application/xml': 'code', 'text/xml': 'code', 'application/json': 'code',
-    'text/csv': 'code', 'image/jpeg': 'images', 'image/png': 'images',
-    'image/bmp': 'images', 'image/gif': 'images',
+    // Documents
+    'application/pdf': { type: 'document', processor: 'ai_core' },
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { type: 'document', processor: 'ai_core' },
+    'text/plain': { type: 'document', processor: 'ai_core' },
+    'text/markdown': { type: 'document', processor: 'ai_core' },
+    // Media
+    'audio/mpeg': { type: 'audio', processor: 'media' },
+    'audio/wav': { type: 'audio', processor: 'media' },
+    'video/mp4': { type: 'video', processor: 'media' },
+    'video/quicktime': { type: 'video', processor: 'media' },
+    'image/png': { type: 'image', processor: 'media' },
+    'image/jpeg': { type: 'image', processor: 'media' },
 };
-const allowedExtensions = [
-    '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.txt', '.py', '.js', '.md', 
-    '.html', '.xml', '.json', '.csv', '.log', '.jpg', '.jpeg', '.png', '.bmp', '.gif'
-];
+const allowedExtensions = Object.keys(allowedMimeTypes).flatMap(mime => {
+    const extMap = { 'application/pdf': '.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx', /* etc */ };
+    return extMap[mime] || []; // Simplified, a full map would be needed
+}); // This part can be improved if needed
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -21521,11 +21899,9 @@ const storage = multer.diskStorage({
         }
         const sanitizedUsername = req.user.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
         const fileMimeType = file.mimetype.toLowerCase();
-        const fileTypeSubfolder = allowedMimeTypes[fileMimeType] || 'others';
+        const fileTypeSubfolder = allowedMimeTypes[fileMimeType]?.type || 'others';
         const destinationPath = path.join(UPLOAD_DIR, sanitizedUsername, fileTypeSubfolder);
-        fs.mkdir(destinationPath, { recursive: true }, (err) => {
-             if (err) cb(err); else cb(null, destinationPath);
-         });
+        fs.mkdir(destinationPath, { recursive: true }).then(() => cb(null, destinationPath)).catch(cb);
     },
     filename: (req, file, cb) => {
         const timestamp = Date.now();
@@ -21537,140 +21913,99 @@ const storage = multer.diskStorage({
     }
 });
 
-const fileFilter = (req, file, cb) => {
-    if (!req.user) {
-         const err = new multer.MulterError('UNAUTHENTICATED');
-         err.message = 'User not authenticated.';
-         return cb(err, false);
-    }
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    const mimeType = file.mimetype.toLowerCase();
-    if (allowedMimeTypes[mimeType] && allowedExtensions.includes(fileExt)) {
-        cb(null, true);
-    } else {
-        const err = new multer.MulterError('LIMIT_UNEXPECTED_FILE');
-        err.message = `Invalid file type. Allowed: ${allowedExtensions.join(', ')}.`;
-        cb(err, false);
-    }
-};
+const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-
-async function triggerPythonRagProcessing(userId, filePath, originalName) {
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-    if (!pythonServiceUrl) {
-        return { success: false, message: "RAG service URL not configured." };
-    }
-    const addDocumentUrl = `${pythonServiceUrl}/add_document`;
+// Main upload route
+router.post('/', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ message: "No file received." });
+    
+    const userId = req.user._id;
+    const { originalname: originalName, path: serverPath, mimetype } = req.file;
+    
+    let newSource;
     try {
-        const response = await axios.post(addDocumentUrl, { user_id: userId, file_path: filePath, original_name: originalName });
-        const pythonData = response.data;
-        const text = pythonData?.raw_text_for_analysis || null;
-        return {
-            success: !!(text && text.trim()),
-            status: pythonData?.status,
-            message: pythonData?.message || "No message from Python.",
-            text: text,
-            chunksForKg: pythonData?.chunks_with_metadata || []
+        const { type, processor } = allowedMimeTypes[mimetype.toLowerCase()] || {};
+        if (!type || !processor) {
+            throw new Error(`Unsupported file type: ${mimetype}`);
+        }
+
+        newSource = new KnowledgeSource({
+            userId,
+            sourceType: type,
+            title: originalName,
+            serverFilename: path.basename(serverPath),
+            status: 'processing_extraction'
+        });
+        await newSource.save();
+
+        res.status(202).json({ 
+            message: "File accepted. Processing has started in the background.",
+            source: newSource
+        });
+
+        // --- Start background processing ---
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
+
+        let pythonEndpoint = '';
+        let pythonPayload = {};
+
+        if (processor === 'ai_core') {
+            pythonEndpoint = '/add_document';
+            pythonPayload = { user_id: userId.toString(), file_path: serverPath, original_name: originalName };
+        } else if (processor === 'media') {
+            pythonEndpoint = '/process_media_file';
+            pythonPayload = { file_path: serverPath, media_type: type };
+        }
+        
+        const extractionResponse = await axios.post(`${pythonServiceUrl}${pythonEndpoint}`, pythonPayload, { timeout: 600000 }); // 10 min timeout for media
+        
+        const text_content = extractionResponse.data?.text_content || (processor === 'ai_core' ? extractionResponse.data?.raw_text_for_analysis : null);
+        
+        if (!text_content) throw new Error("Failed to extract text from the source.");
+        
+        const sourceDoc = await KnowledgeSource.findById(newSource._id);
+        sourceDoc.textContent = text_content;
+        sourceDoc.status = 'processing_analysis';
+        await sourceDoc.save();
+
+        // Trigger analysis and KG workers...
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        
+        const workerBaseData = {
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
         };
-    } catch (error) {
-        return { success: false, message: `Python RAG call failed: ${error.response?.data?.error || error.message}`};
-    }
-}
-
-router.post('/', (req, res) => {
-    const uploader = upload.single('file');
-
-    uploader(req, res, async function (err) {
-        if (!req.user) {
-            return res.status(401).json({ message: "Authentication error: User context not found." });
-        }
-        if (err) {
-            console.error(`Upload Route: Multer error for user '${req.user.email}': ${err.message}`);
-            return res.status(err instanceof multer.MulterError ? 400 : 500).json({ message: err.message });
-        }
-        if (!req.file) {
-            return res.status(400).json({ message: "No file received or file type rejected." });
-        }
-
-        const userId = req.user._id.toString();
-        const { originalname: originalName, path: tempServerPath } = req.file;
-        if (!tempServerPath) {
-            return res.status(500).json({ message: "File upload failed, temporary path not created." });
-        }
-        const absoluteFilePath = path.resolve(tempServerPath);
-
-        try {
-            const user = await User.findById(userId).select('uploadedDocuments.filename preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
-            if (!user) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(404).json({ message: "User not found." });
-            }
-
-            if (user.uploadedDocuments.some(doc => doc.filename === originalName)) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(409).json({ message: `File '${originalName}' already exists.` });
-            }
-
-            const ragResult = await triggerPythonRagProcessing(userId, absoluteFilePath, originalName);
-
-            if (!ragResult.success) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(422).json({ message: ragResult.message || "Failed to extract text." });
-            }
-            
-            const newDocEntry = {
-                filename: originalName, text: ragResult.text,
-                analysis: {}, uploadedAt: new Date(), ragStatus: ragResult.status,
-                analysisStatus: "pending", kgStatus: "pending"
-            };
-            await User.updateOne({ _id: userId }, { $push: { uploadedDocuments: newDocEntry } });
-            
-            res.status(202).json({
-                message: `File '${originalName}' accepted. Background processing initiated.`,
-                originalname: originalName,
+        
+        const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
+            workerData: { ...workerBaseData, textForAnalysis: text_content }
+        });
+        analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (File: ${originalName}):`, err));
+        
+        // KG worker logic for ai_core processed docs (needs refactor for unified chunks)
+        const chunksForKg = extractionResponse.data?.chunks_with_metadata || [];
+         if (chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
             });
-
-            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-            const llmProviderForWorkers = user.preferredLlmProvider || 'gemini';
-
-            if (llmProviderForWorkers === 'gemini' && !userApiKey) {
-                console.warn(`[Upload Route] User ${userId} selected Gemini but has no API key. Workers may fail.`);
-            }
-            
-            const workerData = { 
-                userId, 
-                originalName, 
-                textForAnalysis: ragResult.text, 
-                llmProvider: llmProviderForWorkers, 
-                ollamaModel: user.ollamaModel,
-                apiKey: userApiKey,
-                ollamaUrl: user.ollamaUrl
-            };
-            const kgWorkerData = { ...workerData, chunksForKg: ragResult.chunksForKg };
-
-            const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { workerData });
-            analysisWorker.on('error', (err) => console.error(`Analysis Worker Error [${originalName}]:`, err));
-
-            if (ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
-                const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { workerData: kgWorkerData });
-                kgWorker.on('error', (err) => console.error(`KG Worker Error [${originalName}]:`, err));
-            } else {
-                 await User.updateOne({ _id: userId, "uploadedDocuments.filename": originalName }, { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks" } });
-            }
-
-            await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Non-critical cleanup error: ${e.message}`));
-
-        } catch (error) {
-            console.error(`Overall Upload Error for ${originalName}:`, error);
-            if (fs.existsSync(tempServerPath)) {
-                await fs.promises.unlink(tempServerPath).catch(e => console.error(`Final Cleanup Error: ${e.message}`));
-            }
-            if (!res.headersSent) {
-                res.status(500).json({ message: "Server error during file processing." });
-            }
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (File: ${originalName}):`, err));
         }
-    });
+
+
+    } catch (error) {
+        console.error(`Error processing uploaded file '${originalName}':`, error);
+        if (newSource) {
+            await KnowledgeSource.updateOne({ _id: newSource._id }, {
+                $set: { status: 'failed', failureReason: error.message }
+            });
+        }
+        // If headers not sent, send error to client. This happens for initial errors.
+        if (!res.headersSent) {
+             res.status(500).json({ message: error.message || "Server error during file processing." });
+        }
+    }
 });
 
 module.exports = router;
@@ -21790,7 +22125,7 @@ const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
-
+const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
 const mongoUri = process.env.MONGO_URI;
@@ -21835,7 +22170,7 @@ app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
-
+app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);
@@ -23598,14 +23933,13 @@ run();
 `server/workers/analysisWorker.js`
 
 ```javascript
-
-
 // server/workers/analysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 const path = require('path');
 
-const User = require('../models/User');
+// --- THIS IS THE NEW MODEL ---
+const KnowledgeSource = require('../models/KnowledgeSource');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService');
 const ollamaService = require('../services/ollamaService');
@@ -23613,15 +23947,15 @@ const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
-    const logPrefix = `[Analysis Worker ${process.pid}, Doc: ${originalName}]`;
+async function performFullAnalysis(sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
+    const logPrefix = `[AnalysisWorker ${process.pid}, SourceID: ${sourceId}]`;
     console.log(`${logPrefix} Starting analysis. Using provider: ${llmProvider}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
     if (llmProvider === 'gemini' && !apiKey) {
-        const errorMessage = "Error: Analysis failed because no valid user Gemini API key was provided to the worker.";
+        const errorMessage = "Error: Analysis failed because no valid Gemini API key was provided to the worker.";
         console.error(`${logPrefix} ${errorMessage}`);
         return { 
             success: false, 
@@ -23631,14 +23965,15 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
-            console.log(`${logPrefix} Generating ${type} for '${originalName}'.`);
+            console.log(`${logPrefix} Generating ${type}...`);
             const historyForLLM = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction provided." }] }];
             
             const llmOptions = { 
                 apiKey,
                 ollamaUrl,
                 model: ollamaModel,
-                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT
+                // Using a larger token limit for analysis tasks
+                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG 
             };
 
             const generatedText = llmProvider === 'ollama'
@@ -23676,22 +24011,24 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
         }
     });
     
-    const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
     try {
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
+        // --- REFACTORED DB UPDATE ---
+        // Now updates the KnowledgeSource document directly.
+        await KnowledgeSource.updateOne(
+            { _id: sourceId },
             {
                 $set: {
-                    "uploadedDocuments.$.analysis.faq": analysisResults.faq,
-                    "uploadedDocuments.$.analysis.topics": analysisResults.topics,
-                    "uploadedDocuments.$.analysis.mindmap": analysisResults.mindmap,
-                    "uploadedDocuments.$.analysisStatus": finalAnalysisStatus,
-                    "uploadedDocuments.$.analysisTimestamp": new Date()
+                    "analysis.faq": analysisResults.faq,
+                    "analysis.topics": analysisResults.topics,
+                    "analysis.mindmap": analysisResults.mindmap,
+                    "status": allIndividualAnalysesSuccessful ? "completed" : "failed",
+                    "failureReason": allIndividualAnalysesSuccessful ? "" : "One or more analysis steps failed."
                 }
             }
         );
-        console.log(`${logPrefix} Analysis results (Status: ${finalAnalysisStatus}) stored in DB.`);
+        console.log(`${logPrefix} Analysis results stored in DB.`);
         return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with some failures'}.` };
+        // --- END REFACTOR ---
     } catch (dbError) {
         console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
         return { success: false, message: `DB Error storing analysis: ${dbError.message}` };
@@ -23699,68 +24036,48 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 }
 
 async function run() {
-    const { userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
+    const { sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
     let dbConnected = false;
-    let overallTaskSuccess = false;
-    let finalMessageToParent = "Analysis worker encountered an issue.";
 
     try {
-        if (!process.env.MONGO_URI || !userId || !originalName) {
-            throw new Error("Worker started with incomplete data (MONGO_URI, userId, or originalName missing).");
+        if (!process.env.MONGO_URI || !sourceId) {
+            throw new Error("Worker started with incomplete data (MONGO_URI or sourceId missing).");
         }
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
-            { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
-        );
 
         if (!textForAnalysis || textForAnalysis.trim() === '') {
-            await User.updateOne(
-                { _id: userId, "uploadedDocuments.filename": originalName },
-                { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
-            );
-            overallTaskSuccess = true;
-            finalMessageToParent = "Analysis skipped: No text provided.";
+            await KnowledgeSource.updateOne({ _id: sourceId }, {
+                $set: { status: "failed", failureReason: "Analysis skipped: No text content was extracted." }
+            });
         } else {
-            const result = await performFullAnalysis(
-                userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
+            await performFullAnalysis(
+                sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
             );
-            overallTaskSuccess = result.success;
-            finalMessageToParent = result.message;
-        }
-
-        if (parentPort) {
-            parentPort.postMessage({ success: overallTaskSuccess, originalName, message: finalMessageToParent });
         }
 
     } catch (error) {
-        console.error(`[Analysis Worker] Critical error for '${originalName}':`, error);
-        finalMessageToParent = error.message;
-        if (dbConnected && userId && originalName) {
+        console.error(`[Analysis Worker] Critical error for sourceId '${sourceId}':`, error);
+        if (dbConnected && sourceId) {
             try {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
+                await KnowledgeSource.updateOne(
+                    { _id: sourceId },
+                    { $set: { status: "failed", failureReason: `Critical worker error: ${error.message}` } }
                 );
             } catch (dbUpdateError) {
                 console.error(`[Analysis Worker] Failed to update status to 'failed_critical':`, dbUpdateError);
             }
         }
-        if (parentPort) {
-            parentPort.postMessage({ success: false, originalName, error: finalMessageToParent });
-        }
     } finally {
         if (dbConnected) {
             await mongoose.disconnect();
         }
-        console.log(`[Analysis Worker] Finished task for ${originalName}. Success: ${overallTaskSuccess}`);
+        console.log(`[Analysis Worker] Finished task for sourceId ${sourceId}.`);
     }
 }
 
 run();
-
 ```
 
 `server/workers/kgWorker.js`
@@ -23770,79 +24087,64 @@ run();
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 
-// --- Models and Services ---
-const User = require('../models/User');
-const AdminDocument = require('../models/AdminDocument'); // Import AdminDocument model
+// --- REFACTORED MODELS ---
+const KnowledgeSource = require('../models/KnowledgeSource');
 const connectDB = require('../config/db');
 const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    // --- Destructure all possible fields from workerData ---
-    const { chunksForKg, userId, originalName, llmProvider, ollamaModel, adminDocumentId } = workerData;
+    // --- REFACTORED DESTRUCTURING ---
+    const { chunksForKg, userId, originalName, llmProvider, ollamaModel, sourceId } = workerData;
     
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";
-    const logPrefix = `[KG Worker ${process.pid}, Doc: ${originalName}]`;
+    const logPrefix = `[KG Worker ${process.pid}, SourceID: ${sourceId}]`;
 
     try {
-        console.log(`${logPrefix} Received task. User/Context: '${userId}'. Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
-        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in KG worker environment.");
-        if (!userId || !originalName) throw new Error("Missing userId or originalName in workerData.");
+        console.log(`${logPrefix} Received task. Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
+        if (!process.env.MONGO_URI || !sourceId || !userId || !originalName) {
+            throw new Error("Missing critical worker data (MONGO_URI, sourceId, userId, or originalName).");
+        }
 
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
         console.log(`${logPrefix} DB Connected.`);
 
-        // --- THIS IS THE CORE REFACTORING LOGIC ---
-        // Determine which model to update based on the presence of adminDocumentId
-        const isProcessingAdminDoc = !!adminDocumentId;
-        const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
-        const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
-        const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
-
-        await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "processing" } });
-        console.log(`${logPrefix} Status set to 'processing' for ${isProcessingAdminDoc ? 'admin document' : 'user document'}.`);
+        // --- REFACTORED DB UPDATE LOGIC ---
+        await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "processing" } });
+        console.log(`${logPrefix} Status set to 'processing'.`);
 
         if (!chunksForKg || chunksForKg.length === 0) {
             finalMessage = "No chunks provided for KG generation.";
-            await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "skipped_no_chunks", kgTimestamp: new Date() } });
+            await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "skipped_no_chunks" } });
             overallSuccess = true;
         } else {
+            // NOTE: The `userId` and `originalName` are still passed to kgService for populating metadata in Neo4j.
             const kgExtractionResult = await kgService.generateAndStoreKg(chunksForKg, userId, originalName, llmProvider, ollamaModel);
 
             if (kgExtractionResult && kgExtractionResult.success) {
-                const updatePayload = {
-                    [isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus"]: "completed",
-                    [isProcessingAdminDoc ? "kgNodesCount" : "uploadedDocuments.$.kgNodesCount"]: kgExtractionResult.finalKgNodesCount,
-                    [isProcessingAdminDoc ? "kgEdgesCount" : "uploadedDocuments.$.kgEdgesCount"]: kgExtractionResult.finalKgEdgesCount,
-                    [isProcessingAdminDoc ? "kgTimestamp" : "uploadedDocuments.$.kgTimestamp"]: new Date()
-                };
-                await ModelToUpdate.updateOne(findQuery, { $set: updatePayload });
+                await KnowledgeSource.updateOne(
+                    { _id: sourceId }, 
+                    { $set: { "kgStatus": "completed" } }
+                );
                 overallSuccess = true;
                 finalMessage = kgExtractionResult.message || "KG generation and storage completed successfully.";
             } else {
-                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_extraction" } });
+                await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "failed_extraction" } });
                 finalMessage = kgExtractionResult?.message || "KG detailed extraction or storage failed.";
                 overallSuccess = false;
             }
         }
-
-        if (parentPort) {
-            parentPort.postMessage({ success: overallSuccess, originalName, message: finalMessage });
-        }
+        // --- END REFACTOR ---
 
     } catch (error) {
         console.error(`${logPrefix} CRITICAL error:`, error);
         finalMessage = error.message || "Unknown critical error in KG worker.";
         overallSuccess = false;
-        if (dbConnected && (userId || adminDocumentId)) {
+        if (dbConnected && sourceId) {
             try {
-                const isProcessingAdminDoc = !!adminDocumentId;
-                const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
-                const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
-                const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
-                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_critical" } });
+                await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "failed_critical" } });
             } catch (dbUpdateError) {
                 console.error(`${logPrefix} DB update error on critical fail:`, dbUpdateError);
             }
