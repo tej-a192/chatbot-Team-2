@@ -40,6 +40,9 @@ export const AppStateProvider = ({ children }) => {
         return sessionStorage.getItem('isAdminSessionActive') === 'true';
     });
 
+    const [initialPromptForNewSession, setInitialPromptForNewSession] = useState(null);
+    const [initialActivityForNewSession, setInitialActivityForNewSession] = useState(null);
+
     const toggleTheme = () => {
         setThemeState(prevTheme => {
             const newTheme = prevTheme === 'light' ? 'dark' : 'light';
@@ -137,9 +140,12 @@ export const AppStateProvider = ({ children }) => {
             systemPrompt, setSystemPrompt,
             selectedDocumentForAnalysis, selectDocumentForAnalysis,
             selectedSubject, setSelectedSubject,
-            isAdminSessionActive, setIsAdminSessionActive
+            isAdminSessionActive, setIsAdminSessionActive,
+            initialPromptForNewSession, setInitialPromptForNewSession,
+            initialActivityForNewSession, setInitialActivityForNewSession
         }}>
             {children}
         </AppStateContext.Provider>
     );
+
 };

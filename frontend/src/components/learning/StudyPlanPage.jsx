@@ -1,5 +1,6 @@
 // frontend/src/components/learning/StudyPlanPage.jsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { useAppState } from '../../contexts/AppStateContext.jsx';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked } from 'lucide-react';
 import api from '../../services/api';
@@ -19,6 +20,7 @@ const iconMap = {
 const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat }) => {
     const navigate = useNavigate();
     const [isUpdating, setIsUpdating] = useState(false);
+    const { setInitialPromptForNewSession, setInitialActivityForNewSession } = useAppState();
 
     const handleStatusToggle = async () => {
         setIsUpdating(true);
@@ -41,18 +43,16 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat })
             navigate('/tools/code-executor');
             return;
         }
+        
+        // 1. Set the context state BEFORE starting the new chat and navigating
+        console.log("[StudyPlanPage] Setting initial prompt and activity in context.", activity);
+        setInitialPromptForNewSession(activity.suggestedPrompt);
+        setInitialActivityForNewSession(activity);
 
-        // Call the handleNewChat function. When it's finished and has the new session ID,
-        // it will execute our callback.
+        // 2. Call handleNewChat. The callback now only needs to navigate.
         handleNewChat((newSessionId) => {
-            // This code runs *after* a new session is successfully created.
-            console.log(`New session ${newSessionId} created. Navigating with module context.`);
-            navigate('/', { 
-                state: { 
-                    prefilledPrompt: activity.suggestedPrompt,
-                    startModuleActivity: activity // Pass the entire activity object
-                } 
-            });
+            console.log(`New session ${newSessionId} created. Navigating to chat.`);
+            navigate('/');
         });
     };
 
@@ -134,7 +134,6 @@ const CreatePlan = ({ onPlanCreated }) => {
             const prefilledGoal = locationState.prefilledGoal;
             setGoal(prefilledGoal);
             
-            // This timeout allows React to update the state before we programmatically submit
             setTimeout(() => {
                 const form = document.getElementById('create-plan-form');
                 if (form) {

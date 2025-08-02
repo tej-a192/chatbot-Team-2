@@ -7245,7 +7245,9 @@ import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
 import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
 import api from './services/api.js';
 import toast from 'react-hot-toast';
+import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Button from './components/core/Button.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -7269,7 +7271,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -7280,7 +7282,6 @@ function MainAppLayout({ orchestratorStatus }) {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
-    const [isSessionLoading, setIsSessionLoading] = useState(false);
     
     const handleChatProcessingStatusChange = (isLoading) => {
         setIsChatProcessing(isLoading);
@@ -7290,26 +7291,6 @@ function MainAppLayout({ orchestratorStatus }) {
         regularUserLogout();
         setGlobalSessionId(null);
     };
-
-    const handleNewChat = async () => {
-    setIsSessionLoading(true); // Show the loading modal immediately
-    try {
-        // The API call is now awaited, blocking further execution until it's done
-        const data = await api.startNewSession(currentSessionId);
-        
-        if (data && data.newSessionId) {
-            setGlobalSessionId(data.newSessionId);
-            toast.success("New chat started!");
-        } else {
-            toast.error(data.message || "Could not start new chat session.");
-        }
-    } catch (error) {
-        toast.error(`Failed to start new chat: ${error.message}`);
-    } finally {
-        setIsSessionLoading(false); // Hide the loading modal in all cases (success or failure)
-    }
-    };
-
 
     const handleSelectSessionFromHistory = (sessionId) => {
         if (sessionId && sessionId !== currentSessionId) {
@@ -7328,17 +7309,16 @@ function MainAppLayout({ orchestratorStatus }) {
         }
         try {
             const sessionData = await api.getChatHistory(sid);
-            
-            // --- THIS IS THE CORRECTED LOGIC ---
-            // The API now returns messages pre-formatted with `sender`.
-            // We no longer need to map or transform the data here.
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
-            // --- END OF CORRECTION ---
-
         } catch (error) {
             toast.error(`History load failed: ${error.message}`);
+            // If a session is not found, start a new one.
+            if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found. Starting a new session.");
+                handleNewChat();
+            }
         }
-    }, [regularUserTokenValue]);
+    }, [regularUserTokenValue, handleNewChat]); // Added handleNewChat dependency
 
     useEffect(() => {
         if (currentSessionId && regularUserTokenValue) {
@@ -7389,7 +7369,6 @@ function MainAppLayout({ orchestratorStatus }) {
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
     </>
     );
-
 }
 
 function App() {
@@ -7400,9 +7379,69 @@ function App() {
     const [appInitializing, setAppInitializing] = useState(true);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+    const [isSessionLoading, setIsSessionLoading] = useState(false);
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+
+    const handleNewChat = useCallback(async (callback) => {
+        setIsSessionLoading(true);
+        try {
+            const data = await api.startNewSession(currentSessionId); 
+            if (data && data.newSessionId) {
+                setGlobalSessionId(data.newSessionId);
+                toast.success("New chat started!");
+
+                if (data.studyPlanSuggestion) {
+                    const { topic, reason } = data.studyPlanSuggestion;
+                    toast.custom((t) => (
+                        <motion.div
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
+                        >
+                            <div className="flex items-start">
+                                <div className="flex-shrink-0 pt-0.5">
+                                    <GraduationCap className="h-6 w-6 text-primary" />
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
+                                    <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
+                                    <div className="mt-4 flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            onClick={() => {
+                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
+                                                toast.dismiss(t.id);
+                                            }}
+                                        >
+                                            Create Plan for "{topic}"
+                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
+                                            Dismiss
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    ), {
+                        id: `study-plan-toast-${topic}`,
+                        duration: Infinity,
+                    });
+                }
+                
+                if (callback) callback(data.newSessionId);
+
+            } else {
+                toast.error(data.message || "Could not start new chat session.");
+            }
+        } catch (error) {
+            toast.error(`Failed to start new chat: ${error.message}`);
+        } finally {
+            setIsSessionLoading(false);
+        }
+    }, [currentSessionId, setGlobalSessionId, navigate]);
 
     useEffect(() => {
         if (isAdminSessionActive) {
@@ -7422,26 +7461,18 @@ function App() {
             setShowAuthModal(false);
             if (location.pathname.startsWith('/admin')) {
                 navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools')) { 
-                api.startNewSession(null).then(data => {
-                    if (data && data.newSessionId) {
-                        setGlobalSessionId(data.newSessionId);
-                    }
-                });
+            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
+                handleNewChat();
             }
         } else if (!location.pathname.startsWith('/admin')) {
             setShowAuthModal(true);
         }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId]);
+    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            api.startNewSession(null).then(data => {
-                if (data && data.newSessionId) {
-                    setGlobalSessionId(data.newSessionId);
-                }
-            });
+            handleNewChat();
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -7467,10 +7498,10 @@ function App() {
                 />
                 <Route
                     path="/study-plan"
-                    element={(regularUserToken && regularUser) ? <StudyPlanPage /> : <Navigate to="/" />}
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
                 />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} /> : null} />
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} navigate={navigate} handleNewChat={handleNewChat} isSessionLoading={isSessionLoading} /> : null} />
             </Routes>
         </div>
     );
@@ -10142,44 +10173,41 @@ export default ChatHistoryModal;
 `frontend/src/components/chat/ChatInput.jsx`
 
 ```javascript
-
-
 // frontend/src/components/chat/ChatInput.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react'; // Ensure BookMarked is imported
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
 import toast from 'react-hot-toast';
 import blueBrain from "./../../assets/blueBrain.svg";
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLocation } from 'react-router-dom';
 
 function ChatInput({ 
     onSendMessage, 
     isLoading,
     useWebSearch,
     setUseWebSearch,
-    useAcademicSearch, // This prop is now used
-    setUseAcademicSearch, // This prop is now used
+    useAcademicSearch,
+    setUseAcademicSearch,
     criticalThinkingEnabled,
-    setCriticalThinkingEnabled
+    setCriticalThinkingEnabled,
 }) {
+    const { initialPrompt, setInitialPromptForNewSession } = useAppState();
     const [inputValue, setInputValue] = useState('');
-    const location = useLocation();
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
 
-
     useEffect(() => {
-        const locationState = location.state;
-        if (locationState?.prefilledPrompt) {
-            setInputValue(locationState.prefilledPrompt);
+        if (initialPrompt) {
+            console.log("[ChatInput] Initial prompt found in context:", initialPrompt);
+            setInputValue(initialPrompt);
+            onSendMessage(initialPrompt);
+            setInitialPromptForNewSession(null); 
         }
-    }, [location.state]);
-
+    }, [initialPrompt, onSendMessage, setInitialPromptForNewSession]);
 
     useEffect(() => {
         if (transcript) {
@@ -10227,7 +10255,6 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
-    // --- THIS IS THE NEW HANDLER ---
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
@@ -10258,7 +10285,6 @@ function ChatInput({
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             className="absolute bottom-full left-0 mb-2 w-56 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
-                            {/* Web Search Button */}
                             <button
                                 onClick={handleWebSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -10270,8 +10296,6 @@ function ChatInput({
                                 <Globe size={16} />
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
-
-                            {/* --- THIS IS THE NEW ACADEMIC SEARCH BUTTON --- */}
                             <button
                                 onClick={handleAcademicSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -10283,7 +10307,6 @@ function ChatInput({
                                 <BookMarked size={16} />
                                 {useAcademicSearch ? 'Disable Academic Search' : 'Enable Academic Search'}
                             </button>
-                             
                              <button
                                 onClick={() => {toast("File attachment coming soon!", { icon: "📎" }); setIsMenuOpen(false);}}
                                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -10295,7 +10318,6 @@ function ChatInput({
                     )}
                     </AnimatePresence>
                 </div>
-
                 <textarea
                     ref={textareaRef}
                     value={inputValue}
@@ -11519,6 +11541,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
+    const [promptFromNav, setPromptFromNav] = useState('');
     
     // --- STABLE FUNCTION DEFINITIONS ---
 
@@ -11684,36 +11707,64 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         fetchRecommendations();
     }, [currentSessionId, messages.length]);
 
-    useEffect(() => {
-        const locationState = location.state;
-        if (locationState?.startModuleActivity && locationState.startModuleActivity.type) {
-            const { activity, prefilledPrompt } = locationState;
+    // useEffect(() => {
+    //     // Now, we read from the reliable AppStateContext
+    //     if (initialActivityForNewSession) {
+    //         const activity = initialActivityForNewSession;
+    //         console.log("[CenterPanel] Module activity found in context:", activity);
+
+    //         const options = {
+    //             useWebSearch: activity.type === 'web_search',
+    //             useAcademicSearch: activity.type === 'academic_search',
+    //             documentContextName: (activity.type === 'document_review' && activity.resourceName) ? activity.resourceName : null
+    //         };
             
+    //         if (options.documentContextName) {
+    //             setSelectedSubject(options.documentContextName);
+    //         } else if (activity.type !== 'document_review') {
+    //             setSelectedSubject(null);
+    //         }
+
+    //         // The initial prompt is already in the context, ChatInput will grab it.
+    //         // We just need to clear the activity from the context so it doesn't run again.
+    //         setInitialActivityForNewSession(null);
+    //     }
+    // }, [initialActivityForNewSession, setSelectedSubject, setInitialActivityForNewSession]);
+
+
+    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
+    
+    useEffect(() => {
+        // This effect runs ONLY when the component mounts or when dependencies change.
+        // It reads from the reliable AppStateContext.
+        if (initialActivityForNewSession && initialPromptForNewSession) {
+            const activity = initialActivityForNewSession;
+            const prompt = initialPromptForNewSession;
+            
+            console.log("[CenterPanel] Detected initial activity from context:", activity);
+
             const options = {
                 useWebSearch: activity.type === 'web_search',
                 useAcademicSearch: activity.type === 'academic_search',
                 documentContextName: (activity.type === 'document_review' && activity.resourceName) ? activity.resourceName : null
             };
 
+            // Set context for the upcoming message
             if (options.documentContextName) {
                 setSelectedSubject(options.documentContextName);
-            } else {
-                // Only clear the subject if the activity doesn't involve a document review
-                if (activity.type !== 'document_review') {
-                    setSelectedSubject(null);
-                }
+            } else if (activity.type !== 'document_review') {
+                setSelectedSubject(null);
             }
 
-            if (prefilledPrompt) {
-                handleSendMessage(prefilledPrompt, options);
-            }
-
-            navigate(location.pathname, { replace: true, state: {} });
+            // Automatically send the message
+            handleSendMessage(prompt, options);
+            
+            // CRITICAL: Clear the context state immediately after using it.
+            setInitialActivityForNewSession(null);
+            setInitialPromptForNewSession(null);
         }
-    }, [location.state, navigate, setSelectedSubject, handleSendMessage]);
-
-    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
-
+    }, [initialActivityForNewSession, initialPromptForNewSession, handleSendMessage, setSelectedSubject, setInitialActivityForNewSession, setInitialPromptForNewSession]);
+    
     const handleFeatureClick = (title) => {
         switch (title) {
             case 'Web Search Agent':
@@ -11737,44 +11788,49 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
 
     const handleRecommendationClick = async (rec) => {
         if (isActuallySendingAPI) return;
-
         setUseWebSearch(false);
         setUseAcademicSearch(false);
 
+        // This is now an auto-sending action
+        const options = {
+            useWebSearch: rec.actionType === 'web_search',
+            useAcademicSearch: rec.actionType === 'academic_search',
+            documentContextName: null
+        };
+        
+        let query = rec.topic;
+        
         switch (rec.actionType) {
-            case 'direct_answer': {
-                toast.success(`Asking the AI about "${rec.topic}"...`);
-                const detailedQuery = `Regarding the topic of "${rec.topic}", please provide a detailed explanation. Elaborate on the key concepts and provide clear examples.`;
-                handleSendMessage(detailedQuery, { useWebSearch: false, useAcademicSearch: false });
+            case 'direct_answer':
+                query = `Regarding the topic of "${rec.topic}", please provide a detailed explanation. Elaborate on the key concepts and provide clear examples.`;
                 break;
-            }
-            case 'web_search': {
-                toast.success(`Web Search enabled for "${rec.topic}". Sending now...`);
-                handleSendMessage(`Search the web for the latest information on: ${rec.topic}`, { useWebSearch: true, useAcademicSearch: false });
+            case 'web_search':
+                query = `Search the web for the latest information on: ${rec.topic}`;
                 break;
-            }
-            case 'academic_search': {
-                toast.success(`Academic Search enabled for "${rec.topic}". Sending now...`);
-                handleSendMessage(`Find and summarize academic papers about: ${rec.topic}`, { useWebSearch: false, useAcademicSearch: true });
+            case 'academic_search':
+                query = `Find and summarize academic papers about: ${rec.topic}`;
                 break;
-            }
             case 'document_review': {
                 toast.loading(`Finding the best document for "${rec.topic}"...`, { id: 'doc-find-toast' });
                 try {
                     const { documentName } = await api.findDocumentForTopic(rec.topic);
                     toast.success(`Focus set to document: ${documentName}`, { id: 'doc-find-toast' });
-                    setSelectedSubject(documentName); 
-                    handleSendMessage(`Based on the document "${documentName}", please explain "${rec.topic}".`, { documentContextName: documentName });
+                    setSelectedSubject(documentName);
+                    options.documentContextName = documentName;
+                    query = `Based on the document "${documentName}", please explain "${rec.topic}".`;
                 } catch (error) {
                     toast.error(error.message || `Could not find a document for "${rec.topic}".`, { id: 'doc-find-toast' });
+                    return; // Stop execution if document not found
                 }
                 break;
             }
-            default: {
+            default:
                 toast.error(`Unknown recommendation type: ${rec.actionType}`);
-                break;
-            }
+                return; // Stop execution
         }
+        
+        toast.success(`Exploring "${rec.topic}" for you...`);
+        handleSendMessage(query, options);
     };
 
     const RecommendationCard = ({ rec, index }) => (
@@ -12671,13 +12727,12 @@ export default TopNav;
 ```javascript
 // frontend/src/components/learning/StudyPlanPage.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import Button from '../core/Button';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAppState } from '../../contexts/AppStateContext';
 
 const iconMap = {
     direct_answer: GraduationCap,
@@ -12688,9 +12743,10 @@ const iconMap = {
 };
 
 // --- Module Checklist Item Component ---
-const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp }) => {
+const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat }) => {
     const navigate = useNavigate();
     const [isUpdating, setIsUpdating] = useState(false);
+    const { setInitialPromptForNewSession, setInitialActivityForNewSession } = useAppState();
 
     const handleStatusToggle = async () => {
         setIsUpdating(true);
@@ -12709,19 +12765,20 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp }) => {
     const handleStartModule = () => {
         const { activity } = module;
 
-        // For code executor, just navigate directly
         if (activity.type === 'code_executor') {
             navigate('/tools/code-executor');
             return;
         }
+        
+        // 1. Set the context state BEFORE starting the new chat and navigating
+        console.log("[StudyPlanPage] Setting initial prompt and activity in context.", activity);
+        setInitialPromptForNewSession(activity.suggestedPrompt);
+        setInitialActivityForNewSession(activity);
 
-        // For all other types, navigate to the chat page and pass the
-        // activity details in the navigation state. The chat page will handle it.
-        navigate('/', { 
-            state: { 
-                prefilledPrompt: activity.suggestedPrompt,
-                startModuleActivity: activity // Pass the entire activity object
-            } 
+        // 2. Call handleNewChat. The callback now only needs to navigate.
+        handleNewChat((newSessionId) => {
+            console.log(`New session ${newSessionId} created. Navigating to chat.`);
+            navigate('/');
         });
     };
 
@@ -12761,35 +12818,141 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp }) => {
     );
 };
 
-
-// --- Create New Plan Component ---
+// --- Create New Plan Component (with Questionnaire and Prefill Logic) ---
 const CreatePlan = ({ onPlanCreated }) => {
     const [goal, setGoal] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [questionnaire, setQuestionnaire] = useState(null);
+    const [currentStep, setCurrentStep] = useState(0);
+    const [answers, setAnswers] = useState([]);
+    const location = useLocation();
+    const navigate = useNavigate();
 
-    const handleGenerate = async (e) => {
-        e.preventDefault();
-        if (!goal.trim()) {
+    const handleInitialGenerate = useCallback(async (e) => {
+        if (e) e.preventDefault();
+        const currentGoal = goal.trim();
+        if (!currentGoal) {
             toast.error("Please enter a learning goal.");
             return;
         }
         setIsLoading(true);
         try {
-            await api.generateLearningPath(goal.trim());
-            toast.success("New study plan created successfully!");
-            setGoal('');
-            onPlanCreated(); // Callback to refresh the list
+            const response = await api.generateLearningPath(currentGoal);
+            if (response.isQuestionnaire) {
+                setQuestionnaire(response.questions);
+                setAnswers(new Array(response.questions.length).fill(''));
+                setCurrentStep(0);
+            } else {
+                toast.success("New study plan created successfully!");
+                resetForm();
+                onPlanCreated();
+            }
         } catch (error) {
-            toast.error(`Failed to create plan: ${error.message}`);
+            toast.error(`Failed to start plan generation: ${error.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [goal, onPlanCreated]);
+    
+    useEffect(() => {
+        const locationState = location.state;
+        if (locationState?.prefilledGoal) {
+            const prefilledGoal = locationState.prefilledGoal;
+            setGoal(prefilledGoal);
+            
+            setTimeout(() => {
+                const form = document.getElementById('create-plan-form');
+                if (form) {
+                    const submitButton = form.querySelector('button[type="submit"]');
+                    if (submitButton) {
+                        submitButton.click();
+                    }
+                }
+            }, 100);
+
+            navigate(location.pathname, { replace: true, state: {} });
+        }
+    }, [location.state, navigate, handleInitialGenerate]);
+
+    const handleAnswerChange = (index, value) => {
+        const newAnswers = [...answers];
+        newAnswers[index] = value;
+        setAnswers(newAnswers);
+    };
+
+    const handleFinalSubmit = async () => {
+        setIsLoading(true);
+        const context = {
+            clarificationAnswers: questionnaire.map((q, i) => ({
+                question: q.questionText,
+                answer: answers[i]
+            }))
+        };
+        try {
+            await api.generateLearningPath(goal.trim(), context);
+            toast.success("Your personalized study plan has been created!");
+            resetForm();
+            onPlanCreated();
+        } catch (error) {
+            toast.error(`Failed to create personalized plan: ${error.message}`);
         } finally {
             setIsLoading(false);
         }
     };
+    
+    const resetForm = () => {
+        setGoal('');
+        setQuestionnaire(null);
+        setCurrentStep(0);
+        setAnswers([]);
+    };
+
+    if (questionnaire) {
+        const question = questionnaire[currentStep];
+        return (
+            <div className="card-base p-6 mb-8">
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={currentStep}
+                        initial={{ opacity: 0, x: 50 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -50 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Step {currentStep + 1} of {questionnaire.length}</p>
+                        <h3 className="text-lg font-semibold my-2">{question.questionText}</h3>
+                        {question.type === 'multiple_choice' ? (
+                            <div className="space-y-2 mt-4">
+                                {question.options.map(option => (
+                                    <label key={option} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${answers[currentStep] === option ? 'border-primary bg-primary/10' : 'border-border-light dark:border-border-dark'}`}>
+                                        <input type="radio" name={`q-${currentStep}`} value={option} checked={answers[currentStep] === option} onChange={() => handleAnswerChange(currentStep, option)} className="form-radio" />
+                                        <span className="ml-3">{option}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        ) : (
+                            <input type="text" value={answers[currentStep]} onChange={(e) => handleAnswerChange(currentStep, e.target.value)} className="input-field mt-4" />
+                        )}
+                        <div className="flex justify-between items-center mt-6">
+                            <Button variant="secondary" onClick={() => currentStep > 0 ? setCurrentStep(s => s - 1) : resetForm()}>
+                                {currentStep > 0 ? 'Back' : 'Cancel'}
+                            </Button>
+                            {currentStep < questionnaire.length - 1 ? (
+                                <Button onClick={() => setCurrentStep(s => s + 1)} disabled={!answers[currentStep]}>Next</Button>
+                            ) : (
+                                <Button onClick={handleFinalSubmit} isLoading={isLoading} disabled={!answers[currentStep]}>Generate My Plan</Button>
+                            )}
+                        </div>
+                    </motion.div>
+                </AnimatePresence>
+            </div>
+        );
+    }
 
     return (
         <div className="card-base p-6 mb-8">
             <h2 className="text-lg font-semibold text-center mb-4">Create a New Study Plan</h2>
-            <form onSubmit={handleGenerate} className="flex flex-col sm:flex-row items-center gap-3">
+            <form id="create-plan-form" onSubmit={handleInitialGenerate} className="flex flex-col sm:flex-row items-center gap-3">
                 <input
                     type="text"
                     value={goal}
@@ -12807,7 +12970,7 @@ const CreatePlan = ({ onPlanCreated }) => {
 };
 
 // --- Main Study Plan Page ---
-const StudyPlanPage = () => {
+const StudyPlanPage = ({ handleNewChat }) => {
     const [learningPaths, setLearningPaths] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
@@ -12819,7 +12982,6 @@ const StudyPlanPage = () => {
         try {
             const paths = await api.getLearningPaths();
             setLearningPaths(paths);
-            // If no active path is set, or the active one was deleted, set the first one as active
             if (paths.length > 0 && (!activePathId || !paths.some(p => p._id === activePathId))) {
                 setActivePathId(paths[0]._id);
             }
@@ -12897,6 +13059,7 @@ const StudyPlanPage = () => {
                                                                 pathId={path._id}
                                                                 onModuleUpdate={fetchPaths}
                                                                 isNextUp={nextUpModule?.moduleId === module.moduleId}
+                                                                handleNewChat={handleNewChat}
                                                             />
                                                         ))}
                                                     </div>
@@ -13939,6 +14102,9 @@ export const AppStateProvider = ({ children }) => {
         return sessionStorage.getItem('isAdminSessionActive') === 'true';
     });
 
+    const [initialPromptForNewSession, setInitialPromptForNewSession] = useState(null);
+    const [initialActivityForNewSession, setInitialActivityForNewSession] = useState(null);
+
     const toggleTheme = () => {
         setThemeState(prevTheme => {
             const newTheme = prevTheme === 'light' ? 'dark' : 'light';
@@ -14036,11 +14202,14 @@ export const AppStateProvider = ({ children }) => {
             systemPrompt, setSystemPrompt,
             selectedDocumentForAnalysis, selectDocumentForAnalysis,
             selectedSubject, setSelectedSubject,
-            isAdminSessionActive, setIsAdminSessionActive
+            isAdminSessionActive, setIsAdminSessionActive,
+            initialPromptForNewSession, setInitialPromptForNewSession,
+            initialActivityForNewSession, setInitialActivityForNewSession
         }}>
             {children}
         </AppStateContext.Provider>
     );
+
 };
 ```
 
@@ -20944,17 +21113,20 @@ router.post('/history', async (req, res) => {
     const { previousSessionId } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
+    
+    // This will hold our final response payload
+    const responsePayload = {
+        message: 'New session started.',
+        newSessionId: newSessionId,
+        studyPlanSuggestion: null // Default to null
+    };
 
     try {
         if (previousSessionId) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
             
             if (previousSession && previousSession.messages?.length > 1) {
-                console.log("---------------------------------------");
-                console.log(`[DB READ | /history] PRE-ANALYSIS for Session ${previousSessionId}`);
-                console.log(`  - Document loaded from DB contains ${previousSession.messages.length} messages.`);
-                console.log("---------------------------------------");
-                console.log(`[Chat Route] POST /history: Finalizing previous session '${previousSessionId}' for user '${userId}'...`);
+                console.log(`[Chat Route] Finalizing previous session '${previousSessionId}'...`);
                 
                 const user = await User.findById(userId).select('profile preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
                 const llmConfig = {
@@ -20974,44 +21146,67 @@ router.post('/history', async (req, res) => {
                     { $set: { summary: summary } }
                 );
 
-
-                console.log("---------------------------------------");
-                console.log("History added");
-                console.log("---------------------------------------");
-
-                
-
                 if (knowledgeGaps && knowledgeGaps.size > 0) {
                     user.profile.performanceMetrics.clear();     
                     knowledgeGaps.forEach((score, topic) => {
-                        const sanitizedTopic = topic.replace(/\./g, '-');
-                        user.profile.performanceMetrics.set(sanitizedTopic, score);
+                        user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
                     });
                     await user.save(); 
-                    console.log(`[Chat Route] Overwrote user performance metrics with ${knowledgeGaps.size} new gaps.`);
+                    console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
+
+                    // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
+                    // Find the single most significant knowledge gap (lowest score)
+                    let mostSignificantGap = null;
+                    let lowestScore = 1.1; // Start higher than max possible score
+
+                    knowledgeGaps.forEach((score, topic) => {
+                        if (score < lowestScore) {
+                            lowestScore = score;
+                            mostSignificantGap = topic;
+                        }
+                    });
+
+                    // If we found a significant gap (e.g., score < 0.6), create the suggestion object
+                    if (mostSignificantGap && lowestScore < 0.6) {
+                        console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
+                        responsePayload.studyPlanSuggestion = {
+                            topic: mostSignificantGap,
+                            reason: `Analysis of your last session shows this is a key area for improvement.`
+                        };
+                    }
+                    // --- END OF NEW LOGIC ---
                 }
                 
+                if (keyTopics && keyTopics.length > 0) {
+                    const primaryTopic = keyTopics[0];
+                    console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
+                    responsePayload.studyPlanSuggestion = {
+                        topic: primaryTopic,
+                        reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
+                    };
+                }
+
                 if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
                     const cacheKey = `recommendations:${newSessionId}`;
                     await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
-                    console.log(`[Chat Route] Caching ${recommendations.length} recommendations for new session ${newSessionId}.`);
+                    console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
                 }
             }
         }
 
         await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
-        console.log(`[Chat Route] New session ${newSessionId} created and sent to user ${userId}.`);
-        res.status(200).json({ message: 'New session started.', newSessionId });
+        console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
+        // Send the final payload, which may or may not include the suggestion
+        res.status(200).json(responsePayload);
 
     } catch (error) {
         console.error(`Error during finalize-and-create-new process:`, error);
         if (!res.headersSent) {
             try {
+                // Failsafe: even if analysis fails, still give the user a new session
                 await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
-                res.status(200).json({ 
-                    message: 'New session started, but analysis of previous session failed.',
-                    newSessionId: newSessionId 
-                });
+                responsePayload.message = 'New session started, but analysis of previous session failed.';
+                res.status(200).json(responsePayload);
             } catch (fallbackError) {
                  res.status(500).json({ message: 'A critical error occurred while creating a new session.' });
             }
@@ -23476,102 +23671,244 @@ module.exports = { generateAndStoreKg };
 // server/services/learning/curriculumOrchestrator.js
 const LearningPath = require('../../models/LearningPath');
 const User = require('../../models/User');
-// We will need LLM services and other dependencies later.
+const geminiService = require('../geminiService');
+const ollamaService = require('../ollamaService');
+const { decrypt } = require('../../utils/crypto');
+const { queryPythonRagService } = require('../toolExecutionService');
+
+
+const GOAL_ANALYSIS_PROMPT = `You are an expert curriculum designer. Your first task is to analyze a user's learning goal to determine if it's specific enough to build a detailed plan, or if it's too broad and requires clarification.
+
+**User's Goal:** "{goal}"
+
+**Instructions:**
+Analyze the goal and return a single JSON object with one key, "isSpecific".
+- If the goal is specific and actionable (e.g., "learn python decorators", "prepare for my networking exam on the OSI model"), set "isSpecific" to true.
+- If the goal is broad and requires more user input to create a meaningful plan (e.g., "learn programming", "get better at math", "learn full stack development"), set "isSpecific" to false.
+
+Your output MUST be ONLY the JSON object.
+Example for a specific goal: { "isSpecific": true }
+Example for a broad goal: { "isSpecific": false }
+`;
+
+const CLARIFICATION_QUESTIONS_PROMPT = `You are an expert curriculum designer. A user has stated a broad learning goal: "{goal}". To create a personalized and effective study plan, you need to ask them a few clarifying questions.
+
+**Instructions:**
+1. Generate 2-3 essential multiple-choice or short-answer questions to narrow down the user's goal.
+2. The questions should help you understand their preferred technologies, current skill level, and specific interests within the broad topic.
+3. Your entire output MUST be a single, valid JSON object with one key, "questions".
+4. The "questions" key must hold an array of question objects. Each object must have:
+   - "questionText": The question to ask the user.
+   - "type": Either "multiple_choice" or "text_input".
+   - "options" (for multiple_choice only): An array of strings representing the choices.
+
+**Example JSON Output for "Learn Full Stack Development":**
+{
+  "questions": [
+    {
+      "questionText": "Great goal! To start, which technology stack interests you most?",
+      "type": "multiple_choice",
+      "options": ["MERN Stack (React, Node.js)", "MEAN Stack (Angular, Node.js)", "Something else"]
+    },
+    {
+      "questionText": "What is your current comfort level with frontend development?",
+      "type": "multiple_choice",
+      "options": ["Complete beginner", "I know some HTML/CSS", "I have experience with a framework"]
+    }
+  ]
+}
+`;
+
+const PLAN_GENERATION_PROMPT = `You are a world-class AI academic advisor and curriculum designer for a prestigious university. Your task is to create a detailed, comprehensive, and actionable learning path for a student.
+
+**CONTEXT:**
+- **User Profile:**
+  - **Level:** {degreeType}, {year}
+  - **Field:** {branch}
+  - **Preferred Learning Style:** {learningStyle}
+  - **Identified Weaknesses:** {knowledgeGaps}
+- **User's Ultimate Goal:** "{goal}"
+
+**CRITICAL INSTRUCTIONS:**
+1.  **ADAPT PLAN SCALE:** Analyze the user's goal.
+    -   If the goal is **broad and long-term** (e.g., "learn full stack development", "master machine learning"), you MUST generate a comprehensive curriculum with **10-15 modules**, broken into logical phases (e.g., "Phase 1: Frontend Fundamentals").
+    -   If the goal is **specific and short-term** (e.g., "understand python decorators", "learn how TCP works"), you MUST generate a concise, focused plan of **3-5 modules** that directly addresses the concept.
+2.  **MODULE DESIGN:** Each module must be a clear, actionable step. For each module, provide:
+    -   A "title" that is specific and descriptive.
+    -   A brief "objective" explaining the learning outcome for that module.
+    -   An "activity" object containing:
+        -   "type": The best tool for the task. Your default choice should be 'direct_answer' (approx. 80% of the time). Use 'web_search' for very modern topics, libraries, or practical tutorials. Use 'academic_search' only for deep, theoretical concepts. Use 'code_executor' for hands-on programming tasks. **DO NOT generate a 'document_review' type.**
+        -   "suggestedPrompt": A clear, effective prompt the user can send to the AI to begin the activity. This prompt should be a complete instruction.
+3.  **LOGICAL STRUCTURE:** The sequence of modules MUST be pedagogically sound. Start with fundamentals and build complexity. Prioritize modules that address the user's "Identified Weaknesses".
+
+**OUTPUT FORMAT (ABSOLUTELY STRICT):**
+-   Your entire output must be a single, valid JSON object.
+-   The root object must have one key: "modules".
+-   "modules" must be an array of module objects as described above.
+-   Do NOT include any extra text, markdown, or explanations outside of the JSON structure.
+
+**EXAMPLE FOR A BROAD GOAL ("Learn MERN Stack"):**
+{
+  "modules": [
+    {
+      "title": "Phase 1: Frontend Fundamentals - Module 1: JavaScript ES6+ Core Concepts",
+      "objective": "Master the modern JavaScript features essential for React development.",
+      "activity": { "type": "direct_answer", "suggestedPrompt": "Explain the following ES6+ JavaScript concepts with code examples: let/const, arrow functions, destructuring, and modules." }
+    },
+    {
+      "title": "Phase 1: Frontend Fundamentals - Module 2: Introduction to React & JSX",
+      "objective": "Understand the core concepts of React, components, and JSX syntax.",
+      "activity": { "type": "direct_answer", "suggestedPrompt": "What is React and JSX? Provide a simple 'Hello World' example of a React component." }
+    },
+    {
+      "title": "Phase 2: Backend Development - Module 1: Building a Basic Express Server",
+      "objective": "Learn to create a simple web server using Node.js and Express.",
+      "activity": { "type": "code_executor", "suggestedPrompt": "Guide me step-by-step in building a basic 'Hello World' server with Node.js and Express that listens on port 3000." }
+    }
+  ]
+}`;
+
 
 /**
- * Placeholder for the logic that deconstructs a goal and creates a plan.
- * This is the core "brain" of the feature.
+ * The intelligent "brain" of the feature. Generates a personalized learning plan.
  * @param {string} goal - The user's learning goal.
  * @param {object} user - The full user object from MongoDB.
  * @returns {Promise<Array>} A promise that resolves to an array of module objects.
  */
-async function generateModulesForGoal(goal, user) {
-    console.log(`[CurriculumOrchestrator] Generating modules for goal: "${goal}"`);
+async function generateModulesForGoal(goal, user, context) {
+    console.log(`[CurriculumOrchestrator] Generating ADVANCED modules for goal: "${goal}"`);
 
-    // --- THIS IS A MOCK IMPLEMENTATION FOR NOW ---
-    // In future steps, this will involve complex LLM calls, clarification dialogues, and RAG searches.
-    // For now, we return a simple, static plan to test the API structure.
-    const mockModules = [
-        {
-            title: "Module 1: Getting Started",
-            objective: "Understand the foundational concepts.",
-            activity: {
-                type: 'direct_answer',
-                suggestedPrompt: `Explain the absolute basics of "${goal}".`
-            }
-        },
-        {
-            title: "Module 2: Core Principles",
-            objective: "Dive into the main principles of the topic.",
-            activity: {
-                type: 'web_search',
-                suggestedPrompt: `Perform a web search for the core principles of "${goal}".`
-            }
-        },
-        {
-            title: "Module 3: Advanced Application",
-            objective: "Explore how this topic is used in the real world.",
-            activity: {
-                type: 'academic_search',
-                suggestedPrompt: `Find academic papers on advanced applications of "${goal}".`
-            }
-        }
-    ];
+    const { profile, preferredLlmProvider, ollamaUrl, ollamaModel, encryptedApiKey } = user;
+    const knowledgeGaps = profile.performanceMetrics && profile.performanceMetrics.size > 0 
+        ? Array.from(profile.performanceMetrics.keys()).join(', ') 
+        : "None identified yet.";
 
-    // Set initial status for the modules: first one is ready, rest are locked.
-    if (mockModules.length > 0) {
-        mockModules[0].status = 'not_started';
-        for (let i = 1; i < mockModules.length; i++) {
-            mockModules[i].status = 'locked';
+    const prompt = PLAN_GENERATION_PROMPT
+        .replace('{degreeType}', profile.degreeType || 'N/A')
+        .replace('{year}', profile.year || 'N/A')
+        .replace('{branch}', profile.branch || 'N/A')
+        .replace('{learningStyle}', profile.learningStyle || 'N/A')
+        .replace('{knowledgeGaps}', knowledgeGaps)
+        .replace('{goal}', goal);
+
+    const llmService = preferredLlmProvider === 'ollama' ? ollamaService : geminiService;
+    const apiKey = encryptedApiKey ? decrypt(encryptedApiKey) : null;
+
+    if (preferredLlmProvider === 'gemini' && !apiKey) {
+        throw new Error("Cannot generate plan: User has selected Gemini but has no API key configured.");
+    }
+
+    const llmOptions = { apiKey, ollamaUrl, model: ollamaModel, temperature: 0.5 };
+    const responseText = await llmService.generateContentWithHistory([], prompt, null, llmOptions);
+    
+    // Find and parse the JSON object from the response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+        console.error("LLM did not return a valid JSON object. Response:", responseText);
+        throw new Error("The AI failed to generate a structured learning plan. Please try rephrasing your goal.");
+    }
+    const jsonString = jsonMatch[0];
+    const result = JSON.parse(jsonString);
+
+    if (!result.modules || !Array.isArray(result.modules)) {
+        throw new Error("LLM returned an invalid format for the learning plan's modules.");
+    }
+    
+    // ** The flawed RAG search post-processing step has been REMOVED **
+
+    // Set initial status for the modules
+    if (result.modules.length > 0) {
+        result.modules[0].status = 'not_started';
+        for (let i = 1; i < result.modules.length; i++) {
+            result.modules[i].status = 'locked';
         }
     }
 
-    return mockModules;
+    return result.modules;
 }
 
 
 /**
- * Main orchestrator function. Creates and saves a new learning path.
+ * Main orchestrator function. Creates and saves a new learning path OR returns clarification questions.
  * @param {string} userId - The ID of the user.
  * @param {string} goal - The user's stated learning goal.
- * @param {object} [context] - Optional context from a previous chat session.
- * @returns {Promise<Document>} The newly created LearningPath document.
+ * @param {object} [context] - Optional context, including answers to clarification questions.
+ * @returns {Promise<Object>} Either the newly created LearningPath document or a questionnaire object.
  */
 async function createLearningPath(userId, goal, context = {}) {
     if (!userId || !goal) {
-        throw new Error("User ID and a learning goal are required to create a path.");
+        throw new Error("User ID and a learning goal are required.");
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select(
+        'profile preferredLlmProvider ollamaUrl ollamaModel +encryptedApiKey'
+    );
     if (!user) {
         throw new Error("User not found.");
     }
 
-    // Call the "brain" function to generate the modules
-    const modules = await generateModulesForGoal(goal, user);
+    const { preferredLlmProvider, ollamaUrl, ollamaModel, encryptedApiKey } = user;
+    const llmService = preferredLlmProvider === 'ollama' ? ollamaService : geminiService;
+    const apiKey = encryptedApiKey ? decrypt(encryptedApiKey) : null;
 
-    if (!modules || modules.length === 0) {
-        throw new Error("The curriculum orchestrator failed to generate any modules for this goal.");
+    if (preferredLlmProvider === 'gemini' && !apiKey) {
+        throw new Error("Cannot process plan: User has selected Gemini but has no API key.");
     }
-    
-    // Create the new LearningPath document
-    const newLearningPath = new LearningPath({
-        userId,
-        title: goal,
-        modules: modules
-    });
+    const llmOptions = { apiKey, ollamaUrl, model: ollamaModel, temperature: 0.3 };
 
-    // Save the new path to the database
-    await newLearningPath.save();
+    // --- RESTRUCTURED LOGIC ---
 
-    // Add the reference of the new path to the user's document
-    user.learningPaths.push(newLearningPath._id);
-    await user.save();
+    // SCENARIO 1: The frontend has provided answers, so we must generate the final plan.
+    if (context && context.clarificationAnswers) {
+        console.log(`[CurriculumOrchestrator] Received clarification answers. Generating final plan.`);
+        const refinedGoal = `${goal} - Specifics: ${JSON.stringify(context.clarificationAnswers)}`;
+        const modules = await generateModulesForGoal(refinedGoal, user, context);
 
-    console.log(`[CurriculumOrchestrator] Saved new learning path "${goal}" for user ${userId}.`);
+        if (!modules || modules.length === 0) {
+            throw new Error("The curriculum orchestrator failed to generate any modules for this goal.");
+        }
 
-    return newLearningPath;
+        const newLearningPath = new LearningPath({ userId, title: goal, modules });
+        await newLearningPath.save();
+        
+        await User.updateOne({ _id: userId }, { $push: { learningPaths: newLearningPath._id } });
+
+        console.log(`[CurriculumOrchestrator] Saved new intelligent learning path "${goal}" for user ${userId}.`);
+        return newLearningPath;
+    }
+
+    // SCENARIO 2: This is the initial request. Analyze the goal's specificity.
+    console.log(`[CurriculumOrchestrator] Analyzing initial goal for specificity: "${goal}"`);
+    const analysisPrompt = GOAL_ANALYSIS_PROMPT.replace('{goal}', goal);
+    const analysisResponseText = await llmService.generateContentWithHistory([], analysisPrompt, null, llmOptions);
+    const analysisResult = JSON.parse(analysisResponseText.match(/\{[\s\S]*\}/)[0]);
+
+    if (analysisResult.isSpecific === false) {
+        // Goal is broad, generate and return the questionnaire.
+        console.log(`[CurriculumOrchestrator] Goal is broad. Generating clarification questions.`);
+        const questionsPrompt = CLARIFICATION_QUESTIONS_PROMPT.replace('{goal}', goal);
+        const questionsResponseText = await llmService.generateContentWithHistory([], questionsPrompt, null, llmOptions);
+        const questionsResult = JSON.parse(questionsResponseText.match(/\{[\s\S]*\}/)[0]);
+        return { isQuestionnaire: true, ...questionsResult };
+    } else {
+        // Goal is specific, generate the plan directly.
+        console.log(`[CurriculumOrchestrator] Goal is specific. Proceeding to generate modules directly.`);
+        const modules = await generateModulesForGoal(goal, user, context);
+        
+        if (!modules || modules.length === 0) {
+            throw new Error("The curriculum orchestrator failed to generate any modules for this goal.");
+        }
+        
+        const newLearningPath = new LearningPath({ userId, title: goal, modules });
+        await newLearningPath.save();
+        
+        await User.updateOne({ _id: userId }, { $push: { learningPaths: newLearningPath._id } });
+
+        console.log(`[CurriculumOrchestrator] Saved new intelligent learning path "${goal}" for user ${userId}.`);
+        return newLearningPath;
+    }
 }
+
 
 module.exports = {
     createLearningPath,
@@ -23772,20 +24109,31 @@ module.exports = {
 const geminiService = require('./geminiService');
 const ollamaService = require('./ollamaService');
 
-// --- NEW, FOCUSED PROMPT 1: For Summary and Knowledge Gaps ---
 const SUMMARY_GAPS_PROMPT = `You are an expert educational analyst. Your task is to analyze the provided chat transcript and perform three actions. Your entire output MUST be a single, valid JSON object with NO other text before or after it.
 
 The JSON object MUST have three keys:
 1.  "summary": A string containing an updated, cumulative summary of the conversation. Incorporate the "Existing Summary" with insights from the "New Messages".
-2.  "keyTopics": An array of strings listing the 3-4 most important topics discussed in the conversation (e.g., ["Python Decorators", "Machine Learning Applications"]). This should be generated even if the user understood everything.
-3.  "knowledgeGaps": An array of objects, each with "topic" (string) and "proficiencyScore" (a number from 0.0 to 1.0). Only include topics where the user showed confusion or was corrected, and proficiency is clearly below 0.8.
+2.  "keyTopics": An array of strings listing the 3-4 most important topics discussed in the conversation (e.g., ["Python Decorators", "Machine Learning Applications"]). This must be generated regardless of user proficiency.
+3.  "knowledgeGaps": An array of objects, each with "topic" (string) and "proficiencyScore" (a number from 0.0 to 1.0).
+
+**CRITICAL INSTRUCTIONS FOR "knowledgeGaps":**
+- A knowledge gap exists if the user **explicitly states confusion** (e.g., "I have a gap in X", "I don't understand Y"), even if you provided a good explanation later.
+- A knowledge gap exists if the user asks **multiple, basic clarifying questions** about the same foundational topic.
+- Assign a **low proficiencyScore (e.g., 0.3 - 0.5)** to any topic where the user stated a "huge gap" or significant confusion at the start.
+- Only include topics where the user's proficiency appears to be below 0.8 by the end of the conversation. If they seem to understand everything perfectly, this array should be empty.
 
 Example Output:
 {
-  "summary": "The user asked about the definition of machine learning and its real-world applications. They seem to have a good grasp of the core concepts.",
-  "keyTopics": ["Machine Learning Definition", "Real-world AI Applications", "Future of ML"],
-  "knowledgeGaps": []
+  "summary": "The user stated a significant gap in their understanding of the Software Development Life Cycle (SDLC) and Separation of Concerns (SoC). A detailed explanation of SoC was provided, covering its goals and analogies.",
+  "keyTopics": ["Separation of Concerns (SoC)", "Software Design Principles", "System Complexity Management"],
+  "knowledgeGaps": [
+    {
+      "topic": "Separation of Concerns (SoC)",
+      "proficiencyScore": 0.4
+    }
+  ]
 }`;
+
 
 
 // --- NEW, FOCUSED PROMPT 2: For Recommendations ---
@@ -23944,17 +24292,18 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         query: query,
         k: k,
         user_id: "agent_user", // The user is validated in Node.js; agent uses a generic ID for Python
-        documentContextName: documentContextName || null
+        documentContextName: documentContextName || null,
+        // CRITICAL FIX: Ensure filter is always an object, even if empty.
+        // The Python service expects the key to exist.
+        filter: clientFilter || {} 
     };
-    
-    if (clientFilter) {
-        payload.filter = clientFilter;
-    }
 
     try {
-        const response = await axios.post(searchUrl, payload, { timeout: 30000 });
+        const response = await axios.post(searchUrl, payload, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: process.env.PYTHON_RAG_TIMEOUT || 30000
+        });
         
-        // --- THIS IS THE NEW LOGIC ---
         const relevantDocs = response.data?.retrieved_documents_list || [];
         
         const references = relevantDocs.map((doc, index) => ({
@@ -23965,18 +24314,19 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         
         const toolOutput = relevantDocs.length > 0
             ? response.data.formatted_context_snippet
-            : "No relevant context was found in the specified documents for this query.";
+            : "No relevant documents were found for this topic."; // More specific message
         
-        // Return the consistent object format
-        return { references, toolOutput };
-        // --- END OF NEW LOGIC ---
+        return { references, toolOutput, retrieved_documents_list: relevantDocs }; // Pass full list back
 
     } catch (error) {
-        const errorMsg = error.response?.data?.error || `Python Service Error: ${error.message}`;
-        console.error(`[toolExecutionService] Error calling RAG service:`, errorMsg);
+        let errorMsg = error.message;
+        if (error.response?.data?.error) errorMsg = `Python Service Error: ${error.response.data.error}`;
+        else if (error.code === 'ECONNABORTED') errorMsg = 'Python RAG service request timed out.';
+        console.error(`[toolExecutionService] Error calling Python RAG service at ${searchUrl}:`, errorMsg);
         throw new Error(errorMsg);
     }
 }
+
 
 async function queryKgService(query, documentName, userId) {
     if (!PYTHON_SERVICE_URL) {

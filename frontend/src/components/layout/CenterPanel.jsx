@@ -48,7 +48,7 @@ const glowStyles = {
     gray: "" // No glow for disabled/soon cards
 };
 
-function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
+function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
     const { token: regularUserToken } = useRegularAuth();
     const { setSelectedSubject, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const navigate = useNavigate();
@@ -228,41 +228,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         fetchRecommendations();
     }, [currentSessionId, messages.length]);
 
-
-    useEffect(() => {
-        const locationState = location.state;
-        // Check if the specific state we need exists
-        if (locationState?.startModuleActivity) {
-            const { activity, prefilledPrompt } = locationState;
-
-            // Guard against the activity object being undefined
-            if (activity && activity.type) {
-                console.log("[CenterPanel] Module activity received:", activity);
-
-                // Set tool context
-                setUseWebSearch(activity.type === 'web_search');
-                setUseAcademicSearch(activity.type === 'academic_search');
-
-                // Set document context
-                if (activity.type === 'document_review' && activity.resourceName) {
-                    setSelectedSubject(activity.resourceName);
-                } else if (activity.type !== 'document_review') {
-                    setSelectedSubject(null);
-                }
-                
-                // Set the prompt for the ChatInput component
-                if (prefilledPrompt) {
-                    setPromptFromNav(prefilledPrompt);
-                }
-            }
-            
-            // CRITICAL: Clear the state from location immediately after processing it once.
-            navigate(location.pathname, { replace: true, state: {} });
-        }
-    }, [location.state, navigate, setSelectedSubject]);
-
-    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
-
     const handleFeatureClick = (title) => {
         switch (title) {
             case 'Web Search Agent':
@@ -289,40 +254,46 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         setUseWebSearch(false);
         setUseAcademicSearch(false);
 
+        // This is now an auto-sending action
+        const options = {
+            useWebSearch: rec.actionType === 'web_search',
+            useAcademicSearch: rec.actionType === 'academic_search',
+            documentContextName: null
+        };
+        
+        let query = rec.topic;
+        
         switch (rec.actionType) {
-            case 'direct_answer': {
-                toast.success(`Asking the AI about "${rec.topic}"...`);
-                const detailedQuery = `Regarding the topic of "${rec.topic}", please provide a detailed explanation. Elaborate on the key concepts and provide clear examples.`;
-                handleSendMessage(detailedQuery, { useWebSearch: false, useAcademicSearch: false });
+            case 'direct_answer':
+                query = `Regarding the topic of "${rec.topic}", please provide a detailed explanation. Elaborate on the key concepts and provide clear examples.`;
                 break;
-            }
-            case 'web_search': {
-                toast.success(`Web Search enabled for "${rec.topic}". Sending now...`);
-                handleSendMessage(`Search the web for the latest information on: ${rec.topic}`, { useWebSearch: true, useAcademicSearch: false });
+            case 'web_search':
+                query = `Search the web for the latest information on: ${rec.topic}`;
                 break;
-            }
-            case 'academic_search': {
-                toast.success(`Academic Search enabled for "${rec.topic}". Sending now...`);
-                handleSendMessage(`Find and summarize academic papers about: ${rec.topic}`, { useWebSearch: false, useAcademicSearch: true });
+            case 'academic_search':
+                query = `Find and summarize academic papers about: ${rec.topic}`;
                 break;
-            }
             case 'document_review': {
                 toast.loading(`Finding the best document for "${rec.topic}"...`, { id: 'doc-find-toast' });
                 try {
                     const { documentName } = await api.findDocumentForTopic(rec.topic);
                     toast.success(`Focus set to document: ${documentName}`, { id: 'doc-find-toast' });
-                    setSelectedSubject(documentName); 
-                    handleSendMessage(`Based on the document "${documentName}", please explain "${rec.topic}".`, { documentContextName: documentName });
+                    setSelectedSubject(documentName);
+                    options.documentContextName = documentName;
+                    query = `Based on the document "${documentName}", please explain "${rec.topic}".`;
                 } catch (error) {
                     toast.error(error.message || `Could not find a document for "${rec.topic}".`, { id: 'doc-find-toast' });
+                    return; // Stop execution if document not found
                 }
                 break;
             }
-            default: {
+            default:
                 toast.error(`Unknown recommendation type: ${rec.actionType}`);
-                break;
-            }
+                return; // Stop execution
         }
+        
+        toast.success(`Exploring "${rec.topic}" for you...`);
+        handleSendMessage(query, options);
     };
 
     const RecommendationCard = ({ rec, index }) => (
@@ -447,7 +418,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 setUseAcademicSearch={setUseAcademicSearch}
                 criticalThinkingEnabled={criticalThinkingEnabled} 
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
-                initialPrompt={promptFromNav}
+                initialPrompt={initialPromptForNewSession}
+                setInitialPromptForNewSession={setInitialPromptForNewSession}
             />
 
         </div>

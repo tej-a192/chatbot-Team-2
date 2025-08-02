@@ -43,7 +43,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -84,8 +84,13 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
             toast.error(`History load failed: ${error.message}`);
+            // If a session is not found, start a new one.
+            if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found. Starting a new session.");
+                handleNewChat();
+            }
         }
-    }, [regularUserTokenValue]);
+    }, [regularUserTokenValue, handleNewChat]); // Added handleNewChat dependency
 
     useEffect(() => {
         if (currentSessionId && regularUserTokenValue) {
@@ -123,6 +128,10 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
                     setMessages={setAppStateMessages} 
                     currentSessionId={currentSessionId}
                     onChatProcessingChange={handleChatProcessingStatusChange}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
                 />
             </main>
             <AnimatePresence mode="wait">
@@ -140,7 +149,16 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
 
 function App() {
     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
-    const { theme, setSessionId: setGlobalSessionId, currentSessionId, isAdminSessionActive } = useAppState();
+    const { 
+    theme, 
+    setSessionId: setGlobalSessionId, 
+    currentSessionId, 
+    isAdminSessionActive,
+    initialPromptForNewSession,      
+    setInitialPromptForNewSession, 
+    initialActivityForNewSession,    
+    setInitialActivityForNewSession
+} = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
     const [appInitializing, setAppInitializing] = useState(true);
@@ -268,8 +286,17 @@ function App() {
                     element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
                 />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} navigate={navigate} handleNewChat={handleNewChat} isSessionLoading={isSessionLoading} /> : null} />
-            </Routes>
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                    orchestratorStatus={orchestratorStatus} 
+                    navigate={navigate} 
+                    handleNewChat={handleNewChat} 
+                    isSessionLoading={isSessionLoading}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
+                /> : null} />
+                </Routes>
         </div>
     );
 }
