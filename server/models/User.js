@@ -85,25 +85,25 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
   },
-  uploadedDocuments: [
-    {
-      filename: { type: String },
-      text: { type: String, default: "" },
-      analysis: {
-        faq: { type: String, default: "" },
-        topics: { type: String, default: "" },
-        mindmap: { type: String, default: "" },
-      },
-      ragStatus: { type: String, default: "pending" },
-      analysisStatus: { type: String, default: "pending" },
-      analysisTimestamp: { type: Date },
-      kgStatus: { type: String, default: "pending" },
-      kgNodesCount: { type: Number, default: 0 },
-      kgEdgesCount: { type: Number, default: 0 },
-      kgTimestamp: { type: Date },
-      uploadedAt: { type: Date, default: Date.now },
-    },
-  ],
+  // uploadedDocuments: [
+  //   {
+  //     filename: { type: String },
+  //     text: { type: String, default: "" },
+  //     analysis: {
+  //       faq: { type: String, default: "" },
+  //       topics: { type: String, default: "" },
+  //       mindmap: { type: String, default: "" },
+  //     },
+  //     ragStatus: { type: String, default: "pending" },
+  //     analysisStatus: { type: String, default: "pending" },
+  //     analysisTimestamp: { type: Date },
+  //     kgStatus: { type: String, default: "pending" },
+  //     kgNodesCount: { type: Number, default: 0 },
+  //     kgEdgesCount: { type: Number, default: 0 },
+  //     kgTimestamp: { type: Date },
+  //     uploadedAt: { type: Date, default: Date.now },
+  //   },
+  // ],
   learningPaths: [{ 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'LearningPath' 

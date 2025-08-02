@@ -86,13 +86,28 @@ const api = {
     });
     return response.data;
   },
-  getFiles: async () => {
-    const response = await apiClient.get("/files");
+  // getFiles: async () => {
+  //   const response = await apiClient.get("/files");
+  //   return response.data;
+  // },
+  // deleteFile: async (serverFilename) => {
+  //   const response = await apiClient.delete(`/files/${serverFilename}`);
+  //   return response.data;
+  // },
+  getKnowledgeSources: async () => {
+    const response = await apiClient.get("/knowledge-sources");
     return response.data;
   },
-  deleteFile: async (serverFilename) => {
-    const response = await apiClient.delete(`/files/${serverFilename}`);
+  deleteKnowledgeSource: async (sourceId) => {
+    const response = await apiClient.delete(`/knowledge-sources/${sourceId}`);
     return response.data;
+  },
+  addUrlSource: async (url) => {
+    const response = await apiClient.post('/knowledge-sources', {
+      type: 'url',
+      content: url,
+    });
+    return response.data; // Returns the initial source object with "processing" status
   },
   updateUserLLMConfig: async (configData) => {
     console.log("[Frontend API] Sending LLM config update:", configData);
