@@ -160,8 +160,7 @@ async function analyzeAndRecommend(messagesToSummarize, existingSummary, llmProv
         });
     }
 
-    return { summary, knowledgeGaps: knowledgeGapsMap, recommendations };
-}
+        return { summary, knowledgeGaps: knowledgeGapsMap, recommendations, keyTopics };}
 
 
 module.exports = { analyzeAndRecommend }; 

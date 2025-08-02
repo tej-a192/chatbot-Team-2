@@ -325,23 +325,28 @@ const EXPLICIT_THINKING_OUTPUT_INSTRUCTIONS = `
 Your entire response MUST follow this two-step structure:
 
 **STEP 1: MANDATORY THINKING PROCESS (OUTPUT FIRST):**
-*   Before generating your final answer, you MUST outline your step-by-step plan and reasoning process in detail.
-*   Place this entire thinking process within \`<thinking>\` and \`</thinking>\` tags.
-*   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles or any other text before it.
-*   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
-*   Your thinking process should be appropriate for the complexity of the query. For simple greetings, a brief plan is sufficient. For complex questions, provide a more detailed breakdown.
-*   Example of detailed thinking structure:
+*   Before your final answer, you MUST outline your step-by-step plan in a \`<thinking>\` block.
+*   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles before it.
+*   Use Markdown inside the \`<thinking>\` block to structure your plan.
+
+**CRITICAL FORMATTING RULES:**
+1.  The \`<thinking>...\</thinking>\` block itself **MUST NOT** be wrapped in Markdown code fences (e.g., \`\`\`). It must be plain text.
+2.  The final answer **MUST** begin immediately after the closing \`</thinking>\` tag. There should be no blank lines between them.
+
+*   Example of a **CORRECT** raw output structure:
     \`\`\`
-    <thinking>
-    1.  **Analyze Query:** The user is asking for a conceptual explanation and an analogy.
-    2.  **Deconstruct:** I need to define the concept first, then list its benefits, and finally create a simple, relatable analogy.
-    3.  **Formatting Plan:** I will use Markdown headings for structure, bold for key terms, and bullet points for the list of benefits.
-    </thinking>
+<thinking>
+1.  **Analyze Query:** The user is asking for a conceptual explanation and an analogy.
+2.  **Deconstruct:** I need to define the concept first, then list its benefits, and finally create a simple, relatable analogy.
+3.  **Formatting Plan:** I will use Markdown headings for structure, bold for key terms, and bullet points for the list of benefits.
+</thinking>
+## This is the Final Answer
+The final answer starts right here...
     \`\`\`
 
 **STEP 2: FINAL ANSWER (AFTER \`</thinking>\`):**
-*   After the closing \`</thinking>\` tag, generate your comprehensive and well-formatted answer based on your thinking process and the user's query.
-*   Follow all formatting guidelines (Markdown, KaTeX, etc.) as instructed for this final answer part.
+*   After the closing \`</thinking>\` tag, generate your comprehensive and well-formatted answer.
+*   Follow all formatting guidelines (Markdown, KaTeX, etc.) from your core instructions for this final answer part.
 `;
 
 const CHAT_MAIN_SYSTEM_PROMPT = () => {

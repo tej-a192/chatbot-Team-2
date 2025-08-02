@@ -224,7 +224,64 @@ router.post('/history', async (req, res) => {
                     ollamaUrl: user?.ollamaUrl || null
                 };
 
-                const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
+                // const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
+                //     previousSession.messages, previousSession.summary,
+                //     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
+                // );
+
+                // await ChatHistory.updateOne(
+                //     { sessionId: previousSessionId, userId: userId },
+                //     { $set: { summary: summary } }
+                // );
+
+                // if (knowledgeGaps && knowledgeGaps.size > 0) {
+                //     user.profile.performanceMetrics.clear();     
+                //     knowledgeGaps.forEach((score, topic) => {
+                //         user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
+                //     });
+                //     await user.save(); 
+                //     console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
+
+                //     // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
+                //     // Find the single most significant knowledge gap (lowest score)
+                //     let mostSignificantGap = null;
+                //     let lowestScore = 1.1; // Start higher than max possible score
+
+                //     knowledgeGaps.forEach((score, topic) => {
+                //         if (score < lowestScore) {
+                //             lowestScore = score;
+                //             mostSignificantGap = topic;
+                //         }
+                //     });
+
+                //     // If we found a significant gap (e.g., score < 0.6), create the suggestion object
+                //     if (mostSignificantGap && lowestScore < 0.6) {
+                //         console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
+                //         responsePayload.studyPlanSuggestion = {
+                //             topic: mostSignificantGap,
+                //             reason: `Analysis of your last session shows this is a key area for improvement.`
+                //         };
+                //     }
+                //     // --- END OF NEW LOGIC ---
+                // }
+                
+                // if (keyTopics && keyTopics.length > 0) {
+                //     const primaryTopic = keyTopics[0];
+                //     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
+                //     responsePayload.studyPlanSuggestion = {
+                //         topic: primaryTopic,
+                //         reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
+                //     };
+                // }
+
+                // if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
+                //     const cacheKey = `recommendations:${newSessionId}`;
+                //     await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
+                //     console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
+                // }
+
+
+                                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
                     previousSession.messages, previousSession.summary,
                     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
                 );
@@ -242,10 +299,8 @@ router.post('/history', async (req, res) => {
                     await user.save(); 
                     console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
 
-                    // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
-                    // Find the single most significant knowledge gap (lowest score)
                     let mostSignificantGap = null;
-                    let lowestScore = 1.1; // Start higher than max possible score
+                    let lowestScore = 1.1;
 
                     knowledgeGaps.forEach((score, topic) => {
                         if (score < lowestScore) {
@@ -254,7 +309,6 @@ router.post('/history', async (req, res) => {
                         }
                     });
 
-                    // If we found a significant gap (e.g., score < 0.6), create the suggestion object
                     if (mostSignificantGap && lowestScore < 0.6) {
                         console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
                         responsePayload.studyPlanSuggestion = {
@@ -262,10 +316,10 @@ router.post('/history', async (req, res) => {
                             reason: `Analysis of your last session shows this is a key area for improvement.`
                         };
                     }
-                    // --- END OF NEW LOGIC ---
                 }
                 
-                if (keyTopics && keyTopics.length > 0) {
+                // Check for keyTopics and only create a suggestion if a more critical one doesn't already exist.
+                if (keyTopics && keyTopics.length > 0 && !responsePayload.studyPlanSuggestion) {
                     const primaryTopic = keyTopics[0];
                     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
                     responsePayload.studyPlanSuggestion = {
