@@ -7271,7 +7271,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -7356,6 +7356,10 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
                     setMessages={setAppStateMessages} 
                     currentSessionId={currentSessionId}
                     onChatProcessingChange={handleChatProcessingStatusChange}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
                 />
             </main>
             <AnimatePresence mode="wait">
@@ -7373,7 +7377,16 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
 
 function App() {
     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
-    const { theme, setSessionId: setGlobalSessionId, currentSessionId, isAdminSessionActive } = useAppState();
+    const { 
+    theme, 
+    setSessionId: setGlobalSessionId, 
+    currentSessionId, 
+    isAdminSessionActive,
+    initialPromptForNewSession,      
+    setInitialPromptForNewSession, 
+    initialActivityForNewSession,    
+    setInitialActivityForNewSession
+} = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
     const [appInitializing, setAppInitializing] = useState(true);
@@ -7501,8 +7514,17 @@ function App() {
                     element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
                 />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout orchestratorStatus={orchestratorStatus} navigate={navigate} handleNewChat={handleNewChat} isSessionLoading={isSessionLoading} /> : null} />
-            </Routes>
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                    orchestratorStatus={orchestratorStatus} 
+                    navigate={navigate} 
+                    handleNewChat={handleNewChat} 
+                    isSessionLoading={isSessionLoading}
+                    initialPromptForNewSession={initialPromptForNewSession}
+                    setInitialPromptForNewSession={setInitialPromptForNewSession}
+                    initialActivityForNewSession={initialActivityForNewSession}
+                    setInitialActivityForNewSession={setInitialActivityForNewSession}
+                /> : null} />
+                </Routes>
         </div>
     );
 }
@@ -10174,6 +10196,7 @@ export default ChatHistoryModal;
 
 ```javascript
 // frontend/src/components/chat/ChatInput.jsx
+import { useAppState } from '../../contexts/AppStateContext.jsx';
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
@@ -10192,8 +10215,9 @@ function ChatInput({
     setUseAcademicSearch,
     criticalThinkingEnabled,
     setCriticalThinkingEnabled,
+    initialPrompt,
+    setInitialPromptForNewSession
 }) {
-    const { initialPrompt, setInitialPromptForNewSession } = useAppState();
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
@@ -10201,13 +10225,12 @@ function ChatInput({
     const menuRef = useRef(null);
 
     useEffect(() => {
-        if (initialPrompt) {
-            console.log("[ChatInput] Initial prompt found in context:", initialPrompt);
-            setInputValue(initialPrompt);
-            onSendMessage(initialPrompt);
-            setInitialPromptForNewSession(null); 
-        }
-    }, [initialPrompt, onSendMessage, setInitialPromptForNewSession]);
+    if (initialPrompt) {
+        console.log("[ChatInput] Received initial prompt via props:", initialPrompt);
+        setInputValue(initialPrompt); // Set the text in the input box
+        setInitialPromptForNewSession(null); // Clear the global state immediately
+    }
+    }, [initialPrompt, setInitialPromptForNewSession]);
 
     useEffect(() => {
         if (transcript) {
@@ -11527,7 +11550,7 @@ const glowStyles = {
     gray: "" // No glow for disabled/soon cards
 };
 
-function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange }) {
+function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
     const { token: regularUserToken } = useRegularAuth();
     const { setSelectedSubject, systemPrompt, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const navigate = useNavigate();
@@ -11707,64 +11730,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         fetchRecommendations();
     }, [currentSessionId, messages.length]);
 
-    // useEffect(() => {
-    //     // Now, we read from the reliable AppStateContext
-    //     if (initialActivityForNewSession) {
-    //         const activity = initialActivityForNewSession;
-    //         console.log("[CenterPanel] Module activity found in context:", activity);
-
-    //         const options = {
-    //             useWebSearch: activity.type === 'web_search',
-    //             useAcademicSearch: activity.type === 'academic_search',
-    //             documentContextName: (activity.type === 'document_review' && activity.resourceName) ? activity.resourceName : null
-    //         };
-            
-    //         if (options.documentContextName) {
-    //             setSelectedSubject(options.documentContextName);
-    //         } else if (activity.type !== 'document_review') {
-    //             setSelectedSubject(null);
-    //         }
-
-    //         // The initial prompt is already in the context, ChatInput will grab it.
-    //         // We just need to clear the activity from the context so it doesn't run again.
-    //         setInitialActivityForNewSession(null);
-    //     }
-    // }, [initialActivityForNewSession, setSelectedSubject, setInitialActivityForNewSession]);
-
-
-    // --- OTHER HANDLERS AND SUB-COMPONENTS ---
-    
-    useEffect(() => {
-        // This effect runs ONLY when the component mounts or when dependencies change.
-        // It reads from the reliable AppStateContext.
-        if (initialActivityForNewSession && initialPromptForNewSession) {
-            const activity = initialActivityForNewSession;
-            const prompt = initialPromptForNewSession;
-            
-            console.log("[CenterPanel] Detected initial activity from context:", activity);
-
-            const options = {
-                useWebSearch: activity.type === 'web_search',
-                useAcademicSearch: activity.type === 'academic_search',
-                documentContextName: (activity.type === 'document_review' && activity.resourceName) ? activity.resourceName : null
-            };
-
-            // Set context for the upcoming message
-            if (options.documentContextName) {
-                setSelectedSubject(options.documentContextName);
-            } else if (activity.type !== 'document_review') {
-                setSelectedSubject(null);
-            }
-
-            // Automatically send the message
-            handleSendMessage(prompt, options);
-            
-            // CRITICAL: Clear the context state immediately after using it.
-            setInitialActivityForNewSession(null);
-            setInitialPromptForNewSession(null);
-        }
-    }, [initialActivityForNewSession, initialPromptForNewSession, handleSendMessage, setSelectedSubject, setInitialActivityForNewSession, setInitialPromptForNewSession]);
-    
     const handleFeatureClick = (title) => {
         switch (title) {
             case 'Web Search Agent':
@@ -11955,7 +11920,10 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 setUseAcademicSearch={setUseAcademicSearch}
                 criticalThinkingEnabled={criticalThinkingEnabled} 
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
+                initialPrompt={initialPromptForNewSession}
+                setInitialPromptForNewSession={setInitialPromptForNewSession}
             />
+
         </div>
     );
 }
@@ -12727,6 +12695,7 @@ export default TopNav;
 ```javascript
 // frontend/src/components/learning/StudyPlanPage.jsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { useAppState } from '../../contexts/AppStateContext.jsx';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked } from 'lucide-react';
 import api from '../../services/api';
