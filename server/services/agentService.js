@@ -1,23 +1,35 @@
 // server/services/agentService.js
-const { CHAT_MAIN_SYSTEM_PROMPT, createSynthesizerPrompt, createAgenticSystemPrompt } = require('../config/promptTemplates.js');
-const { availableTools } = require('./toolRegistry.js');
-const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
-const geminiService = require('./geminiService.js');
-const ollamaService = require('./ollamaService.js');
+const {
+  CHAT_MAIN_SYSTEM_PROMPT,
+  createSynthesizerPrompt,
+  createAgenticSystemPrompt,
+} = require("../config/promptTemplates.js");
+const { availableTools } = require("./toolRegistry.js");
+const {
+  createModelContext,
+  createAgenticContext,
+} = require("../protocols/contextProtocols.js");
+const geminiService = require("./geminiService.js");
+const ollamaService = require("./ollamaService.js");
 
 function parseToolCall(responseText) {
-    try {
-        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
-        const jsonString = jsonMatch ? jsonMatch[2] : responseText;
-        const jsonResponse = JSON.parse(jsonString);
-        if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
-            return jsonResponse.tool_call;
-        }
-        return null;
-    } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(0, 200)}...`);
-        return null;
+  try {
+    const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+    const jsonString = jsonMatch ? jsonMatch[2] : responseText;
+    const jsonResponse = JSON.parse(jsonString);
+    if (jsonResponse && typeof jsonResponse.tool_call !== "undefined") {
+      return jsonResponse.tool_call;
     }
+    return null;
+  } catch (e) {
+    console.warn(
+      `[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(
+        0,
+        200
+      )}...`
+    );
+    return null;
+  }
 }
 
 async function processAgenticRequest(
@@ -174,7 +186,6 @@ async function processAgenticRequest(
   }
 }
 
-
 module.exports = {
-    processAgenticRequest,
+  processAgenticRequest,
 };

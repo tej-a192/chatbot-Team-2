@@ -137,7 +137,7 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues // Add cues for client
+                criticalThinkingCues: criticalThinkingCues
             };
 
             streamEvent(res, { type: 'final_answer', content: aiMessageForClient });

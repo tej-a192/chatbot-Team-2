@@ -288,11 +288,11 @@ class VectorDBService:
         qdrant_filter = models.Filter(
             must=[
                 models.FieldCondition(
-                    key="processing_user", # The metadata field storing the user ID
+                    key="user_id",
                     match=models.MatchValue(value=user_id)
                 ),
                 models.FieldCondition(
-                    key="file_name", # The metadata field storing the original document name
+                    key="file_name",
                     match=models.MatchValue(value=document_name)
                 )
             ]
