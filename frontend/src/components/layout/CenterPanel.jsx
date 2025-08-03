@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
+import PromptCoachModal from '../chat/PromptCoachModal.jsx';
 import api from '../../services/api';
 import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
@@ -62,7 +63,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-    const [promptFromNav, setPromptFromNav] = useState('');
+    // const [promptFromNav, setPromptFromNav] = useState('');
+    const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
+    const [coachData, setCoachData] = useState(null);
     
     // --- STABLE FUNCTION DEFINITIONS ---
 
@@ -406,7 +409,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     </div>
                 </div>
             ) : (
-                <ChatHistory messages={messages} />
+                <ChatHistory messages={messages} onCueClick={handleSendMessage} />
             )}
             
             <ChatInput
@@ -420,9 +423,20 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
                 initialPrompt={initialPromptForNewSession}
                 setInitialPromptForNewSession={setInitialPromptForNewSession}
+                openCoachModalWithData={setCoachData}
+                setCoachModalOpen={setIsCoachModalOpen}
             />
-
+            <PromptCoachModal
+                isOpen={isCoachModalOpen}
+                onClose={() => setIsCoachModalOpen(false)}
+                onApply={(improvedPrompt) => {
+                    // This logic now lives here, where it can set the initial prompt state
+                    setInitialPromptForNewSession(improvedPrompt);
+                }}
+                data={coachData}
+            />
         </div>
+        
     );
 }
 

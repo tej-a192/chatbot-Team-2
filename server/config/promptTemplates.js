@@ -325,23 +325,28 @@ const EXPLICIT_THINKING_OUTPUT_INSTRUCTIONS = `
 Your entire response MUST follow this two-step structure:
 
 **STEP 1: MANDATORY THINKING PROCESS (OUTPUT FIRST):**
-*   Before generating your final answer, you MUST outline your step-by-step plan and reasoning process in detail.
-*   Place this entire thinking process within \`<thinking>\` and \`</thinking>\` tags.
-*   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles or any other text before it.
-*   Use Markdown for formatting within your thinking process (e.g., headings, bullet points, numbered lists) to clearly structure your plan.
-*   Your thinking process should be appropriate for the complexity of the query. For simple greetings, a brief plan is sufficient. For complex questions, provide a more detailed breakdown.
-*   Example of detailed thinking structure:
+*   Before your final answer, you MUST outline your step-by-step plan in a \`<thinking>\` block.
+*   This \`<thinking>...\</thinking>\` block MUST be the very first thing in your output. No preambles before it.
+*   Use Markdown inside the \`<thinking>\` block to structure your plan.
+
+**CRITICAL FORMATTING RULES:**
+1.  The \`<thinking>...\</thinking>\` block itself **MUST NOT** be wrapped in Markdown code fences (e.g., \`\`\`). It must be plain text.
+2.  The final answer **MUST** begin immediately after the closing \`</thinking>\` tag. There should be no blank lines between them.
+
+*   Example of a **CORRECT** raw output structure:
     \`\`\`
-    <thinking>
-    1.  **Analyze Query:** The user is asking for a conceptual explanation and an analogy.
-    2.  **Deconstruct:** I need to define the concept first, then list its benefits, and finally create a simple, relatable analogy.
-    3.  **Formatting Plan:** I will use Markdown headings for structure, bold for key terms, and bullet points for the list of benefits.
-    </thinking>
+<thinking>
+1.  **Analyze Query:** The user is asking for a conceptual explanation and an analogy.
+2.  **Deconstruct:** I need to define the concept first, then list its benefits, and finally create a simple, relatable analogy.
+3.  **Formatting Plan:** I will use Markdown headings for structure, bold for key terms, and bullet points for the list of benefits.
+</thinking>
+## This is the Final Answer
+The final answer starts right here...
     \`\`\`
 
 **STEP 2: FINAL ANSWER (AFTER \`</thinking>\`):**
-*   After the closing \`</thinking>\` tag, generate your comprehensive and well-formatted answer based on your thinking process and the user's query.
-*   Follow all formatting guidelines (Markdown, KaTeX, etc.) as instructed for this final answer part.
+*   After the closing \`</thinking>\` tag, generate your comprehensive and well-formatted answer.
+*   Follow all formatting guidelines (Markdown, KaTeX, etc.) from your core instructions for this final answer part.
 `;
 
 const CHAT_MAIN_SYSTEM_PROMPT = () => {
@@ -798,7 +803,51 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 **FINAL JSON TEST CASE ARRAY:**
 `;
 
+// ==============================================================================
+// === PROMPT COACH PROMPTS ===
+// ==============================================================================
 
+const PROMPT_COACH_TEMPLATE = `
+You are an expert Prompt Engineering Coach. Your task is to analyze the user's provided prompt and rewrite it to be more specific, provide more context, and ultimately be more effective for an AI Tutor specializing in academic and technical topics.
+
+Your entire output MUST be a single, valid JSON object with two keys: "improvedPrompt" and "explanation".
+- "improvedPrompt": Your rewritten, superior version of the prompt.
+- "explanation": A brief, bulleted list in Markdown explaining the key improvements you made. Use "- " for each bullet point.
+
+User's Prompt: "{userPrompt}"
+
+Example Output for a user prompt of "tell me about python":
+{
+  "improvedPrompt": "Provide a beginner-friendly overview of Python. Cover its main uses (like web development, data science, and automation) and include a simple 'Hello, World!' code example.",
+  "explanation": "- **Added Specificity:** Asked for a 'beginner-friendly overview' to set the right tone.\\n- **Provided Context:** Mentioned specific uses to guide the AI's focus.\\n- **Requested Actionable Content:** Asked for a 'code example' to get a practical response."
+}
+
+FINAL JSON OUTPUT:
+`;
+
+const CRITICAL_THINKING_CUE_TEMPLATE = `
+You are a Devil's Advocate, a Fact-Checker, and a Practical Mentor AI. Your task is to read the following AI-generated text and identify opportunities to encourage deeper, more critical thinking.
+
+Based on the text, generate up to three distinct types of follow-up prompts for the user.
+
+Your entire output MUST be a single, valid JSON object. It can contain any of the following three keys: "verificationPrompt", "alternativePrompt", and "applicationPrompt".
+- "verificationPrompt": A prompt that asks for external evidence, sources, or data to back up a key claim.
+- "alternativePrompt": A prompt that asks for counterarguments, disadvantages, or different perspectives on the topic.
+- "applicationPrompt": A prompt that asks for a practical example, a "what-if" scenario, or how the concept applies to a real-world problem.
+
+If you cannot generate a meaningful prompt for a specific type, omit its key from the JSON. If no good prompts can be generated at all, return an empty JSON object: {}.
+
+AI-Generated Text: "{aiAnswer}"
+
+Example for "React is the best frontend framework due to its virtual DOM, which makes it faster than competitors.":
+{
+  "verificationPrompt": "Find sources and benchmarks comparing React's virtual DOM performance to Svelte's compiler-based approach.",
+  "alternativePrompt": "What are some common criticisms or disadvantages of using React?",
+  "applicationPrompt": "How would I handle global state management in a large-scale React application?"
+}
+
+FINAL JSON OUTPUT:
+`;
 
 module.exports = {
     // Analysis
@@ -820,4 +869,6 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
+    PROMPT_COACH_TEMPLATE,
+    CRITICAL_THINKING_CUE_TEMPLATE
 };  

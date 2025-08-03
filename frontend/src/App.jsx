@@ -44,7 +44,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession, messages, setMessages }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -52,7 +52,6 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         isRightPanelOpen,
         setSessionId: setGlobalSessionId,
     } = useAppState();
-    const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
     
@@ -73,34 +72,6 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         setIsHistoryModalOpen(false);
     };
 
-    const { token: regularUserTokenValue } = useRegularAuth();
-
-    const fetchChatHistory = useCallback(async (sid) => {
-        if (!sid || !regularUserTokenValue) {
-            setAppStateMessages([]);
-            return;
-        }
-        try {
-            const sessionData = await api.getChatHistory(sid);
-            setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
-        } catch (error) {
-            toast.error(`History load failed: ${error.message}`);
-            // If a session is not found, start a new one.
-            if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found. Starting a new session.");
-                handleNewChat();
-            }
-        }
-    }, [regularUserTokenValue, handleNewChat]); // Added handleNewChat dependency
-
-    useEffect(() => {
-        if (currentSessionId && regularUserTokenValue) {
-            fetchChatHistory(currentSessionId);
-        } else if (!regularUserTokenValue) {
-            setAppStateMessages([]);
-        }
-    }, [currentSessionId, regularUserTokenValue, fetchChatHistory]);
-
     return (
     <>
         <AnimatePresence>
@@ -110,7 +81,7 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={handleNewChat} 
+            onNewChat={() => handleNewChat(messages)} // Pass messages here
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -125,8 +96,8 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
             </AnimatePresence>
             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
                 <CenterPanel 
-                    messages={appStateMessages} 
-                    setMessages={setAppStateMessages} 
+                    messages={messages} 
+                    setMessages={setMessages} 
                     currentSessionId={currentSessionId}
                     onChatProcessingChange={handleChatProcessingStatusChange}
                     initialPromptForNewSession={initialPromptForNewSession}
@@ -151,15 +122,15 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
 function App() {
     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
     const { 
-    theme, 
-    setSessionId: setGlobalSessionId, 
-    currentSessionId, 
-    isAdminSessionActive,
-    initialPromptForNewSession,      
-    setInitialPromptForNewSession, 
-    initialActivityForNewSession,    
-    setInitialActivityForNewSession
-} = useAppState();
+        theme, 
+        setSessionId: setGlobalSessionId, 
+        currentSessionId, 
+        isAdminSessionActive,
+        initialPromptForNewSession,      
+        setInitialPromptForNewSession, 
+        initialActivityForNewSession,    
+        setInitialActivityForNewSession
+    } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
     const [appInitializing, setAppInitializing] = useState(true);
@@ -167,10 +138,18 @@ function App() {
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
 
-    useEffect(() => { document.documentElement.className = theme; }, [theme]);
-    useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    // --- NEW LOGIC MOVED HERE FROM MainAppLayout ---
+    const [appStateMessages, setAppStateMessages] = useState([]);
 
-    const handleNewChat = useCallback(async (callback) => {
+        const handleNewChat = useCallback(async (callbackOrMessages) => {
+        const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
+        const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
+
+        if (messages.length === 0 && currentSessionId) {
+            toast('This is already a new chat!', { icon: '✨' });
+            return;
+        }
+
         setIsSessionLoading(true);
         try {
             const data = await api.startNewSession(currentSessionId); 
@@ -228,7 +207,36 @@ function App() {
             setIsSessionLoading(false);
         }
     }, [currentSessionId, setGlobalSessionId, navigate]);
+    
+    const fetchChatHistory = useCallback(async (sid) => {
+        if (!sid || !regularUserToken) {
+            setAppStateMessages([]);
+            return;
+        }
+        try {
+            const sessionData = await api.getChatHistory(sid);
+            setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
+        } catch (error) {
+            toast.error(`History load failed: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found. Starting a new session.");
+                handleNewChat();
+            }
+        }
+    }, [regularUserToken, handleNewChat]);
 
+    useEffect(() => {
+        if (currentSessionId && regularUserToken) {
+            fetchChatHistory(currentSessionId);
+        } else if (!regularUserToken) {
+            setAppStateMessages([]);
+        }
+    }, [currentSessionId, regularUserToken, fetchChatHistory]);
+    // --- END OF MOVED LOGIC ---
+
+    useEffect(() => { document.documentElement.className = theme; }, [theme]);
+    useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    
     useEffect(() => {
         if (isAdminSessionActive) {
             setAppInitializing(false);
@@ -301,6 +309,8 @@ function App() {
                     setInitialPromptForNewSession={setInitialPromptForNewSession}
                     initialActivityForNewSession={initialActivityForNewSession}
                     setInitialActivityForNewSession={setInitialActivityForNewSession}
+                    messages={appStateMessages}
+                    setMessages={setAppStateMessages}
                 /> : null} />
                 </Routes>
         </div>
