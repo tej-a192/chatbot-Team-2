@@ -36,3 +36,4 @@ openai-whisper
 beautifulsoup4
 playwright
 moviepy
+Werkzeug

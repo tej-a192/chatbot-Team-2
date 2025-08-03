@@ -803,7 +803,27 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 **FINAL JSON TEST CASE ARRAY:**
 `;
 
+// ==============================================================================
+// === PROMPT COACH PROMPTS ===
+// ==============================================================================
 
+const PROMPT_COACH_TEMPLATE = `
+You are an expert Prompt Engineering Coach. Your task is to analyze the user's provided prompt and rewrite it to be more specific, provide more context, and ultimately be more effective for an AI Tutor specializing in academic and technical topics.
+
+Your entire output MUST be a single, valid JSON object with two keys: "improvedPrompt" and "explanation".
+- "improvedPrompt": Your rewritten, superior version of the prompt.
+- "explanation": A brief, bulleted list in Markdown explaining the key improvements you made. Use "- " for each bullet point.
+
+User's Prompt: "{userPrompt}"
+
+Example Output for a user prompt of "tell me about python":
+{
+  "improvedPrompt": "Provide a beginner-friendly overview of Python. Cover its main uses (like web development, data science, and automation) and include a simple 'Hello, World!' code example.",
+  "explanation": "- **Added Specificity:** Asked for a 'beginner-friendly overview' to set the right tone.\\n- **Provided Context:** Mentioned specific uses to guide the AI's focus.\\n- **Requested Actionable Content:** Asked for a 'code example' to get a practical response."
+}
+
+FINAL JSON OUTPUT:
+`;
 
 module.exports = {
     // Analysis
@@ -825,4 +845,5 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
+    PROMPT_COACH_TEMPLATE
 };  

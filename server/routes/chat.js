@@ -9,6 +9,7 @@ const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
+const { analyzePrompt } = require('../services/promptCoachService');
 const router = express.Router();
 
 
@@ -398,6 +399,36 @@ router.delete('/session/:sessionId', async (req, res) => {
         res.status(200).json({ message: 'Chat session deleted successfully.' });
     } catch (error) {
         res.status(500).json({ message: 'Server error while deleting chat session.' });
+    }
+});
+
+
+// @route   POST /api/chat/analyze-prompt
+// @desc    Analyze a user's prompt and suggest improvements.
+// @access  Private
+router.post('/analyze-prompt', async (req, res) => {
+    const { prompt } = req.body;
+    const userId = req.user._id;
+
+    // --- REVISED VALIDATION ---
+    if (!prompt || typeof prompt !== 'string') {
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: 'prompt' field is missing or not a string. Received body:`, req.body);
+        return res.status(400).json({ message: "'prompt' field is missing or invalid." });
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length < 3) { // <-- The changed value
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: Prompt is too short. Received: "${trimmedPrompt}"`);
+        return res.status(400).json({ message: `Prompt must be at least 3 characters long.` }); // <-- The changed message
+    }
+    // --- END REVISED VALIDATION ---
+
+    try {
+        const analysis = await analyzePrompt(userId, trimmedPrompt);
+        res.status(200).json(analysis);
+    } catch (error) {
+        console.error(`[API /analyze-prompt] Error for user ${userId} with prompt "${trimmedPrompt.substring(0, 50)}...":`, error);
+        res.status(500).json({ message: error.message || 'Server error during prompt analysis.' });
     }
 });
 

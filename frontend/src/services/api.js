@@ -273,6 +273,11 @@ const api = {
     });
     return response.data; // Should be { quiz: [...] }
   },
+  analyzePrompt: async (promptText) => {
+    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
+    return response.data; // Expects { improvedPrompt, explanation }
+  },
+
 };
 
 export default api;

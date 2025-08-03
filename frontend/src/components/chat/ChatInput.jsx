@@ -1,7 +1,8 @@
 // frontend/src/components/chat/ChatInput.jsx
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react';
+import api from '../../services/api.js';
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked, Sparkles } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
@@ -19,13 +20,57 @@ function ChatInput({
     criticalThinkingEnabled,
     setCriticalThinkingEnabled,
     initialPrompt,
-    setInitialPromptForNewSession
+    setInitialPromptForNewSession,
+    openCoachModalWithData,
+    setCoachModalOpen
 }) {
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+    // --- SIMPLIFIED COACH LOGIC ---
+    const [isCoaching, setIsCoaching] = useState(false);
+
+    const handleRequestPromptCoaching = async () => {
+        const trimmedInput = inputValue.trim();
+
+        // --- NEW: Frontend Validation ---
+        if (!trimmedInput) return; // General check to prevent action on empty input
+        
+        if (trimmedInput.length < 3) {
+            toast("Prompt is too short for coaching. Please provide a bit more detail.", {
+                icon: '❤️',
+                style: {
+                    background: '#FBBF24',
+                    color: '#ffffff',
+                },
+            });
+            return; // Stop the function here
+        }
+        // --- END: Frontend Validation ---
+        
+        if (isCoaching) return;
+
+        setIsCoaching(true);
+        const toastId = toast.loading('Asking the coach for advice...');
+        try {
+            const response = await api.analyzePrompt(trimmedInput);
+            // Tell the parent to open the modal with the new data
+            openCoachModalWithData({
+                original: trimmedInput,
+                improved: response.improvedPrompt,
+                explanation: response.explanation
+            });
+            setCoachModalOpen(true);
+            toast.success('Suggestion received!', { id: toastId });
+        } catch (error) {
+            toast.error(error.message || "The Prompt Coach is unavailable.", { id: toastId });
+        } finally {
+            setIsCoaching(false);
+        }
+    };
 
     useEffect(() => {
     if (initialPrompt) {
@@ -166,6 +211,18 @@ function ChatInput({
                         disabled={isLoading}
                     />
                 )}
+                
+                {/* --- NEW BUTTON --- */}
+                <IconButton
+                    icon={Sparkles}
+                    onClick={handleRequestPromptCoaching}
+                    title="Ask Prompt Coach for Improvement"
+                    variant="ghost"
+                    size="md"
+                    className="p-2 text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+                    isLoading={isCoaching}
+                    disabled={isLoading || isCoaching || !inputValue.trim()}
+                />
 
                <IconButton
                     icon={icon}
