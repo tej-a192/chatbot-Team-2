@@ -7272,7 +7272,7 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
+function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession, messages, setMessages }) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
@@ -7280,7 +7280,6 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         isRightPanelOpen,
         setSessionId: setGlobalSessionId,
     } = useAppState();
-    const [appStateMessages, setAppStateMessages] = useState([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
     
@@ -7301,34 +7300,6 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         setIsHistoryModalOpen(false);
     };
 
-    const { token: regularUserTokenValue } = useRegularAuth();
-
-    const fetchChatHistory = useCallback(async (sid) => {
-        if (!sid || !regularUserTokenValue) {
-            setAppStateMessages([]);
-            return;
-        }
-        try {
-            const sessionData = await api.getChatHistory(sid);
-            setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
-        } catch (error) {
-            toast.error(`History load failed: ${error.message}`);
-            // If a session is not found, start a new one.
-            if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found. Starting a new session.");
-                handleNewChat();
-            }
-        }
-    }, [regularUserTokenValue, handleNewChat]); // Added handleNewChat dependency
-
-    useEffect(() => {
-        if (currentSessionId && regularUserTokenValue) {
-            fetchChatHistory(currentSessionId);
-        } else if (!regularUserTokenValue) {
-            setAppStateMessages([]);
-        }
-    }, [currentSessionId, regularUserTokenValue, fetchChatHistory]);
-
     return (
     <>
         <AnimatePresence>
@@ -7338,7 +7309,7 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={handleNewChat} 
+            onNewChat={() => handleNewChat(messages)} // Pass messages here
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -7353,8 +7324,8 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
             </AnimatePresence>
             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
                 <CenterPanel 
-                    messages={appStateMessages} 
-                    setMessages={setAppStateMessages} 
+                    messages={messages} 
+                    setMessages={setMessages} 
                     currentSessionId={currentSessionId}
                     onChatProcessingChange={handleChatProcessingStatusChange}
                     initialPromptForNewSession={initialPromptForNewSession}
@@ -7379,15 +7350,15 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
 function App() {
     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
     const { 
-    theme, 
-    setSessionId: setGlobalSessionId, 
-    currentSessionId, 
-    isAdminSessionActive,
-    initialPromptForNewSession,      
-    setInitialPromptForNewSession, 
-    initialActivityForNewSession,    
-    setInitialActivityForNewSession
-} = useAppState();
+        theme, 
+        setSessionId: setGlobalSessionId, 
+        currentSessionId, 
+        isAdminSessionActive,
+        initialPromptForNewSession,      
+        setInitialPromptForNewSession, 
+        initialActivityForNewSession,    
+        setInitialActivityForNewSession
+    } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
     const [appInitializing, setAppInitializing] = useState(true);
@@ -7395,10 +7366,18 @@ function App() {
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
 
-    useEffect(() => { document.documentElement.className = theme; }, [theme]);
-    useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    // --- NEW LOGIC MOVED HERE FROM MainAppLayout ---
+    const [appStateMessages, setAppStateMessages] = useState([]);
 
-    const handleNewChat = useCallback(async (callback) => {
+        const handleNewChat = useCallback(async (callbackOrMessages) => {
+        const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
+        const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
+
+        if (messages.length === 0 && currentSessionId) {
+            toast('This is already a new chat!', { icon: '✨' });
+            return;
+        }
+
         setIsSessionLoading(true);
         try {
             const data = await api.startNewSession(currentSessionId); 
@@ -7456,7 +7435,36 @@ function App() {
             setIsSessionLoading(false);
         }
     }, [currentSessionId, setGlobalSessionId, navigate]);
+    
+    const fetchChatHistory = useCallback(async (sid) => {
+        if (!sid || !regularUserToken) {
+            setAppStateMessages([]);
+            return;
+        }
+        try {
+            const sessionData = await api.getChatHistory(sid);
+            setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
+        } catch (error) {
+            toast.error(`History load failed: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found. Starting a new session.");
+                handleNewChat();
+            }
+        }
+    }, [regularUserToken, handleNewChat]);
 
+    useEffect(() => {
+        if (currentSessionId && regularUserToken) {
+            fetchChatHistory(currentSessionId);
+        } else if (!regularUserToken) {
+            setAppStateMessages([]);
+        }
+    }, [currentSessionId, regularUserToken, fetchChatHistory]);
+    // --- END OF MOVED LOGIC ---
+
+    useEffect(() => { document.documentElement.className = theme; }, [theme]);
+    useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    
     useEffect(() => {
         if (isAdminSessionActive) {
             setAppInitializing(false);
@@ -7529,6 +7537,8 @@ function App() {
                     setInitialPromptForNewSession={setInitialPromptForNewSession}
                     initialActivityForNewSession={initialActivityForNewSession}
                     setInitialActivityForNewSession={setInitialActivityForNewSession}
+                    messages={appStateMessages}
+                    setMessages={setAppStateMessages}
                 /> : null} />
                 </Routes>
         </div>
@@ -9974,9 +9984,9 @@ import React, { useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import { motion, AnimatePresence } from 'framer-motion';
 
-function ChatHistory({ messages }) {
+function ChatHistory({ messages, onCueClick }) {
+    
     const chatHistoryRef = useRef(null);
-
     useEffect(() => {
         if (chatHistoryRef.current) {
             chatHistoryRef.current.scrollTop = chatHistoryRef.current.scrollHeight;
@@ -10003,7 +10013,9 @@ function ChatHistory({ messages }) {
                             references={msg.references}
                             timestamp={msg.timestamp}
                             sourcePipeline={msg.source_pipeline}
-                            isStreaming={msg.isStreaming} // Pass the flag
+                            isStreaming={msg.isStreaming}
+                            criticalThinkingCues={msg.criticalThinkingCues}
+                            onCueClick={onCueClick}
                         />
                     </motion.div>
                 ))}
@@ -10192,7 +10204,8 @@ export default ChatHistoryModal;
 // frontend/src/components/chat/ChatInput.jsx
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react';
+import api from '../../services/api.js';
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked, Sparkles } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
@@ -10210,13 +10223,57 @@ function ChatInput({
     criticalThinkingEnabled,
     setCriticalThinkingEnabled,
     initialPrompt,
-    setInitialPromptForNewSession
+    setInitialPromptForNewSession,
+    openCoachModalWithData,
+    setCoachModalOpen
 }) {
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+    // --- SIMPLIFIED COACH LOGIC ---
+    const [isCoaching, setIsCoaching] = useState(false);
+
+    const handleRequestPromptCoaching = async () => {
+        const trimmedInput = inputValue.trim();
+
+        // --- NEW: Frontend Validation ---
+        if (!trimmedInput) return; // General check to prevent action on empty input
+        
+        if (trimmedInput.length < 3) {
+            toast("Prompt is too short for coaching. Please provide a bit more detail.", {
+                icon: '❤️',
+                style: {
+                    background: '#FBBF24',
+                    color: '#ffffff',
+                },
+            });
+            return; // Stop the function here
+        }
+        // --- END: Frontend Validation ---
+        
+        if (isCoaching) return;
+
+        setIsCoaching(true);
+        const toastId = toast.loading('Asking the coach for advice...');
+        try {
+            const response = await api.analyzePrompt(trimmedInput);
+            // Tell the parent to open the modal with the new data
+            openCoachModalWithData({
+                original: trimmedInput,
+                improved: response.improvedPrompt,
+                explanation: response.explanation
+            });
+            setCoachModalOpen(true);
+            toast.success('Suggestion received!', { id: toastId });
+        } catch (error) {
+            toast.error(error.message || "The Prompt Coach is unavailable.", { id: toastId });
+        } finally {
+            setIsCoaching(false);
+        }
+    };
 
     useEffect(() => {
     if (initialPrompt) {
@@ -10357,6 +10414,18 @@ function ChatInput({
                         disabled={isLoading}
                     />
                 )}
+                
+                {/* --- NEW BUTTON --- */}
+                <IconButton
+                    icon={Sparkles}
+                    onClick={handleRequestPromptCoaching}
+                    title="Ask Prompt Coach for Improvement"
+                    variant="ghost"
+                    size="md"
+                    className="p-2 text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+                    isLoading={isCoaching}
+                    disabled={isLoading || isCoaching || !inputValue.trim()}
+                />
 
                <IconButton
                     icon={icon}
@@ -10417,7 +10486,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check } from 'lucide-react';
+import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
@@ -10474,7 +10543,7 @@ const AnimatedThinking = ({ content }) => {
     );
 };
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const contentRef = useRef(null);
@@ -10563,21 +10632,44 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     <details className="group/details text-xs">
-                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                            <span className="flex items-center gap-1">
-                                <LinkIcon size={14} /> References
-                            </span>
-                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
-                        </summary>
-                        <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
-                            {references.map((ref, index) => (
-                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
-                                    <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
-                                </li>
-                            ))}
-                        </ul>
-                    </details>
+                     {/* ... details block for references ... */}
+                </div>
+            )}
+            
+            {!isStreaming && !isUser && criticalThinkingCues && (
+                <div className="max-w-[85%] md:max-w-[75%] w-full mt-2 pl-2 animate-fadeIn">
+                    <div className="border-t border-dashed border-border-light dark:border-border-dark pt-2">
+                        <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark flex items-center gap-1.5 mb-2">
+                            <Lightbulb size={14} />
+                            Critical Thinking Prompts
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                            {criticalThinkingCues.verificationPrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.verificationPrompt)}
+                                    className="text-xs bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 px-2.5 py-1 rounded-full hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.verificationPrompt}
+                                </button>
+                            )}
+                            {criticalThinkingCues.alternativePrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.alternativePrompt)}
+                                    className="text-xs bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-1 rounded-full hover:bg-amber-500/20 dark:hover:bg-amber-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.alternativePrompt}
+                                </button>
+                            )}
+                            {criticalThinkingCues.applicationPrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
+                                    className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.applicationPrompt}
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
@@ -10585,6 +10677,83 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 }
 
 export default MessageBubble;
+```
+
+`frontend/src/components/chat/PromptCoachModal.jsx`
+
+```javascript
+// frontend/src/components/chat/PromptCoachModal.jsx
+import React from 'react';
+import Modal from '../core/Modal';
+import Button from '../core/Button';
+import { Sparkles, Check } from 'lucide-react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+// This function will safely render the Markdown explanation from the AI
+const createMarkup = (markdownText) => {
+    if (!markdownText) return { __html: '' };
+    const rawHtml = marked.parse(markdownText);
+    const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+    return { __html: cleanHtml };
+};
+
+const PromptCoachModal = ({ isOpen, onClose, onApply, data }) => {
+    if (!isOpen || !data) return null;
+
+    const { original, improved, explanation } = data;
+
+    const handleApply = () => {
+        onApply(improved);
+        onClose();
+    };
+
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Prompt Coach Suggestion"
+            size="xl"
+            footerContent={
+                <>
+                    <Button variant="secondary" onClick={onClose}>Keep Original</Button>
+                    <Button onClick={handleApply} leftIcon={<Check size={16} />}>Use Suggestion</Button>
+                </>
+            }
+        >
+            <div className="max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark">Your Original Prompt</label>
+                        <p className="mt-1 p-3 bg-gray-100 dark:bg-gray-800 rounded-md text-sm italic">
+                            "{original}"
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <label className="text-sm font-semibold text-primary dark:text-primary-light flex items-center gap-1.5">
+                            <Sparkles size={16} />
+                            Suggested Improvement
+                        </label>
+                        <p className="mt-1 p-3 bg-primary/10 dark:bg-primary/20 border border-primary/30 rounded-md text-sm font-medium">
+                            "{improved}"
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <label className="text-sm font-semibold text-text-muted-light dark:text-text-muted-dark">Reasoning</label>
+                        <div
+                            className="prose prose-sm dark:prose-invert max-w-none mt-1 text-text-light dark:text-text-dark text-sm"
+                            dangerouslySetInnerHTML={createMarkup(explanation)}
+                        />
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+export default PromptCoachModal;
 ```
 
 `frontend/src/components/chat/StreamingResponse.jsx`
@@ -11851,6 +12020,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
+import PromptCoachModal from '../chat/PromptCoachModal.jsx';
 import api from '../../services/api';
 import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
@@ -11910,7 +12080,9 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-    const [promptFromNav, setPromptFromNav] = useState('');
+    // const [promptFromNav, setPromptFromNav] = useState('');
+    const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
+    const [coachData, setCoachData] = useState(null);
     
     // --- STABLE FUNCTION DEFINITIONS ---
 
@@ -12254,7 +12426,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     </div>
                 </div>
             ) : (
-                <ChatHistory messages={messages} />
+                <ChatHistory messages={messages} onCueClick={handleSendMessage} />
             )}
             
             <ChatInput
@@ -12268,9 +12440,20 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 setCriticalThinkingEnabled={setCriticalThinkingEnabled}
                 initialPrompt={initialPromptForNewSession}
                 setInitialPromptForNewSession={setInitialPromptForNewSession}
+                openCoachModalWithData={setCoachData}
+                setCoachModalOpen={setIsCoachModalOpen}
             />
-
+            <PromptCoachModal
+                isOpen={isCoachModalOpen}
+                onClose={() => setIsCoachModalOpen(false)}
+                onApply={(improvedPrompt) => {
+                    // This logic now lives here, where it can set the initial prompt state
+                    setInitialPromptForNewSession(improvedPrompt);
+                }}
+                data={coachData}
+            />
         </div>
+        
     );
 }
 
@@ -16319,6 +16502,11 @@ const api = {
     });
     return response.data; // Should be { quiz: [...] }
   },
+  analyzePrompt: async (promptText) => {
+    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
+    return response.data; // Expects { improvedPrompt, explanation }
+  },
+
 };
 
 export default api;
@@ -16559,18 +16747,14 @@ export default defineConfig({
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
-# ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
-# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
-# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
-# GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
 GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
+PROMPT_COACH_GEMINI_MODEL=gemini-1.5-flash-latest
+PROMPT_COACH_OLLAMA_MODEL=phi3:mini-instruct
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
-# OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
 ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
 REDIS_URL="redis://localhost:6379"
-# --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
 
@@ -17420,7 +17604,51 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 **FINAL JSON TEST CASE ARRAY:**
 `;
 
+// ==============================================================================
+// === PROMPT COACH PROMPTS ===
+// ==============================================================================
 
+const PROMPT_COACH_TEMPLATE = `
+You are an expert Prompt Engineering Coach. Your task is to analyze the user's provided prompt and rewrite it to be more specific, provide more context, and ultimately be more effective for an AI Tutor specializing in academic and technical topics.
+
+Your entire output MUST be a single, valid JSON object with two keys: "improvedPrompt" and "explanation".
+- "improvedPrompt": Your rewritten, superior version of the prompt.
+- "explanation": A brief, bulleted list in Markdown explaining the key improvements you made. Use "- " for each bullet point.
+
+User's Prompt: "{userPrompt}"
+
+Example Output for a user prompt of "tell me about python":
+{
+  "improvedPrompt": "Provide a beginner-friendly overview of Python. Cover its main uses (like web development, data science, and automation) and include a simple 'Hello, World!' code example.",
+  "explanation": "- **Added Specificity:** Asked for a 'beginner-friendly overview' to set the right tone.\\n- **Provided Context:** Mentioned specific uses to guide the AI's focus.\\n- **Requested Actionable Content:** Asked for a 'code example' to get a practical response."
+}
+
+FINAL JSON OUTPUT:
+`;
+
+const CRITICAL_THINKING_CUE_TEMPLATE = `
+You are a Devil's Advocate, a Fact-Checker, and a Practical Mentor AI. Your task is to read the following AI-generated text and identify opportunities to encourage deeper, more critical thinking.
+
+Based on the text, generate up to three distinct types of follow-up prompts for the user.
+
+Your entire output MUST be a single, valid JSON object. It can contain any of the following three keys: "verificationPrompt", "alternativePrompt", and "applicationPrompt".
+- "verificationPrompt": A prompt that asks for external evidence, sources, or data to back up a key claim.
+- "alternativePrompt": A prompt that asks for counterarguments, disadvantages, or different perspectives on the topic.
+- "applicationPrompt": A prompt that asks for a practical example, a "what-if" scenario, or how the concept applies to a real-world problem.
+
+If you cannot generate a meaningful prompt for a specific type, omit its key from the JSON. If no good prompts can be generated at all, return an empty JSON object: {}.
+
+AI-Generated Text: "{aiAnswer}"
+
+Example for "React is the best frontend framework due to its virtual DOM, which makes it faster than competitors.":
+{
+  "verificationPrompt": "Find sources and benchmarks comparing React's virtual DOM performance to Svelte's compiler-based approach.",
+  "alternativePrompt": "What are some common criticisms or disadvantages of using React?",
+  "applicationPrompt": "How would I handle global state management in a large-scale React application?"
+}
+
+FINAL JSON OUTPUT:
+`;
 
 module.exports = {
     // Analysis
@@ -17442,6 +17670,8 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
+    PROMPT_COACH_TEMPLATE,
+    CRITICAL_THINKING_CUE_TEMPLATE
 };  
 ```
 
@@ -22961,8 +23191,10 @@ const User = require('../models/User');
 const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
 const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
+const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
+const { analyzePrompt } = require('../services/promptCoachService');
 const router = express.Router();
 
 
@@ -23000,10 +23232,6 @@ router.post('/message', async (req, res) => {
     
     const userId = req.user._id;
 
-    console.log(`%c[DEBUG | POST /message] Request Received`, 'color: #FFD700; font-weight: bold;');
-    console.log(`  - Session ID from Client:`, sessionId);
-    console.log(`  - User ID:`, userId.toString());
-
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
     }
@@ -23023,9 +23251,15 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
+        const llmConfig = {
+            llmProvider,
+            ollamaModel,
+            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+            ollamaUrl: user?.ollamaUrl
+        };
+
         const historyFromDb = chatSession ? chatSession.messages : [];
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        
         const historyForLlm = [];
 
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
@@ -23038,7 +23272,7 @@ router.post('/message', async (req, res) => {
                 parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
             });
         }
-
+        
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
@@ -23046,15 +23280,12 @@ router.post('/message', async (req, res) => {
         
         const requestContext = {
             documentContextName, criticalThinkingEnabled, filter,
-            llmProvider, ollamaModel,
-            isWebSearchEnabled: !!useWebSearch, isAcademicSearchEnabled: !!useAcademicSearch,
-            userId: userId.toString(), ollamaUrl: user.ollamaUrl,
-            systemPrompt: clientProvidedSystemInstruction
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
         };
-
-        if (llmProvider === 'gemini') {
-            requestContext.apiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
 
         if (criticalThinkingEnabled) {
             console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
@@ -23079,7 +23310,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
 
-            const aiMessageForDbAndClient = {
+            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: totResult.finalAnswer }],
                 text: totResult.finalAnswer,
@@ -23087,17 +23320,17 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues // Add cues for client
             };
 
-            streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
+            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
-            console.log(`%c[DEBUG | POST /message] Executing DB Update`, 'color: #FFD700; font-weight: bold;');
-            console.log(`  - Action: findOneAndUpdate (This will ADD messages to the existing session)`);
-            console.log(`  - Target Session ID:`, sessionId);
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
@@ -23110,7 +23343,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
             );
 
-            const aiMessageForDbAndClient = {
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: agentResponse.finalAnswer }],
                 text: agentResponse.finalAnswer,
@@ -23118,24 +23353,20 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues // Add cues for client
             };
-            console.log("---------------------------------------");
-            console.log(`[DB WRITE | /message] PRE-SAVE for Session ${sessionId}`);
-            console.log(`  - Attempting to atomically $push user message: "${userMessageForDb.parts[0].text.substring(0, 50)}..."`);
-            console.log(`  - Attempting to atomically $push AI response: "${aiMessageForDbAndClient.text.substring(0, 50)}..."`);
-            console.log("---------------------------------------");
+            
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
-            console.log("---------------------------------------");
-            console.log(`[DB WRITE | /message] POST-SAVE for Session ${sessionId}`);
-            console.log(`  - findOneAndUpdate operation completed successfully.`);
-            console.log("---------------------------------------");
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForDbAndClient });
+            res.status(200).json({ reply: aiMessageForClient });
         }
 
     } catch (error) {
@@ -23178,64 +23409,7 @@ router.post('/history', async (req, res) => {
                     ollamaUrl: user?.ollamaUrl || null
                 };
 
-                // const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
-                //     previousSession.messages, previousSession.summary,
-                //     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
-                // );
-
-                // await ChatHistory.updateOne(
-                //     { sessionId: previousSessionId, userId: userId },
-                //     { $set: { summary: summary } }
-                // );
-
-                // if (knowledgeGaps && knowledgeGaps.size > 0) {
-                //     user.profile.performanceMetrics.clear();     
-                //     knowledgeGaps.forEach((score, topic) => {
-                //         user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
-                //     });
-                //     await user.save(); 
-                //     console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
-
-                //     // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
-                //     // Find the single most significant knowledge gap (lowest score)
-                //     let mostSignificantGap = null;
-                //     let lowestScore = 1.1; // Start higher than max possible score
-
-                //     knowledgeGaps.forEach((score, topic) => {
-                //         if (score < lowestScore) {
-                //             lowestScore = score;
-                //             mostSignificantGap = topic;
-                //         }
-                //     });
-
-                //     // If we found a significant gap (e.g., score < 0.6), create the suggestion object
-                //     if (mostSignificantGap && lowestScore < 0.6) {
-                //         console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
-                //         responsePayload.studyPlanSuggestion = {
-                //             topic: mostSignificantGap,
-                //             reason: `Analysis of your last session shows this is a key area for improvement.`
-                //         };
-                //     }
-                //     // --- END OF NEW LOGIC ---
-                // }
-                
-                // if (keyTopics && keyTopics.length > 0) {
-                //     const primaryTopic = keyTopics[0];
-                //     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
-                //     responsePayload.studyPlanSuggestion = {
-                //         topic: primaryTopic,
-                //         reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
-                //     };
-                // }
-
-                // if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
-                //     const cacheKey = `recommendations:${newSessionId}`;
-                //     await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
-                //     console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
-                // }
-
-
-                                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
+                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
                     previousSession.messages, previousSession.summary,
                     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
                 );
@@ -23272,7 +23446,6 @@ router.post('/history', async (req, res) => {
                     }
                 }
                 
-                // Check for keyTopics and only create a suggestion if a more critical one doesn't already exist.
                 if (keyTopics && keyTopics.length > 0 && !responsePayload.studyPlanSuggestion) {
                     const primaryTopic = keyTopics[0];
                     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
@@ -23292,14 +23465,12 @@ router.post('/history', async (req, res) => {
 
         await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
         console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
-        // Send the final payload, which may or may not include the suggestion
         res.status(200).json(responsePayload);
 
     } catch (error) {
         console.error(`Error during finalize-and-create-new process:`, error);
         if (!res.headersSent) {
             try {
-                // Failsafe: even if analysis fails, still give the user a new session
                 await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
                 responsePayload.message = 'New session started, but analysis of previous session failed.';
                 res.status(200).json(responsePayload);
@@ -23352,6 +23523,36 @@ router.delete('/session/:sessionId', async (req, res) => {
         res.status(200).json({ message: 'Chat session deleted successfully.' });
     } catch (error) {
         res.status(500).json({ message: 'Server error while deleting chat session.' });
+    }
+});
+
+
+// @route   POST /api/chat/analyze-prompt
+// @desc    Analyze a user's prompt and suggest improvements.
+// @access  Private
+router.post('/analyze-prompt', async (req, res) => {
+    const { prompt } = req.body;
+    const userId = req.user._id;
+
+    // --- REVISED VALIDATION ---
+    if (!prompt || typeof prompt !== 'string') {
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: 'prompt' field is missing or not a string. Received body:`, req.body);
+        return res.status(400).json({ message: "'prompt' field is missing or invalid." });
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length < 3) { // <-- The changed value
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: Prompt is too short. Received: "${trimmedPrompt}"`);
+        return res.status(400).json({ message: `Prompt must be at least 3 characters long.` }); // <-- The changed message
+    }
+    // --- END REVISED VALIDATION ---
+
+    try {
+        const analysis = await analyzePrompt(userId, trimmedPrompt);
+        res.status(200).json(analysis);
+    } catch (error) {
+        console.error(`[API /analyze-prompt] Error for user ${userId} with prompt "${trimmedPrompt.substring(0, 50)}...":`, error);
+        res.status(500).json({ message: error.message || 'Server error during prompt analysis.' });
     }
 });
 
@@ -25695,6 +25896,73 @@ module.exports = {
 };
 ```
 
+`server/services/criticalThinkingService.js`
+
+```javascript
+// server/services/criticalThinkingService.js
+const geminiService = require('./geminiService');
+const ollamaService = require('./ollamaService');
+const { CRITICAL_THINKING_CUE_TEMPLATE } = require('../config/promptTemplates');
+
+const CUE_GEMINI_MODEL = process.env.PROMPT_COACH_GEMINI_MODEL || 'gemini-1.5-flash-latest';
+const CUE_OLLAMA_MODEL = process.env.PROMPT_COACH_OLLAMA_MODEL || 'phi3:mini-instruct';
+
+/**
+ * Analyzes an AI's final answer to generate critical thinking cue prompts.
+ * @param {string} aiAnswerText - The final text of the AI's response.
+ * @param {object} llmConfig - Configuration object containing the user's provider, key, URL, etc.
+ * @returns {Promise<object|null>} An object with cue prompts, or null if none are generated or an error occurs.
+ */
+async function generateCues(aiAnswerText, llmConfig) {
+    if (!aiAnswerText || aiAnswerText.trim().length < 50) {
+        // Don't generate cues for very short or empty answers
+        return null;
+    }
+
+    const { llmProvider, ollamaUrl, apiKey } = llmConfig;
+    const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
+
+    const promptForLlm = CRITICAL_THINKING_CUE_TEMPLATE.replace('{aiAnswer}', aiAnswerText.substring(0, 2000)); // Limit context size for speed
+
+    const llmOptions = {
+        model: llmProvider === 'ollama' ? CUE_OLLAMA_MODEL : CUE_GEMINI_MODEL,
+        apiKey: apiKey,
+        ollamaUrl: ollamaUrl,
+        temperature: 0.4 // Lower temperature for more deterministic, structured output
+    };
+
+    try {
+        console.log(`[CriticalThinkingService] Generating cues using ${llmProvider} with model ${llmOptions.model}.`);
+        const responseText = await llmService.generateContentWithHistory([], promptForLlm, null, llmOptions);
+
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            console.warn("[CriticalThinkingService] LLM response did not contain a valid JSON object.");
+            return null;
+        }
+        
+        const parsedResponse = JSON.parse(jsonMatch[0]);
+
+        // Validate that at least one valid key exists
+        if (parsedResponse.verificationPrompt || parsedResponse.alternativePrompt || parsedResponse.applicationPrompt) {
+            return parsedResponse;
+        }
+
+        // Return null if the object is empty ({})
+        return null;
+
+    } catch (error) {
+        console.error(`[CriticalThinkingService] Failed to generate cues: ${error.message}`);
+        // Return null on any error to ensure this feature doesn't block the main response
+        return null;
+    }
+}
+
+module.exports = {
+    generateCues
+};
+```
+
 `server/services/geminiService.js`
 
 ```javascript
@@ -26527,6 +26795,85 @@ module.exports = {
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT,
     DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG,
+};
+```
+
+`server/services/promptCoachService.js`
+
+```javascript
+// server/services/promptCoachService.js
+const geminiService = require('./geminiService');
+const ollamaService = require('./ollamaService');
+const { PROMPT_COACH_TEMPLATE } = require('../config/promptTemplates');
+const User = require('../models/User');
+const { decrypt } = require('../utils/crypto');
+
+const COACH_GEMINI_MODEL = process.env.PROMPT_COACH_GEMINI_MODEL || 'gemini-1.5-flash-latest';
+const COACH_OLLAMA_MODEL = process.env.PROMPT_COACH_OLLAMA_MODEL || 'phi3:mini-instruct';
+
+/**
+ * Analyzes a user's prompt using a lightweight, fast LLM based on their preference.
+ * @param {string} userId - The ID of the user requesting the analysis.
+ * @param {string} userPrompt - The raw prompt text from the user.
+ * @returns {Promise<{improvedPrompt: string, explanation: string}>} The analyzed result.
+ */
+async function analyzePrompt(userId, userPrompt) {
+    const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaUrl');
+    if (!user) {
+        throw new Error("User not found.");
+    }
+
+    const { preferredLlmProvider, ollamaUrl } = user;
+    const promptForLlm = PROMPT_COACH_TEMPLATE.replace('{userPrompt}', userPrompt);
+    
+    let responseText;
+    let llmOptions = {};
+
+    console.log(`[PromptCoachService] Analyzing prompt for user ${userId} using preferred provider: ${preferredLlmProvider}`);
+
+    try {
+        if (preferredLlmProvider === 'ollama') {
+            llmOptions = {
+                model: COACH_OLLAMA_MODEL,
+                ollamaUrl: ollamaUrl
+            };
+            responseText = await ollamaService.generateContentWithHistory([], promptForLlm, null, llmOptions);
+        } else { // Default to Gemini
+            const apiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+            if (!apiKey) {
+                throw new Error("User has selected Gemini but has no API key configured.");
+            }
+            llmOptions = {
+                model: COACH_GEMINI_MODEL, // This is specific to Gemini, not needed in options object
+                apiKey: apiKey
+            };
+            // Note: The geminiService itself will use the correct model name.
+            responseText = await geminiService.generateContentWithHistory([], promptForLlm, null, llmOptions);
+        }
+
+        // --- JSON Parsing Logic ---
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            throw new Error("AI response did not contain a valid JSON object.");
+        }
+        const jsonString = jsonMatch[0];
+        const parsedResponse = JSON.parse(jsonString);
+
+        if (!parsedResponse.improvedPrompt || !parsedResponse.explanation) {
+            throw new Error("AI response JSON is missing required 'improvedPrompt' or 'explanation' keys.");
+        }
+
+        return parsedResponse;
+
+    } catch (error) {
+        console.error(`[PromptCoachService] Error during prompt analysis: ${error.message}`);
+        // Re-throw a user-friendly error
+        throw new Error(`The AI Coach failed to analyze the prompt. ${error.message}`);
+    }
+}
+
+module.exports = {
+    analyzePrompt
 };
 ```
 

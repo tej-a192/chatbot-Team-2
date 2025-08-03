@@ -597,20 +597,21 @@ def extract_document_metadata_info(
     file_type_from_parser = os.path.splitext(original_file_name)[1].lower() # Fallback if not in parser_meta
 
     doc_meta = {
+        'user_id': user_id,
+        'original_name': original_file_name,
         'file_name': original_file_name,
         'file_path_on_server': file_path,
         'original_file_type': parser_meta.get('file_type', file_type_from_parser),
-        'processing_user': user_id,
-        'title': parser_meta.get('title', original_file_name), # Prioritize parser title
-        'author': parser_meta.get('author', "Unknown"),       # Prioritize parser author
-        'creation_date': parser_meta.get('creation_date'),   # Expect ISO format from parser
-        'modification_date': parser_meta.get('modification_date'), # Expect ISO format
+        'title': parser_meta.get('title', original_file_name),
+        'author': parser_meta.get('author', "Unknown"),
+        'creation_date': parser_meta.get('creation_date'),
+        'modification_date': parser_meta.get('modification_date'),
         'page_count': parser_meta.get('page_count', 0),
         'char_count_processed_text': len(processed_text),
         'named_entities': {},
         'structural_elements': "Paragraphs" + (", Tables" if parsed_doc_elements.get('tables') else ""),
-        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False), # Initial guess
-        'ocr_applied': False # Will be set to True if OCR text was actually used
+        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False),
+        'ocr_applied': False
     }
 
     # OS-level metadata (can augment or be overridden by parser_meta)

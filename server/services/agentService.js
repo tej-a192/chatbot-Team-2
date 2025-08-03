@@ -91,11 +91,10 @@ async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt,
         const executedToolNames = [toolCall.tool_name];
         let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
 
-        // If the main tool is RAG and a document is selected, automatically add KG search.
         if (toolCall.tool_name === 'rag_search' && documentContextName) {
             console.log('[AgentService] RAG search triggered. Automatically adding KG search to execution plan.');
             const kgTool = availableTools['kg_search'];
-            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
+            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, requestContext));
             executedToolNames.push('kg_search');
             pipeline += '+kg';
         }

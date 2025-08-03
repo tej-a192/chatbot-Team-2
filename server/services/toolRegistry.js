@@ -50,7 +50,13 @@ const availableTools = {
   rag_search: {
     description: "Searches the content of a specific, user-provided document to answer questions based on its text.",
     execute: async (params, context) => {
-        return await queryPythonRagService(params.query, context.documentContextName, context.filter);
+        return await queryPythonRagService(
+            params.query, 
+            context.documentContextName, 
+            context.userId, // <-- Pass the userId
+            context.criticalThinkingEnabled, // <-- Pass the flag
+            context.filter
+        );
     },
     requiredParams: ['query'],
   },
