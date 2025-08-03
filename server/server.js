@@ -17,8 +17,7 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
-const { connectRedis } = require('./config/redisClient');
-
+const { connectRedis } = require("./config/redisClient");
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -37,7 +36,6 @@ const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
-
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -104,7 +102,7 @@ async function startServer() {
     await performAssetCleanup();
     await checkRagService(pythonRagUrl);
     await connectRedis();
-    
+
     const server = app.listen(port, "0.0.0.0", () => {
       console.log("\n=== Node.js Server Ready ===");
       console.log(`🚀 Server listening on port ${port}`);
