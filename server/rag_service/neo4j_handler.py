@@ -13,7 +13,6 @@ def init_driver():
     if _neo4j_driver is not None:
         try:
             _neo4j_driver.verify_connectivity()
-            # If connected and healthy, try to create the index
             try:
                 with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
                     session.execute_write(_create_fulltext_index_if_not_exists)
@@ -28,10 +27,8 @@ def init_driver():
         _neo4j_driver.verify_connectivity()
         logger.info(f"Neo4j driver initialized. Connected to: {config.NEO4J_URI}")
         
-        # --- IMPORTANT: Call index creation here after successful connection ---
         with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
             session.execute_write(_create_fulltext_index_if_not_exists)
-        # --- END IMPORTANT ---
 
     except Exception as e:
         logger.critical(f"Failed to initialize Neo4j driver: {e}", exc_info=True)
@@ -55,14 +52,11 @@ def _execute_write_tx(tx_function, *args, **kwargs):
 def _create_fulltext_index_if_not_exists(tx):
     index_name = "node_search_index"
     
-    # Check if index already exists
-    # Neo4j 5.x syntax to list indexes. Use `db.indexes()` for older versions.
     result = tx.run(f"SHOW FULLTEXT INDEXES WHERE name = '{index_name}'")
     if result.single():
         logger.info(f"Neo4j: Full-text index '{index_name}' already exists.")
         return
 
-    # If it doesn't exist, create it
     create_query = (
         f"CREATE FULLTEXT INDEX {index_name} "
         f"FOR (n:KnowledgeNode) ON EACH [n.nodeId, n.description] "
@@ -79,8 +73,6 @@ def _create_fulltext_index_if_not_exists(tx):
             logger.error(f"Neo4j: Failed to create full-text index '{index_name}': {e}", exc_info=True)
             raise #
             
-# --- Private Transactional Cypher Functions ---
-# (ingest/delete/add functions are correct and do not need changes)
 def _delete_kg_transactional(tx, user_id, document_name):
     query = "MATCH (n:KnowledgeNode {userId: $userId, documentName: $documentName}) DETACH DELETE n"
     tx.run(query, userId=user_id, documentName=document_name)
@@ -112,7 +104,6 @@ def _add_edges_transactional(tx, edges_param, user_id, document_name):
     result = tx.run(query, edges_data=valid_edges, userId=user_id, documentName=document_name)
     return result.single()[0] if result.peek() else 0
 
-# --- CORRECTED SEARCH AND GET QUERIES ---
 
 def _search_kg_transactional(tx, user_id, document_name, query_text):
     logger.info(f"Neo4j TX: Searching KG for user '{user_id}', doc '{document_name}' with query: '{query_text[:50]}...'")
@@ -129,9 +120,6 @@ def _search_kg_transactional(tx, user_id, document_name, query_text):
     
     results = tx.run(query, userId=user_id, documentName=document_name, query_text=query_text)
     
-    # --- THIS IS THE FIX ---
-    # The f-string was changed to use double quotes on the outside,
-    # so the inner single quotes don't need to be escaped.
     facts = []
     for record in results:
         fact = f"- Concept '{record['nodeId']}': {record['description']}"
@@ -172,7 +160,6 @@ def _get_kg_transactional(tx, user_id, document_name):
 # --- Public Service Functions ---
 def ingest_knowledge_graph(user_id: str, document_name: str, nodes: list, edges: list) -> dict:
     try:
-        _execute_write_tx(_delete_kg_transactional, user_id, document_name)
         nodes_affected = _execute_write_tx(_add_nodes_transactional, nodes, user_id, document_name) if nodes else 0
         edges_affected = _execute_write_tx(_add_edges_transactional, edges, user_id, document_name) if edges else 0
         return {"success": True, "message": "KG ingested.", "nodes_affected": nodes_affected, "edges_affected": edges_affected}

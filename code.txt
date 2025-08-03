@@ -9340,6 +9340,150 @@ export default PodcastGenerator;
 
 ```
 
+`frontend/src/components/analysis/RealtimeKgPanel.jsx`
+
+```javascript
+// frontend/src/components/analysis/RealtimeKgPanel.jsx
+import React, { useEffect, useState, useCallback } from 'react';
+import ReactFlow, { MiniMap, Controls, Background, useNodesState, useEdgesState } from 'reactflow';
+import 'reactflow/dist/style.css';
+import { useAppState } from '../../contexts/AppStateContext.jsx';
+import api from '../../services/api.js';
+import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import IconButton from '../core/IconButton.jsx';
+
+const layoutNodes = (nodes, edges) => {
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const childrenMap = new Map();
+    edges.forEach(edge => {
+        if (!childrenMap.has(edge.source)) childrenMap.set(edge.source, []);
+        childrenMap.get(edge.source).push(edge.target);
+    });
+
+    const positionedNodes = new Set();
+
+    const positionNode = (nodeId, x, level) => {
+        if (positionedNodes.has(nodeId)) return;
+        const node = nodeMap.get(nodeId);
+        if (!node) return;
+        
+        node.position = { x: x + (Math.random() * 50 - 25), y: level * 150 };
+        positionedNodes.add(nodeId);
+        
+        const children = childrenMap.get(nodeId) || [];
+        const childWidth = children.length > 0 ? 300 * children.length : 0;
+        let currentX = x - childWidth / 2 + 150;
+
+        children.forEach(childId => {
+            positionNode(childId, currentX, level + 1);
+            currentX += 300;
+        });
+    };
+    
+    const targetNodes = new Set(edges.map(e => e.target));
+    const rootNodes = nodes.filter(n => !targetNodes.has(n.id));
+    
+    let currentX = 0;
+    rootNodes.forEach(root => {
+        positionNode(root.id, currentX, 0);
+        currentX += (childrenMap.get(root.id)?.length || 1) * 300;
+    });
+
+    return nodes;
+};
+
+const RealtimeKgPanel = () => {
+    const { currentSessionId } = useAppState();
+    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    const fetchAndLayoutGraph = useCallback(async () => {
+        if (!currentSessionId) {
+            setError("No active session found.");
+            setIsLoading(false);
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        try {
+            const graphData = await api.getSessionKnowledgeGraph(currentSessionId);
+            if (graphData && graphData.nodes && graphData.edges) {
+                if (graphData.nodes.length === 0) {
+                     setNodes([]);
+                     setEdges([]);
+                     return;
+                }
+                const reactFlowNodes = graphData.nodes.map(n => ({
+                    id: n.id,
+                    data: { label: n.id },
+                    position: { x: 0, y: 0 }
+                }));
+                const reactFlowEdges = graphData.edges.map((e, i) => ({
+                    id: `e${i}-${e.from}-${e.to}`,
+                    source: e.from,
+                    target: e.to,
+                    label: e.relationship.replace(/_/g, ' '),
+                    animated: true
+                }));
+                
+                const laidOutNodes = layoutNodes(reactFlowNodes, reactFlowEdges);
+                setNodes(laidOutNodes);
+                setEdges(reactFlowEdges);
+            }
+        } catch (err) {
+            setError(err.message || 'Failed to fetch knowledge graph.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, [currentSessionId, setNodes, setEdges]);
+
+    useEffect(() => {
+        fetchAndLayoutGraph();
+    }, [fetchAndLayoutGraph]);
+
+    // The component now returns the graph canvas directly, without extra headers or borders.
+    return (
+        <div className="h-full w-full relative bg-gray-50 dark:bg-gray-800/50 rounded-md">
+            {isLoading && <Loader2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary z-10" />}
+            {error && <div className="p-4 text-center text-red-500 text-sm"><AlertTriangle className="mx-auto mb-2"/>{error}</div>}
+            
+            {!isLoading && !error && nodes.length === 0 && (
+                <div className="flex items-center justify-center h-full text-center text-text-muted-light dark:text-text-muted-dark">
+                    <p>No concepts have been mapped from this conversation yet. <br/> Continue chatting to build the map!</p>
+                </div>
+            )}
+
+            {!isLoading && !error && nodes.length > 0 && (
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    fitView
+                    className="bg-background-light dark:bg-background-dark"
+                >
+                    <Controls />
+                    <MiniMap />
+                    <Background variant="dots" gap={12} size={1} />
+                </ReactFlow>
+            )}
+             <IconButton 
+                icon={RefreshCw} 
+                onClick={fetchAndLayoutGraph} 
+                size="sm" 
+                title="Refresh Graph" 
+                isLoading={isLoading}
+                className="absolute top-2 right-2 z-10 bg-surface-light dark:bg-surface-dark shadow-md"
+            />
+        </div>
+    );
+};
+
+export default RealtimeKgPanel;
+```
+
 `frontend/src/components/analysis/RightPanel.jsx`
 
 ```javascript
@@ -12908,16 +13052,15 @@ export default RightCollapsedNav;
 `frontend/src/components/layout/RightPanel.jsx`
 
 ```javascript
-
-
 // frontend/src/components/layout/RightPanel.jsx
 import React, { useState } from 'react';
 import { useAppState } from '../../contexts/AppStateContext';
 import AnalysisToolRunner from '../analysis/AnalysisToolRunner.jsx';
 import PodcastGenerator from '../analysis/PodcastGenerator.jsx';
 import KnowledgeGraphViewer from '../analysis/KnowledgeGraphViewer.jsx';
+import RealtimeKgPanel from '../analysis/RealtimeKgPanel.jsx';
 import api from '../../services/api.js';
-import { PanelRightClose, ChevronDown, ChevronUp, Telescope, Radio, BrainCircuit } from 'lucide-react';
+import { PanelRightClose, ChevronDown, ChevronUp, Telescope, Radio, BrainCircuit, Share2 } from 'lucide-react';
 import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import Button from '../core/Button.jsx';
@@ -12927,7 +13070,11 @@ import toast from 'react-hot-toast';
 function RightPanel() {
     const { setIsRightPanelOpen, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const [isAnalyzerOpen, setIsAnalyzerOpen] = useState(true);
+    
+    // --- THIS IS THE NEW STATE FOR THE LIVE KG MODAL ---
+    const [isLiveKgModalOpen, setIsLiveKgModalOpen] = useState(false);
 
+    // State for the static document KG modal (no change)
     const [isKgModalOpen, setIsKgModalOpen] = useState(false);
     const [kgData, setKgData] = useState(null);
     const [isLoadingKg, setIsLoadingKg] = useState(false);
@@ -12960,58 +13107,83 @@ function RightPanel() {
     return (
         <>
             <div className="flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-border-light dark:border-border-dark">
-                    <h2 className="text-base font-semibold">Advanced Analyzer</h2>
+                <div className="flex items-center justify-between pb-2 border-b border-border-light dark:border-border-dark">
+                    <h2 className="text-base font-semibold">Advanced Tools</h2>
                     <IconButton
                         icon={PanelRightClose}
                         onClick={() => setIsRightPanelOpen(false)}
-                        title="Close Analyzer Panel"
+                        title="Close Panel"
                         variant="ghost" size="sm"
                         className="text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light"
                     />
                 </div>
                 
-                {!currentSelectedDocFilename ? (
-                    <div className="p-4 text-xs text-center text-text-muted-light dark:text-text-muted-dark bg-gray-50 dark:bg-gray-800 rounded-md border border-dashed border-border-light dark:border-border-dark">
-                        <p>Select a document from the left panel to enable analysis and generation tools.</p>
-                    </div>
-                ) : (
-                    <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-1">
-                        <div>
-                            <button onClick={() => setIsAnalyzerOpen(!isAnalyzerOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark">
-                                <span className="flex items-center gap-2"><Telescope size={16} /> Analysis Tools</span>
-                                {isAnalyzerOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                            </button>
-                            {isAnalyzerOpen && (
-                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="mt-2 space-y-3 overflow-hidden">
-                                    <AnalysisToolRunner toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
-                                    <AnalysisToolRunner toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
-                                    <AnalysisToolRunner toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
-                                </motion.div>
-                            )}
+                <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-1 pt-4">
+                    {/* --- THIS IS THE NEW BUTTON TO LAUNCH THE MODAL --- */}
+                    <div className="card-base p-3">
+                         <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                            <Share2 size={16} className="text-primary dark:text-primary-light" />
+                            <span>Live Concept Map</span>
                         </div>
-                        <div>
-                            <div className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
-                               <span className="flex items-center gap-2"><Radio size={16} /> Content Exporters & Synthesis</span>
-                            </div>
-                             <div className="mt-2 space-y-3">
-                                <PodcastGenerator selectedDocumentFilename={currentSelectedDocFilename} />
-                                <Button onClick={handleVisualizeKg} variant="outline" size="sm" fullWidth isLoading={isLoadingKg} leftIcon={<BrainCircuit size={16} />}>
-                                    Visualize Knowledge Graph
-                                </Button>
-                            </div>
-                        </div>
+                        <p className="text-xs text-text-muted-light dark:text-text-muted-dark mb-3">
+                            Visualize concepts from your current conversation in real-time.
+                        </p>
+                        <Button onClick={() => setIsLiveKgModalOpen(true)} variant="primary" size="sm" fullWidth leftIcon={<Share2 size={16} />}>
+                            Show Live Map
+                        </Button>
                     </div>
-                )}
+
+                    {/* --- EXISTING STATIC ANALYSIS TOOLS (Conditional) --- */}
+                    {currentSelectedDocFilename ? (
+                        <>
+                            <div>
+                                <button onClick={() => setIsAnalyzerOpen(!isAnalyzerOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark">
+                                    <span className="flex items-center gap-2"><Telescope size={16} /> Document Analysis</span>
+                                    {isAnalyzerOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                </button>
+                                {isAnalyzerOpen && (
+                                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="mt-2 space-y-3 overflow-hidden">
+                                        <AnalysisToolRunner toolType="faq" title="FAQ Generator" iconName="HelpCircle" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
+                                        <AnalysisToolRunner toolType="topics" title="Key Topics Extractor" iconName="Tags" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
+                                        <AnalysisToolRunner toolType="mindmap" title="Mind Map Creator" iconName="GitFork" selectedDocumentFilename={currentSelectedDocFilename} isTargetAdminDoc={isTargetAdminSubject} />
+                                    </motion.div>
+                                )}
+                            </div>
+                            <div>
+                                <div className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
+                                   <span className="flex items-center gap-2"><Radio size={16} /> Content Exporters</span>
+                                </div>
+                                 <div className="mt-2 space-y-3">
+                                    <PodcastGenerator selectedDocumentFilename={currentSelectedDocFilename} />
+                                    <Button onClick={handleVisualizeKg} variant="outline" size="sm" fullWidth isLoading={isLoadingKg} leftIcon={<BrainCircuit size={16} />}>
+                                        Visualize Full Document KG
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                         <div className="p-4 mt-4 text-xs text-center text-text-muted-light dark:text-text-muted-dark bg-gray-50 dark:bg-gray-800 rounded-md border border-dashed border-border-light dark:border-border-dark">
+                            <p>Select a document from the left panel to enable static analysis tools.</p>
+                        </div>
+                    )}
+                </div>
             </div>
 
-            <Modal isOpen={isKgModalOpen} onClose={() => setIsKgModalOpen(false)} title={`Knowledge Graph: ${currentSelectedDocFilename}`} size="5xl">
+            {/* --- MODAL FOR THE LIVE KG --- */}
+            <Modal isOpen={isLiveKgModalOpen} onClose={() => setIsLiveKgModalOpen(false)} title="Live Concept Map (From Conversation)" size="5xl">
+                <div className="h-[70vh]">
+                   <RealtimeKgPanel />
+                </div>
+            </Modal>
+
+            {/* --- MODAL FOR STATIC DOCUMENT KG (No change) --- */}
+            <Modal isOpen={isKgModalOpen} onClose={() => setIsKgModalOpen(false)} title={`Full KG: ${currentSelectedDocFilename}`} size="5xl">
                 <KnowledgeGraphViewer graphData={isLoadingKg ? null : kgData} />
             </Modal>
         </>
     );
 }
-export default RightPanel;
+export default RightPanel; 
 ```
 
 `frontend/src/components/layout/TopNav.jsx`
@@ -16321,8 +16493,8 @@ const api = {
     return response.data;
   },
   addUrlSource: async (url) => {
-    const response = await apiClient.post('/knowledge-sources', {
-      type: 'url',
+    const response = await apiClient.post("/knowledge-sources", {
+      type: "url",
       content: url,
     });
     return response.data; // Returns the initial source object with "processing" status
@@ -16435,6 +16607,12 @@ const api = {
     );
     return response.data;
   },
+  getSessionKnowledgeGraph: async (sessionId) => {
+    const response = await apiClient.get(
+      `/kg/session/${encodeURIComponent(sessionId)}`
+    );
+    return response.data;
+  },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
     return response.data; // The data should be { results: [...] } or { compilationError: "..." }
@@ -16455,26 +16633,34 @@ const api = {
     return response.data; // Should be { explanation: "..." }
   },
   getRecommendations: async (sessionId) => {
-    const response = await apiClient.get(`/learning/recommendations/${sessionId}`);
+    const response = await apiClient.get(
+      `/learning/recommendations/${sessionId}`
+    );
     return response.data; // Should be { recommendations: [...] }
   },
 
   findDocumentForTopic: async (topic) => {
-    const response = await apiClient.post('/learning/find-document', { topic });
+    const response = await apiClient.post("/learning/find-document", { topic });
     return response.data; // Should be { documentName: "..." }
   },
   getLearningPaths: async () => {
-    const response = await apiClient.get('/learning/paths');
+    const response = await apiClient.get("/learning/paths");
     return response.data; // Should be an array of learning path objects
   },
 
   generateLearningPath: async (goal, context = null) => {
-    const response = await apiClient.post('/learning/paths/generate', { goal, context });
+    const response = await apiClient.post("/learning/paths/generate", {
+      goal,
+      context,
+    });
     return response.data; // Should be the newly created learning path object
   },
 
   updateModuleStatus: async (pathId, moduleId, status) => {
-    const response = await apiClient.put(`/learning/paths/${pathId}/modules/${moduleId}`, { status });
+    const response = await apiClient.put(
+      `/learning/paths/${pathId}/modules/${moduleId}`,
+      { status }
+    );
     return response.data; // Should be the entire updated learning path object
   },
 
@@ -16492,10 +16678,11 @@ const api = {
     return response.data; // Should be { quiz: [...] }
   },
   analyzePrompt: async (promptText) => {
-    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
+    const response = await apiClient.post("/chat/analyze-prompt", {
+      prompt: promptText,
+    });
     return response.data; // Expects { improvedPrompt, explanation }
   },
-
 };
 
 export default api;
@@ -19646,23 +19833,35 @@ def generate_quiz_route():
 
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
-    current_app.logger.info("--- /query Request (RAG Search Only) ---")
+    current_app.logger.info("--- /query Request (RAG + KG Search) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     
     query_text = data.get('query')
-    user_id = data.get('user_id') # user_id is mainly for logging here
+    user_id = data.get('user_id')
+    document_context_name = data.get('documentContextName')
+    use_kg = data.get('use_kg_critical_thinking', False) 
     
     if not query_text or not user_id:
         return create_error_response("Missing 'query' or 'user_id'", 400)
 
     try:
         k = data.get('k', 5)
-        document_context_name = data.get('documentContextName')
         
+        facts_from_kg = ""
+        if use_kg and document_context_name:
+            current_app.logger.info(f"KG search is ENABLED for doc '{document_context_name}'.")
+            try:
+                facts_from_kg = neo4j_handler.search_knowledge_graph(user_id, document_context_name, query_text)
+            except Exception as e_kg:
+                logger.error(f"Error during KG search part of RAG query: {e_kg}", exc_info=True)
+                facts_from_kg = "Note: An error occurred while searching the knowledge graph."
+        else:
+            current_app.logger.info("KG search is DISABLED for this query.")
+
         must_conditions = []
         if document_context_name:
-            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
+            current_app.logger.info(f"Applying document context filter for vector search: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
                 key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
@@ -19670,24 +19869,28 @@ def search_qdrant_documents():
         
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
-        retrieved_docs, snippet, docs_map = vector_service.search_documents(
+        retrieved_docs, snippet_from_vector, docs_map = vector_service.search_documents(
             query=query_text, k=k, filter_conditions=qdrant_filters
         )
         
+        final_snippet = ""
+        if facts_from_kg and "No specific facts were found" not in facts_from_kg:
+            final_snippet += facts_from_kg + "\n\n---\n\n"
+        
+        final_snippet += snippet_from_vector
+
         response_payload = {
             "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
-            "formatted_context_snippet": snippet,
+            "formatted_context_snippet": final_snippet.strip(), 
             "retrieved_documents_map": docs_map,
         }
         
-        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
+        current_app.logger.info(f"RAG+KG search successful. Returning {len(retrieved_docs)} documents.")
         return jsonify(response_payload), 200
         
     except Exception as e:
-        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
+        logger.error(f"Error in /query (RAG+KG search): {e}", exc_info=True)
         return create_error_response(f"Query failed: {str(e)}", 500)
-
-# All other endpoints remain unchanged and are included for completeness
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -19886,8 +20089,16 @@ def add_or_update_kg_route():
 def get_kg_route(user_id, document_name):
     try:
         kg_data = neo4j_handler.get_knowledge_graph(user_id, document_name)
-        return jsonify(kg_data) if kg_data else create_error_response("KG not found", 404)
-    except Exception as e: return create_error_response(f"KG retrieval failed: {str(e)}", 500)
+        
+        if kg_data is None:
+            logger.info(f"No KG found for user '{user_id}', doc '{document_name}'. Returning empty graph.")
+            return jsonify({"nodes": [], "edges": []}), 200
+        
+        return jsonify(kg_data), 200
+
+    except Exception as e: 
+        return create_error_response(f"KG retrieval failed: {str(e)}", 500)
+
 
 @app.route('/kg/<user_id>/<path:document_name>', methods=['DELETE'])
 def delete_kg_route(user_id, document_name):
@@ -23184,6 +23395,7 @@ const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
+const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
 const router = express.Router();
 
 
@@ -23322,9 +23534,11 @@ router.post('/message', async (req, res) => {
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
+            if (finalBotMessageObject) {
+                extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
+            }
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
             res.end();
-
         } else {
             console.log(`[Chat Route] Diverting to standard Agentic Service.`);
 
@@ -23356,6 +23570,7 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
+            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
         }
 
     } catch (error) {
@@ -24322,6 +24537,7 @@ module.exports = router;
 `server/routes/kg.js`
 
 ```javascript
+
 // server/routes/kg.js
 const express = require('express');
 const router = express.Router();
@@ -24394,6 +24610,44 @@ router.get('/visualize/:documentName', async (req, res) => {
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to retrieve knowledge graph.";
         console.error(`[KG Visualize] Error for '${documentName}': ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ error: errorMsg });
+    }
+});
+
+
+// --- NEW ROUTE ---
+// @route   GET /api/kg/session/:sessionId
+// @desc    Get the knowledge graph for a specific chat session
+// @access  Private
+router.get('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id.toString();
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ error: "Knowledge Graph service is not configured." });
+    }
+    
+    // The sessionId is used as the document_name for the KG
+    const getKgUrl = `${pythonServiceUrl}/kg/${userId}/${encodeURIComponent(sessionId)}`;
+
+    try {
+        console.log(`[KG Route] Proxying request to Python service to get KG for session: ${sessionId}`);
+        const pythonResponse = await axios.get(getKgUrl, { timeout: 30000 });
+        
+        if (pythonResponse.data) {
+            res.status(200).json(pythonResponse.data);
+        } else {
+            // It's not an error if a KG doesn't exist yet, just return empty data
+            res.status(200).json({ nodes: [], edges: [] });
+        }
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            // Handle case where Python service returns 404 if KG doesn't exist
+            return res.status(200).json({ nodes: [], edges: [] });
+        }
+        const errorMsg = error.response?.data?.error || error.message || "Failed to retrieve knowledge graph.";
+        console.error(`[KG Route] Error for session '${sessionId}': ${errorMsg}`);
         res.status(error.response?.status || 500).json({ error: errorMsg });
     }
 });
@@ -25768,116 +26022,160 @@ function parseToolCall(responseText) {
     }
 }
 
-async function processAgenticRequest(userQuery, chatHistory, clientSystemPrompt, requestContext) {
-    const { llmProvider, ollamaModel, userId, ollamaUrl, documentContextName, apiKey } = requestContext;
-    
-    const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
-    const llmOptions = {
-        ...(llmProvider === 'ollama' && { model: ollamaModel }),
-        apiKey: apiKey,
-        ollamaUrl: ollamaUrl
+async function processAgenticRequest(
+  userQuery,
+  chatHistory,
+  clientSystemPrompt,
+  requestContext
+) {
+  const {
+    llmProvider,
+    ollamaModel,
+    userId,
+    ollamaUrl,
+    documentContextName,
+    apiKey,
+  } = requestContext;
+
+  const llmService = llmProvider === "ollama" ? ollamaService : geminiService;
+  const llmOptions = {
+    ...(llmProvider === "ollama" && { model: ollamaModel }),
+    apiKey: apiKey,
+    ollamaUrl: ollamaUrl,
+  };
+
+  const modelContext = createModelContext({ availableTools });
+  const agenticContext = createAgenticContext({
+    systemPrompt: clientSystemPrompt,
+  });
+  const routerSystemPrompt = createAgenticSystemPrompt(
+    modelContext,
+    agenticContext,
+    { userQuery, ...requestContext }
+  );
+
+  console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
+  const routerResponseText = await llmService.generateContentWithHistory(
+    [],
+    "Analyze the query and decide on an action.",
+    routerSystemPrompt,
+    llmOptions
+  );
+  const toolCall = parseToolCall(routerResponseText);
+
+  if (requestContext.forceSimple === true || !toolCall || !toolCall.tool_name) {
+    if (requestContext.forceSimple === true) {
+      console.log(
+        "[AgentService] Skipping router/tool logic due to forceSimple flag. Responding directly."
+      );
+    } else {
+      console.log(
+        "[AgentService] Router decided a direct answer is best (no tool call). Responding directly."
+      );
+    }
+
+    const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
+    const userPrompt = userQuery;
+    const directAnswer = await llmService.generateContentWithHistory(
+      chatHistory,
+      userPrompt,
+      finalSystemPrompt,
+      llmOptions
+    );
+
+    const thinkingMatch = directAnswer.match(
+      /<thinking>([\s\S]*?)<\/thinking>/i
+    );
+    const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+    const mainContent = thinking
+      ? directAnswer.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, "").trim()
+      : directAnswer;
+
+    const pipelineSource = requestContext.forceSimple
+      ? `${requestContext.llmProvider}-agent-direct-bypass`
+      : `${requestContext.llmProvider}-agent-direct-no-tool`;
+
+    return {
+      finalAnswer: mainContent,
+      thinking: thinking,
+      references: [],
+      sourcePipeline: pipelineSource,
     };
+  }
 
-    const modelContext = createModelContext({ availableTools });
-    const agenticContext = createAgenticContext({ systemPrompt: clientSystemPrompt });
-    const routerSystemPrompt = createAgenticSystemPrompt(modelContext, agenticContext, { userQuery, ...requestContext });
+  console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
+  const mainTool = availableTools[toolCall.tool_name];
+  if (!mainTool) {
+    return {
+      finalAnswer:
+        "I tried to use a tool that doesn't exist. Please try again.",
+      references: [],
+      sourcePipeline: "agent-error-unknown-tool",
+    };
+  }
 
-    console.log(`[AgentService] Performing Router call using ${llmProvider}...`);
-    const routerResponseText = await llmService.generateContentWithHistory([], "Analyze the query and decide on an action.", routerSystemPrompt, llmOptions);
-    console.log("ROuter Response : ", routerResponseText);
-    const toolCall = parseToolCall(routerResponseText);
+  try {
+    const toolResult = await mainTool.execute(
+      toolCall.parameters,
+      requestContext
+    );
 
-    // --- DIRECT ANSWER PATH (Corrected Logic) ---
-    if (requestContext.forceSimple === true || !toolCall || !toolCall.tool_name) {
-        if (requestContext.forceSimple === true) {
-            console.log('[AgentService] Skipping router/tool logic due to forceSimple flag. Responding directly.');
-        } else {
-            console.log('[AgentService] Router decided a direct answer is best (no tool call). Responding directly.');
-        }
-
-        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
-        // NOTE: The original `fullUserQuery` was combining the system prompt and user query, 
-        // which might be redundant if the LLM service already handles system prompts separately.
-        // Let's pass the user query directly, as is standard.
-        const userPrompt = userQuery; 
-        const directAnswer = await llmService.generateContentWithHistory(
-            chatHistory,
-            userPrompt,
-            // We pass the client's system prompt here, or a default if none is provided.
-            finalSystemPrompt,
-            llmOptions
-        );
-
-        const thinkingMatch = directAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-        const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
-        const mainContent = thinking ? directAnswer.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : directAnswer;
-        
-        // Determine the correct pipeline source
-        const pipelineSource = requestContext.forceSimple 
-            ? `${requestContext.llmProvider}-agent-direct-bypass`
-            : `${requestContext.llmProvider}-agent-direct-no-tool`;
-
-        return {
-            finalAnswer: mainContent,
-            thinking: thinking,
-            references: [],
-            sourcePipeline: pipelineSource,
-        };
+    let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
+    if (
+      toolCall.tool_name === "rag_search" &&
+      requestContext.criticalThinkingEnabled
+    ) {
+      pipeline += "+kg_enhanced";
     }
 
+    console.log(
+      `[AgentService] Performing Synthesizer call using ${llmProvider}...`
+    );
 
+    const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
+    const synthesizerUserQuery = createSynthesizerPrompt(
+      userQuery,
+      toolResult.toolOutput,
+      toolCall.tool_name
+    );
 
-    // --- TOOL-BASED ANSWER PATH (With KG Enhancement) ---
-    console.log(`[AgentService] Decision: Tool Call -> ${toolCall.tool_name}`);
-    const mainTool = availableTools[toolCall.tool_name];
-    if (!mainTool) {
-        return { finalAnswer: "I tried to use a tool that doesn't exist. Please try again.", references: [], sourcePipeline: 'agent-error-unknown-tool' };
-    }
+    const finalAnswerWithThinking = await llmService.generateContentWithHistory(
+      chatHistory,
+      synthesizerUserQuery,
+      finalSystemPrompt,
+      llmOptions
+    );
 
-    try {
-        const toolExecutionPromises = [mainTool.execute(toolCall.parameters, requestContext)];
-        const executedToolNames = [toolCall.tool_name];
-        let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
+    const thinkingMatch = finalAnswerWithThinking.match(
+      /<thinking>([\s\S]*?)<\/thinking>/i
+    );
+    const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+    const finalAnswer = thinking
+      ? finalAnswerWithThinking
+          .replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, "")
+          .trim()
+      : finalAnswerWithThinking;
 
-        // If the main tool is RAG and a document is selected, automatically add KG search.
-        if (toolCall.tool_name === 'rag_search' && documentContextName) {
-            console.log('[AgentService] RAG search triggered. Automatically adding KG search to execution plan.');
-            const kgTool = availableTools['kg_search'];
-            toolExecutionPromises.push(kgTool.execute(toolCall.parameters, { ...requestContext, userId }));
-            executedToolNames.push('kg_search');
-            pipeline += '+kg';
-        }
-
-        const toolResults = await Promise.all(toolExecutionPromises);
-        
-        const combinedToolOutput = toolResults.map((result, index) => 
-            `--- CONTEXT FROM: ${executedToolNames[index].toUpperCase()} ---\n${result.toolOutput}`
-        ).join('\n\n');
-        const combinedReferences = toolResults.flatMap(result => result.references || []);
-
-        console.log(`[AgentService] Performing Synthesizer call using ${llmProvider}...`);
-        
-        const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
-        const synthesizerUserQuery = createSynthesizerPrompt(userQuery, combinedToolOutput, toolCall.tool_name);
-        
-        const finalAnswerWithThinking = await llmService.generateContentWithHistory(chatHistory, synthesizerUserQuery, finalSystemPrompt, llmOptions);
-        
-        // Extract thinking from synthesizer response
-        const thinkingMatch = finalAnswerWithThinking.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-        const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
-        const finalAnswer = thinking ? finalAnswerWithThinking.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim() : finalAnswerWithThinking;
-
-        return {
-            finalAnswer,
-            thinking,
-            references: combinedReferences,
-            sourcePipeline: pipeline,
-        };
-    } catch (error) {
-        console.error(`[AgentService] Error executing tool '${toolCall.tool_name}':`, error);
-        return { finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`, references: [], thinking: null, sourcePipeline: `agent-error-tool-failed` };
-    }
+    return {
+      finalAnswer,
+      thinking,
+      references: toolResult.references || [],
+      sourcePipeline: pipeline,
+    };
+  } catch (error) {
+    console.error(
+      `[AgentService] Error executing tool '${toolCall.tool_name}':`,
+      error
+    );
+    return {
+      finalAnswer: `I tried to use a tool, but it failed. Error: ${error.message}.`,
+      references: [],
+      thinking: null,
+      sourcePipeline: `agent-error-tool-failed`,
+    };
+  }
 }
+
 
 module.exports = {
     processAgenticRequest,
@@ -26141,6 +26439,109 @@ module.exports = {
   DEFAULT_MAX_OUTPUT_TOKENS_KG,
 };
 
+```
+
+`server/services/kgExtractionService.js`
+
+```javascript
+// server/services/kgExtractionService.js
+const { decrypt } = require("../utils/crypto");
+const User = require("../models/User");
+const geminiService = require("./geminiService");
+const ollamaService = require("./ollamaService");
+const axios = require("axios");
+const path = require("path");
+
+const KG_EXTRACTION_PROMPT = `
+You are an expert data architect. Your task is to analyze the provided text and extract a detailed knowledge graph of the key concepts and their relationships.
+
+**INSTRUCTIONS:**
+1.  **Identify Entities/Nodes**: Identify the top 5-7 most important entities (concepts, technologies, processes). These will be your nodes.
+2.  **Identify Relationships/Edges**: Determine how these nodes are connected with descriptive verb phrases (e.g., 'IS_A', 'USES', 'RESULTS_IN').
+3.  **Format as JSON**: Your entire output MUST be a single, valid JSON object with "nodes" and "edges".
+    -   Nodes: \`[{"id": "NodeID", "description": "A brief, one-sentence description."}]\`
+    -   Edges: \`[{"from": "SourceNodeID", "to": "TargetNodeID", "relationship": "RELATIONSHIP_TYPE"}]\`
+4.  **Be Concise**: Focus only on the most critical concepts from the provided text.
+
+---
+**TEXT TO ANALYZE:**
+"{textToAnalyze}"
+---
+
+**FINAL KNOWLEDGE GRAPH JSON (start immediately with \`{\`):**
+`;
+
+async function extractAndStoreKgFromText(text, sessionId, userId, llmConfig) {
+  const logPrefix = `[KG Extraction Service] Session: ${sessionId}`;
+  try {
+   
+    const { preferredLlmProvider, ollamaUrl, ollamaModel, apiKey } = llmConfig; // Use passed-in config
+
+    const llmService =
+      preferredLlmProvider === "ollama" ? ollamaService : geminiService;
+
+    if (preferredLlmProvider === "gemini" && !apiKey) {
+      throw new Error(
+        "User has selected Gemini but has no API key configured."
+      );
+    }
+
+    const prompt = KG_EXTRACTION_PROMPT.replace(
+      "{textToAnalyze}",
+      text.substring(0, 4000)
+    );
+    const llmOptions = {
+      apiKey,
+      ollamaUrl,
+      model: ollamaModel,
+      temperature: 0.2,
+    };
+
+    console.log(`${logPrefix} Calling LLM to extract KG entities...`);
+    const responseText = await llmService.generateContentWithHistory(
+      [],
+      prompt,
+      null,
+      llmOptions
+    );
+
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch)
+      throw new Error("LLM did not return a valid JSON object for the KG.");
+
+    const graphData = JSON.parse(jsonMatch[0]);
+    if (!graphData.nodes || !graphData.edges)
+      throw new Error("LLM JSON is missing 'nodes' or 'edges'.");
+
+    console.log(
+      `${logPrefix} Extracted ${graphData.nodes.length} nodes. Sending to Python for ingestion.`
+    );
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl)
+      throw new Error("Python service URL not configured.");
+
+    await axios.post(
+      `${pythonServiceUrl}/kg`,
+      {
+        userId: userId.toString(),
+        originalName: sessionId,
+        nodes: graphData.nodes,
+        edges: graphData.edges,
+      },
+      { timeout: 60000 }
+    );
+
+    console.log(`${logPrefix} KG ingestion successful.`);
+  } catch (error) {
+    console.error(
+      `${logPrefix} Failed to extract and store KG:`,
+      error.message
+    );
+  }
+}
+
+module.exports = { extractAndStoreKgFromText };
 ```
 
 `server/services/kgService.js`

@@ -375,23 +375,35 @@ def generate_quiz_route():
 
 @app.route('/query', methods=['POST'])
 def search_qdrant_documents():
-    current_app.logger.info("--- /query Request (RAG Search Only) ---")
+    current_app.logger.info("--- /query Request (RAG + KG Search) ---")
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     
     query_text = data.get('query')
-    user_id = data.get('user_id') # user_id is mainly for logging here
+    user_id = data.get('user_id')
+    document_context_name = data.get('documentContextName')
+    use_kg = data.get('use_kg_critical_thinking', False) 
     
     if not query_text or not user_id:
         return create_error_response("Missing 'query' or 'user_id'", 400)
 
     try:
         k = data.get('k', 5)
-        document_context_name = data.get('documentContextName')
         
+        facts_from_kg = ""
+        if use_kg and document_context_name:
+            current_app.logger.info(f"KG search is ENABLED for doc '{document_context_name}'.")
+            try:
+                facts_from_kg = neo4j_handler.search_knowledge_graph(user_id, document_context_name, query_text)
+            except Exception as e_kg:
+                logger.error(f"Error during KG search part of RAG query: {e_kg}", exc_info=True)
+                facts_from_kg = "Note: An error occurred while searching the knowledge graph."
+        else:
+            current_app.logger.info("KG search is DISABLED for this query.")
+
         must_conditions = []
         if document_context_name:
-            current_app.logger.info(f"Applying document context filter: '{document_context_name}'")
+            current_app.logger.info(f"Applying document context filter for vector search: '{document_context_name}'")
             must_conditions.append(qdrant_models.FieldCondition(
                 key="file_name",
                 match=qdrant_models.MatchValue(value=document_context_name)
@@ -399,24 +411,28 @@ def search_qdrant_documents():
         
         qdrant_filters = qdrant_models.Filter(must=must_conditions) if must_conditions else None
         
-        retrieved_docs, snippet, docs_map = vector_service.search_documents(
+        retrieved_docs, snippet_from_vector, docs_map = vector_service.search_documents(
             query=query_text, k=k, filter_conditions=qdrant_filters
         )
         
+        final_snippet = ""
+        if facts_from_kg and "No specific facts were found" not in facts_from_kg:
+            final_snippet += facts_from_kg + "\n\n---\n\n"
+        
+        final_snippet += snippet_from_vector
+
         response_payload = {
             "retrieved_documents_list": [d.to_dict() for d in retrieved_docs],
-            "formatted_context_snippet": snippet,
+            "formatted_context_snippet": final_snippet.strip(), 
             "retrieved_documents_map": docs_map,
         }
         
-        current_app.logger.info(f"RAG search successful. Returning {len(retrieved_docs)} documents.")
+        current_app.logger.info(f"RAG+KG search successful. Returning {len(retrieved_docs)} documents.")
         return jsonify(response_payload), 200
         
     except Exception as e:
-        logger.error(f"Error in /query (RAG search): {e}", exc_info=True)
+        logger.error(f"Error in /query (RAG+KG search): {e}", exc_info=True)
         return create_error_response(f"Query failed: {str(e)}", 500)
-
-# All other endpoints remain unchanged and are included for completeness
 
 @app.route('/health', methods=['GET'])
 def health_check():
