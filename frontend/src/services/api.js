@@ -103,8 +103,8 @@ const api = {
     return response.data;
   },
   addUrlSource: async (url) => {
-    const response = await apiClient.post('/knowledge-sources', {
-      type: 'url',
+    const response = await apiClient.post("/knowledge-sources", {
+      type: "url",
       content: url,
     });
     return response.data; // Returns the initial source object with "processing" status
@@ -217,6 +217,12 @@ const api = {
     );
     return response.data;
   },
+  getSessionKnowledgeGraph: async (sessionId) => {
+    const response = await apiClient.get(
+      `/kg/session/${encodeURIComponent(sessionId)}`
+    );
+    return response.data;
+  },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
     return response.data; // The data should be { results: [...] } or { compilationError: "..." }
@@ -237,26 +243,34 @@ const api = {
     return response.data; // Should be { explanation: "..." }
   },
   getRecommendations: async (sessionId) => {
-    const response = await apiClient.get(`/learning/recommendations/${sessionId}`);
+    const response = await apiClient.get(
+      `/learning/recommendations/${sessionId}`
+    );
     return response.data; // Should be { recommendations: [...] }
   },
 
   findDocumentForTopic: async (topic) => {
-    const response = await apiClient.post('/learning/find-document', { topic });
+    const response = await apiClient.post("/learning/find-document", { topic });
     return response.data; // Should be { documentName: "..." }
   },
   getLearningPaths: async () => {
-    const response = await apiClient.get('/learning/paths');
+    const response = await apiClient.get("/learning/paths");
     return response.data; // Should be an array of learning path objects
   },
 
   generateLearningPath: async (goal, context = null) => {
-    const response = await apiClient.post('/learning/paths/generate', { goal, context });
+    const response = await apiClient.post("/learning/paths/generate", {
+      goal,
+      context,
+    });
     return response.data; // Should be the newly created learning path object
   },
 
   updateModuleStatus: async (pathId, moduleId, status) => {
-    const response = await apiClient.put(`/learning/paths/${pathId}/modules/${moduleId}`, { status });
+    const response = await apiClient.put(
+      `/learning/paths/${pathId}/modules/${moduleId}`,
+      { status }
+    );
     return response.data; // Should be the entire updated learning path object
   },
 
@@ -274,10 +288,11 @@ const api = {
     return response.data; // Should be { quiz: [...] }
   },
   analyzePrompt: async (promptText) => {
-    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
+    const response = await apiClient.post("/chat/analyze-prompt", {
+      prompt: promptText,
+    });
     return response.data; // Expects { improvedPrompt, explanation }
   },
-
 };
 
 export default api;

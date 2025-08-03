@@ -615,8 +615,16 @@ def add_or_update_kg_route():
 def get_kg_route(user_id, document_name):
     try:
         kg_data = neo4j_handler.get_knowledge_graph(user_id, document_name)
-        return jsonify(kg_data) if kg_data else create_error_response("KG not found", 404)
-    except Exception as e: return create_error_response(f"KG retrieval failed: {str(e)}", 500)
+        
+        if kg_data is None:
+            logger.info(f"No KG found for user '{user_id}', doc '{document_name}'. Returning empty graph.")
+            return jsonify({"nodes": [], "edges": []}), 200
+        
+        return jsonify(kg_data), 200
+
+    except Exception as e: 
+        return create_error_response(f"KG retrieval failed: {str(e)}", 500)
+
 
 @app.route('/kg/<user_id>/<path:document_name>', methods=['DELETE'])
 def delete_kg_route(user_id, document_name):
