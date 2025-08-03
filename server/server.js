@@ -17,8 +17,7 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
-const { connectRedis } = require('./config/redisClient');
-
+const { connectRedis } = require("./config/redisClient");
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -105,7 +104,7 @@ async function startServer() {
     await performAssetCleanup();
     await checkRagService(pythonRagUrl);
     await connectRedis();
-    
+
     const server = app.listen(port, "0.0.0.0", () => {
       console.log("\n=== Node.js Server Ready ===");
       console.log(`🚀 Server listening on port ${port}`);

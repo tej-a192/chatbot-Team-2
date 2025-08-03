@@ -32,6 +32,7 @@
     "react-resizable-panels": "^3.0.3",
     "react-router-dom": "^7.6.2",
     "react-vis-network-graph": "^3.0.1",
+    "reactflow": "^11.11.4",
     "save-svg-as-png": "^1.4.17",
     "svg-pan-zoom": "^3.6.2",
     "uuid": "^9.0.1",

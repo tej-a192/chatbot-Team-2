@@ -460,7 +460,7 @@ const createAgenticSystemPrompt = (modelContext, agenticContext, requestContext)
   } else if (requestContext.isAcademicSearchEnabled) {
       activeModeInstructions = `**CURRENT MODE: Academic Search.** The user has manually enabled academic search. Your decision MUST be 'academic_search'. This is not optional.`;
   } else if (requestContext.documentContextName) {
-      activeModeInstructions = `**CURRENT MODE: Document RAG.** A document named "${requestContext.documentContextName}" is pre-selected as the primary context. First, evaluate if the user's query is directly related to the content of this document. If it is, your decision MUST be 'rag_search'. If the query is unrelated to the document (e.g., a general knowledge question, a request for real-time information), you MUST ignore the document and choose a more appropriate tool like 'direct_answer' or 'web_search'.`;
+      activeModeInstructions = `**CURRENT MODE: Document RAG.** The user has selected a document named "${requestContext.documentContextName}". Your decision MUST be 'rag_search'. This is not optional.`;
   } else {
       activeModeInstructions = `**CURRENT MODE: Direct Chat.** No specific tool has been selected. Analyze the user's query to decide. If it requires real-time information or external knowledge, choose 'web_search'. For academic papers or scholarly articles, choose 'academic_search'. For all other general queries, definitions, or explanations, your decision MUST be 'direct_answer'.`;
   }
@@ -871,4 +871,4 @@ module.exports = {
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
     PROMPT_COACH_TEMPLATE,
     CRITICAL_THINKING_CUE_TEMPLATE
-};
+};  

@@ -1,3 +1,4 @@
+
 // server/routes/kg.js
 const express = require('express');
 const router = express.Router();
@@ -70,6 +71,44 @@ router.get('/visualize/:documentName', async (req, res) => {
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to retrieve knowledge graph.";
         console.error(`[KG Visualize] Error for '${documentName}': ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ error: errorMsg });
+    }
+});
+
+
+// --- NEW ROUTE ---
+// @route   GET /api/kg/session/:sessionId
+// @desc    Get the knowledge graph for a specific chat session
+// @access  Private
+router.get('/session/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user._id.toString();
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ error: "Knowledge Graph service is not configured." });
+    }
+    
+    // The sessionId is used as the document_name for the KG
+    const getKgUrl = `${pythonServiceUrl}/kg/${userId}/${encodeURIComponent(sessionId)}`;
+
+    try {
+        console.log(`[KG Route] Proxying request to Python service to get KG for session: ${sessionId}`);
+        const pythonResponse = await axios.get(getKgUrl, { timeout: 30000 });
+        
+        if (pythonResponse.data) {
+            res.status(200).json(pythonResponse.data);
+        } else {
+            // It's not an error if a KG doesn't exist yet, just return empty data
+            res.status(200).json({ nodes: [], edges: [] });
+        }
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            // Handle case where Python service returns 404 if KG doesn't exist
+            return res.status(200).json({ nodes: [], edges: [] });
+        }
+        const errorMsg = error.response?.data?.error || error.message || "Failed to retrieve knowledge graph.";
+        console.error(`[KG Route] Error for session '${sessionId}': ${errorMsg}`);
         res.status(error.response?.status || 500).json({ error: errorMsg });
     }
 });

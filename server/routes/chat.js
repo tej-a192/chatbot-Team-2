@@ -11,6 +11,7 @@ const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
+const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
 const router = express.Router();
 
 
@@ -149,9 +150,11 @@ router.post('/message', async (req, res) => {
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
+            if (finalBotMessageObject) {
+                extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
+            }
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
             res.end();
-
         } else {
             console.log(`[Chat Route] Diverting to standard Agentic Service.`);
 
@@ -183,6 +186,7 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
+            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
         }
 
     } catch (error) {
