@@ -3,19 +3,22 @@ const axios = require('axios');
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_RAG_SERVICE_URL;
 
-async function queryPythonRagService(query, documentContextName, clientFilter = null, k = 5) {
-    if (!PYTHON_SERVICE_URL) {
+async function queryPythonRagService(
+    query, documentContextNameToPass, userId, criticalThinkingEnabled, clientFilter = null, k = 5
+) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
         throw new Error("RAG service is not configured on the server.");
     }
-    const searchUrl = `${PYTHON_SERVICE_URL}/query`;
-    
+    const searchUrl = `${pythonServiceUrl}/query`;
+    console.log(`[ragQueryService] Querying Python RAG: User="${userId}", Query="${query.substring(0, 50)}...", DocContext=${documentContextNameToPass}`);
+
     const payload = {
         query: query,
         k: k,
-        user_id: "agent_user", // The user is validated in Node.js; agent uses a generic ID for Python
-        documentContextName: documentContextName || null,
-        // CRITICAL FIX: Ensure filter is always an object, even if empty.
-        // The Python service expects the key to exist.
+        user_id: userId, // <<< THIS IS THE KEY ADDITION
+        use_kg_critical_thinking: !!criticalThinkingEnabled,
+        documentContextName: documentContextNameToPass || null,
         filter: clientFilter || {} 
     };
 
@@ -35,9 +38,9 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         
         const toolOutput = relevantDocs.length > 0
             ? response.data.formatted_context_snippet
-            : "No relevant documents were found for this topic."; // More specific message
+            : "No relevant documents were found for this topic.";
         
-        return { references, toolOutput, retrieved_documents_list: relevantDocs }; // Pass full list back
+        return { references, toolOutput, retrieved_documents_list: relevantDocs };
 
     } catch (error) {
         let errorMsg = error.message;
