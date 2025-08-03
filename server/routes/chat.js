@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
 const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
+const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
@@ -47,10 +48,6 @@ router.post('/message', async (req, res) => {
     
     const userId = req.user._id;
 
-    console.log(`%c[DEBUG | POST /message] Request Received`, 'color: #FFD700; font-weight: bold;');
-    console.log(`  - Session ID from Client:`, sessionId);
-    console.log(`  - User ID:`, userId.toString());
-
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
     }
@@ -70,9 +67,15 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
+        const llmConfig = {
+            llmProvider,
+            ollamaModel,
+            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+            ollamaUrl: user?.ollamaUrl
+        };
+
         const historyFromDb = chatSession ? chatSession.messages : [];
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        
         const historyForLlm = [];
 
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
@@ -85,7 +88,7 @@ router.post('/message', async (req, res) => {
                 parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
             });
         }
-
+        
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
@@ -93,15 +96,12 @@ router.post('/message', async (req, res) => {
         
         const requestContext = {
             documentContextName, criticalThinkingEnabled, filter,
-            llmProvider, ollamaModel,
-            isWebSearchEnabled: !!useWebSearch, isAcademicSearchEnabled: !!useAcademicSearch,
-            userId: userId.toString(), ollamaUrl: user.ollamaUrl,
-            systemPrompt: clientProvidedSystemInstruction
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
         };
-
-        if (llmProvider === 'gemini') {
-            requestContext.apiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
 
         if (criticalThinkingEnabled) {
             console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
@@ -126,7 +126,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
 
-            const aiMessageForDbAndClient = {
+            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: totResult.finalAnswer }],
                 text: totResult.finalAnswer,
@@ -134,17 +136,17 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues // Add cues for client
             };
 
-            streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
+            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
-            console.log(`%c[DEBUG | POST /message] Executing DB Update`, 'color: #FFD700; font-weight: bold;');
-            console.log(`  - Action: findOneAndUpdate (This will ADD messages to the existing session)`);
-            console.log(`  - Target Session ID:`, sessionId);
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
@@ -157,7 +159,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
             );
 
-            const aiMessageForDbAndClient = {
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: agentResponse.finalAnswer }],
                 text: agentResponse.finalAnswer,
@@ -165,24 +169,20 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues // Add cues for client
             };
-            console.log("---------------------------------------");
-            console.log(`[DB WRITE | /message] PRE-SAVE for Session ${sessionId}`);
-            console.log(`  - Attempting to atomically $push user message: "${userMessageForDb.parts[0].text.substring(0, 50)}..."`);
-            console.log(`  - Attempting to atomically $push AI response: "${aiMessageForDbAndClient.text.substring(0, 50)}..."`);
-            console.log("---------------------------------------");
+            
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
-            console.log("---------------------------------------");
-            console.log(`[DB WRITE | /message] POST-SAVE for Session ${sessionId}`);
-            console.log(`  - findOneAndUpdate operation completed successfully.`);
-            console.log("---------------------------------------");
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForDbAndClient });
+            res.status(200).json({ reply: aiMessageForClient });
         }
 
     } catch (error) {
@@ -225,64 +225,7 @@ router.post('/history', async (req, res) => {
                     ollamaUrl: user?.ollamaUrl || null
                 };
 
-                // const { summary, knowledgeGaps, recommendations } = await analyzeAndRecommend(
-                //     previousSession.messages, previousSession.summary,
-                //     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
-                // );
-
-                // await ChatHistory.updateOne(
-                //     { sessionId: previousSessionId, userId: userId },
-                //     { $set: { summary: summary } }
-                // );
-
-                // if (knowledgeGaps && knowledgeGaps.size > 0) {
-                //     user.profile.performanceMetrics.clear();     
-                //     knowledgeGaps.forEach((score, topic) => {
-                //         user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
-                //     });
-                //     await user.save(); 
-                //     console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
-
-                //     // --- THIS IS THE NEW LOGIC THAT WAS MISSING ---
-                //     // Find the single most significant knowledge gap (lowest score)
-                //     let mostSignificantGap = null;
-                //     let lowestScore = 1.1; // Start higher than max possible score
-
-                //     knowledgeGaps.forEach((score, topic) => {
-                //         if (score < lowestScore) {
-                //             lowestScore = score;
-                //             mostSignificantGap = topic;
-                //         }
-                //     });
-
-                //     // If we found a significant gap (e.g., score < 0.6), create the suggestion object
-                //     if (mostSignificantGap && lowestScore < 0.6) {
-                //         console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
-                //         responsePayload.studyPlanSuggestion = {
-                //             topic: mostSignificantGap,
-                //             reason: `Analysis of your last session shows this is a key area for improvement.`
-                //         };
-                //     }
-                //     // --- END OF NEW LOGIC ---
-                // }
-                
-                // if (keyTopics && keyTopics.length > 0) {
-                //     const primaryTopic = keyTopics[0];
-                //     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
-                //     responsePayload.studyPlanSuggestion = {
-                //         topic: primaryTopic,
-                //         reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
-                //     };
-                // }
-
-                // if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
-                //     const cacheKey = `recommendations:${newSessionId}`;
-                //     await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
-                //     console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
-                // }
-
-
-                                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
+                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
                     previousSession.messages, previousSession.summary,
                     llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
                 );
@@ -319,7 +262,6 @@ router.post('/history', async (req, res) => {
                     }
                 }
                 
-                // Check for keyTopics and only create a suggestion if a more critical one doesn't already exist.
                 if (keyTopics && keyTopics.length > 0 && !responsePayload.studyPlanSuggestion) {
                     const primaryTopic = keyTopics[0];
                     console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
@@ -339,14 +281,12 @@ router.post('/history', async (req, res) => {
 
         await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
         console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
-        // Send the final payload, which may or may not include the suggestion
         res.status(200).json(responsePayload);
 
     } catch (error) {
         console.error(`Error during finalize-and-create-new process:`, error);
         if (!res.headersSent) {
             try {
-                // Failsafe: even if analysis fails, still give the user a new session
                 await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
                 responsePayload.message = 'New session started, but analysis of previous session failed.';
                 res.status(200).json(responsePayload);

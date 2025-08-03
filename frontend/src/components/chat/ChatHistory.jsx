@@ -3,9 +3,9 @@ import React, { useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import { motion, AnimatePresence } from 'framer-motion';
 
-function ChatHistory({ messages }) {
+function ChatHistory({ messages, onCueClick }) {
+    
     const chatHistoryRef = useRef(null);
-
     useEffect(() => {
         if (chatHistoryRef.current) {
             chatHistoryRef.current.scrollTop = chatHistoryRef.current.scrollHeight;
@@ -32,7 +32,9 @@ function ChatHistory({ messages }) {
                             references={msg.references}
                             timestamp={msg.timestamp}
                             sourcePipeline={msg.source_pipeline}
-                            isStreaming={msg.isStreaming} // Pass the flag
+                            isStreaming={msg.isStreaming}
+                            criticalThinkingCues={msg.criticalThinkingCues}
+                            onCueClick={onCueClick}
                         />
                     </motion.div>
                 ))}

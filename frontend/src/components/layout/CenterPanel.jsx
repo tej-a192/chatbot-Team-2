@@ -409,7 +409,7 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     </div>
                 </div>
             ) : (
-                <ChatHistory messages={messages} />
+                <ChatHistory messages={messages} onCueClick={handleSendMessage} />
             )}
             
             <ChatInput
