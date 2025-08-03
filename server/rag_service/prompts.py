@@ -34,9 +34,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\n10", "expectedOutput": "15" }},
-{{ "input": "0\n0", "expectedOutput": "0" }},
-{{ "input": "-5\n5", "expectedOutput": "0" }}
+{{ "input": "5\\n10", "expectedOutput": "15" }},
+{{ "input": "0\\n0", "expectedOutput": "0" }},
+{{ "input": "-5\\n5", "expectedOutput": "0" }}
 ]
 LANGUAGE:
 {language}

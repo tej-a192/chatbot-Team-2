@@ -9,6 +9,7 @@ const axios = require('axios');
 const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
+const { redisClient } = require('../config/redisClient');
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
@@ -55,7 +56,6 @@ router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, 
 });
 
 // @route   POST /api/admin/key-requests/approve
-// @desc    Approve a user's API key request
 router.post("/key-requests/approve", async (req, res) => {
   const { userId } = req.body;
   if (!userId) {
@@ -81,6 +81,14 @@ router.post("/key-requests/approve", async (req, res) => {
 
     await user.save();
 
+    // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
+    if (redisClient && redisClient.isOpen) {
+        await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
+        await redisClient.del('__express__/api/admin/dashboard-stats').catch(err => console.error("Redis DEL error:", err));
+        console.log(`Redis cache for '/api/admin/key-requests' and '/api/admin/dashboard-stats' invalidated.`);
+    }
+    // --- END NEW ---
+
     res.json({
       message: `API key request for ${user.email} has been approved.`,
     });
@@ -88,8 +96,7 @@ router.post("/key-requests/approve", async (req, res) => {
     console.error(`Error approving API key for user ${userId}:`, error);
     res.status(500).json({ message: "Server error while approving request." });
   }
-});
-
+})
 // @route   POST /api/admin/key-requests/reject
 // @desc    Reject a user's API key request
 router.post("/key-requests/reject", async (req, res) => {
@@ -107,6 +114,14 @@ router.post("/key-requests/reject", async (req, res) => {
     user.apiKeyRequestStatus = "rejected";
     await user.save();
 
+    // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
+    if (redisClient && redisClient.isOpen) {
+        await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
+        await redisClient.del('__express__/api/admin/dashboard-stats').catch(err => console.error("Redis DEL error:", err));
+        console.log(`Redis cache for '/api/admin/key-requests' and '/api/admin/dashboard-stats' invalidated.`);
+    }
+    // --- END NEW ---
+
     res.json({
       message: `API key request for ${user.email} has been rejected.`,
     });
@@ -115,7 +130,6 @@ router.post("/key-requests/reject", async (req, res) => {
     res.status(500).json({ message: "Server error while rejecting request." });
   }
 });
-
 // --- Document Management Routes ---
 
 const ADMIN_UPLOAD_DIR_BASE = path.join(

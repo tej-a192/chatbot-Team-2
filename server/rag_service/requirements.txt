@@ -31,5 +31,9 @@ python-docx
 reportlab
 google-generativeai
 gTTS
+yt-dlp
+openai-whisper
+beautifulsoup4
+playwright
+moviepy
 Werkzeug
-

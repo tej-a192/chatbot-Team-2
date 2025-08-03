@@ -11208,11 +11208,13 @@ export default DocumentList;
 `frontend/src/components/documents/DocumentUpload.jsx`
 
 ```javascript
+
+
 // frontend/src/components/documents/DocumentUpload.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../../services/api.js';
 import toast from 'react-hot-toast';
-import { UploadCloud, FileText, XCircle, Paperclip } from 'lucide-react';
+import { UploadCloud, FileText, XCircle, Paperclip, Link as LinkIcon } from 'lucide-react';
 import Button from '../core/Button.jsx';
 import { motion } from 'framer-motion';
 
@@ -11225,8 +11227,8 @@ const RAG_STAGES = [
     { name: "Embedding", duration: 4000, message: "Converting content to searchable vectors..." },
     { name: "Analyzing", duration: 3000, message: "Indexing content for optimal retrieval..." },
 ];
-
-function DocumentUpload({ onUploadSuccess }) {
+// MODIFIED: Renamed 'onUploadSuccess' prop to 'onSourceAdded'
+function DocumentUpload({ onSourceAdded }) { 
     const [selectedFile, setSelectedFile] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -11234,6 +11236,8 @@ function DocumentUpload({ onUploadSuccess }) {
     const [stageMessage, setStageMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
     const [dragActive, setDragActive] = useState(false);
+    const [urlInput, setUrlInput] = useState('');
+    const [isIngestingUrl, setIsIngestingUrl] = useState(false);
 
     const fileInputRef = useRef(null);
     const processingTimeoutRef = useRef(null);
@@ -11289,7 +11293,6 @@ function DocumentUpload({ onUploadSuccess }) {
             toast.error("Please select a file first.");
             return;
         }
-
         setIsProcessing(true);
         setErrorMessage('');
         runProgressSimulation(0);
@@ -11299,17 +11302,14 @@ function DocumentUpload({ onUploadSuccess }) {
         
         try {
             await api.uploadFile(formData);
-
             if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
-            setCurrentStage("Ready");
-            setStageMessage("Document successfully processed and ready to use!");
             setProgress(100);
-            toast.success(`'${selectedFile.name}' processed successfully!`);
+            toast.success(`'${selectedFile.name}' accepted! Processing has begun.`, { duration: 4000 });
             
             setTimeout(() => {
                 resetState();
-                if (onUploadSuccess) onUploadSuccess();
-            }, 2500);
+                if (onSourceAdded) onSourceAdded(); // Now correctly calls onSourceAdded
+            }, 1500);
 
         } catch (error) {
             if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
@@ -11319,6 +11319,27 @@ function DocumentUpload({ onUploadSuccess }) {
             setIsProcessing(false);
             setCurrentStage('Failed');
             setProgress(100);
+        }
+    };
+
+    const handleIngestUrl = async () => {
+        const url = urlInput.trim();
+        if (!url) {
+            toast.error("Please enter a valid URL.");
+            return;
+        }
+        setIsIngestingUrl(true);
+        const toastId = toast.loading(`Ingesting URL: ${url.substring(0, 30)}...`);
+        try {
+            await api.addUrlSource(url);
+            toast.success("URL accepted! Processing has begun in the background.", { id: toastId });
+            setUrlInput('');
+            if (onSourceAdded) onSourceAdded(); // Now correctly calls onSourceAdded
+        } catch (error) {
+            const msg = error.response?.data?.message || error.message || "Failed to ingest URL.";
+            toast.error(msg, { id: toastId });
+        } finally {
+            setIsIngestingUrl(false);
         }
     };
 
@@ -11350,53 +11371,384 @@ function DocumentUpload({ onUploadSuccess }) {
     }
     
     return (
-        <div className="mb-4 p-1">
-            <label
-                htmlFor="file-upload-input"
-                onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
-                className={`flex flex-col items-center justify-center w-full h-36 px-4 transition-colors duration-200 ease-in-out bg-surface-light dark:bg-gray-800 border-2 border-dashed rounded-lg cursor-pointer border-border-light dark:border-border-dark hover:border-primary dark:hover:border-primary-light ${dragActive ? "border-primary dark:border-primary-light ring-2 ring-primary dark:ring-primary-light bg-primary/10 dark:bg-primary-dark/20" : ""}`}
-            >
-                <div className="flex flex-col items-center justify-center text-center">
-                    <Paperclip size={36} className={`mb-2 transition-colors ${dragActive ? 'text-primary dark:text-primary-light' : 'text-text-muted-light dark:text-text-muted-dark'}`} />
-                    <p className="mb-1 text-sm text-text-muted-light dark:text-text-muted-dark">
-                        <span className="font-semibold text-primary dark:text-primary-light">Click to upload</span> or drag and drop
-                    </p>
-                    <p className="text-xs text-text-muted-light dark:text-text-muted-dark">PDF, DOCX, TXT, PPTX, code files</p>
-                </div>
-                <input ref={fileInputRef} id="file-upload-input" type="file" className="hidden" onChange={handleFileChange}
-                       accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.py,.js,.md,.html,.xml,.json,.csv,.log,.c,.cpp,.java" />
-            </label>
-
-            {selectedFile && (
-                <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-between text-sm animate-fadeIn">
-                    <div className="flex items-center gap-2 truncate">
-                        <FileText size={18} className="text-primary flex-shrink-0" />
-                        <span className="truncate text-text-light dark:text-text-dark" title={selectedFile.name}>{selectedFile.name}</span>
-                        <span className="text-text-muted-light dark:text-text-muted-dark text-xs whitespace-nowrap">
-                            ({(selectedFile.size / 1024).toFixed(1)} KB)
-                        </span>
+        <div className="mb-4 space-y-4">
+            {/* --- File Upload Section (Existing JSX, no changes needed) --- */}
+            <div>
+                <label
+                    htmlFor="file-upload-input"
+                    onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                    className={`flex flex-col items-center justify-center w-full h-28 px-4 transition-colors duration-200 ease-in-out bg-surface-light dark:bg-gray-800 border-2 border-dashed rounded-lg cursor-pointer border-border-light dark:border-border-dark hover:border-primary dark:hover:border-primary-light ${dragActive ? "border-primary dark:border-primary-light ring-2 ring-primary dark:ring-primary-light bg-primary/10 dark:bg-primary-dark/20" : ""}`}
+                >
+                    <div className="flex flex-col items-center justify-center text-center">
+                        <Paperclip size={28} className={`mb-1 transition-colors ${dragActive ? 'text-primary dark:text-primary-light' : 'text-text-muted-light dark:text-text-muted-dark'}`} />
+                        <p className="text-sm text-text-muted-light dark:text-text-muted-dark"><span className="font-semibold text-primary dark:text-primary-light">Upload a file</span> or drag & drop</p>
+                        <p className="text-xs text-text-muted-light/70 dark:text-text-muted-dark/70">PDF, DOCX, TXT, Media, etc.</p>
                     </div>
-                    <button onClick={() => setSelectedFile(null)} className="text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors p-1 rounded-full hover:bg-red-500/10">
-                        <XCircle size={18} />
-                    </button>
-                </div>
-            )}
+                    <input ref={fileInputRef} id="file-upload-input" type="file" className="hidden" onChange={handleFileChange} accept=".pdf,.docx,.txt,.md,.mp3,.wav,.mp4,.mov,.png,.jpg,.jpeg" />
+                </label>
+                {selectedFile && ( <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-between text-sm animate-fadeIn"> <div className="flex items-center gap-2 truncate"> <FileText size={18} className="text-primary flex-shrink-0" /> <span className="truncate text-text-light dark:text-text-dark" title={selectedFile.name}>{selectedFile.name}</span> <span className="text-text-muted-light dark:text-text-muted-dark text-xs whitespace-nowrap"> ({(selectedFile.size / 1024).toFixed(1)} KB) </span> </div> <button onClick={() => setSelectedFile(null)} className="text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors p-1 rounded-full hover:bg-red-500/10"> <XCircle size={18} /> </button> </div> )}
+                <Button onClick={handleUpload} fullWidth className="mt-2 text-sm" variant="primary" disabled={!selectedFile} leftIcon={<UploadCloud size={16} />}> Process File </Button>
+            </div>
 
-            <Button
-                onClick={handleUpload}
-                fullWidth
-                className="mt-3 text-sm min-h-[38px]"
-                variant="primary"
-                disabled={!selectedFile}
-                leftIcon={<UploadCloud size={16} />}
-            >
-                Upload Document
-            </Button>
+            {/* --- NEW URL INGESTION SECTION --- */}
+            <div className="relative pt-4 border-t border-border-light dark:border-border-dark">
+                <p className="text-center text-xs text-text-muted-light dark:text-text-muted-dark absolute -top-2.5 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark px-2">OR</p>
+                <label htmlFor="url-input" className="block text-sm font-medium text-text-light dark:text-text-dark mb-1.5">Add from URL</label>
+                <div className="flex items-center gap-2">
+                    <div className="relative flex-grow">
+                        <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted-light dark:text-text-muted-dark" />
+                        <input
+                            id="url-input"
+                            type="url"
+                            value={urlInput}
+                            onChange={(e) => setUrlInput(e.target.value)}
+                            placeholder="Enter YouTube or webpage URL..."
+                            className="input-field !pl-9 !py-2 !text-sm w-full"
+                            disabled={isIngestingUrl}
+                        />
+                    </div>
+                    <Button
+                        onClick={handleIngestUrl}
+                        size="md"
+                        className="!px-3 !py-2"
+                        isLoading={isIngestingUrl}
+                        disabled={!urlInput.trim() || isIngestingUrl}
+                    >
+                        Ingest
+                    </Button>
+                </div>
+            </div>
         </div>
     );
 }
 
 export default DocumentUpload;
+```
+
+`frontend/src/components/documents/KnowledgeSourceList.jsx`
+
+```javascript
+// frontend/src/components/documents/KnowledgeSourceList.jsx
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+import {
+    FileText, CheckCircle, Loader2, AlertTriangle, Trash2,
+    Youtube, Globe, Library
+} from 'lucide-react';
+import IconButton from '../core/IconButton.jsx';
+import { formatDistanceToNow } from 'date-fns';
+
+const getSourceIcon = (sourceType) => {
+    const icons = {
+        'document': FileText, 'youtube': Youtube, 'webpage': Globe,
+        'subject': Library, 'audio': FileText, 'video': FileText, 'image': FileText
+    };
+    return icons[sourceType] || FileText;
+};
+
+const formatRelativeTime = (dateString) => {
+    if (!dateString) return 'date unknown';
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return 'invalid date';
+        return formatDistanceToNow(date, { addSuffix: true });
+    } catch (e) {
+        return 'date error';
+    }
+};
+
+function KnowledgeSourceList({ onSelectSource, selectedSource, onRefreshNeeded }) {
+    const [sources, setSources] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const pollingIntervalRef = useRef(null);
+
+    const fetchSources = useCallback(async (isPolling = false) => {
+        if (!isPolling) setLoading(true);
+        setError('');
+        try {
+            const response = await api.getKnowledgeSources();
+            const fetchedSources = Array.isArray(response) ? response : [];
+            const userOnlySources = fetchedSources.filter(source => source.sourceType !== 'subject');
+            setSources(userOnlySources)
+            // Check if there are any sources still processing to decide if we need to continue polling.
+            const stillProcessing = fetchedSources.some(s => s.status && s.status.startsWith('processing'));
+            
+            if (pollingIntervalRef.current && !stillProcessing) {
+                console.log("[Polling] All sources processed. Stopping polling.");
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+            }
+        } catch (err) {
+            setError(err.message || "Failed to fetch knowledge sources.");
+            if (!isPolling) toast.error("Could not load knowledge base.");
+            // Stop polling on error
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+            }
+        } finally {
+            if (!isPolling) setLoading(false);
+        }
+    }, []);
+
+    // Effect for initial load and manual refresh
+    useEffect(() => {
+        fetchSources();
+    }, [fetchSources, onRefreshNeeded]);
+
+    // --- NEW: Effect for automatic polling ---
+    useEffect(() => {
+        // Stop any existing polling interval when the component mounts or sources change
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+
+        // Check if there are any sources currently in a processing state
+        const isProcessing = sources.some(s => s.status && s.status.startsWith('processing'));
+
+        if (isProcessing) {
+            console.log("[Polling] Detected processing sources. Starting polling every 5 seconds.");
+            pollingIntervalRef.current = setInterval(() => {
+                console.log("[Polling] Fetching source statuses...");
+                fetchSources(true); // `true` indicates this is a silent background poll
+            }, 5000); // Poll every 5 seconds
+        }
+
+        // Cleanup function to clear the interval when the component unmounts
+        // or when the dependencies (sources array) change.
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+        };
+    }, [sources, fetchSources]); // This effect depends on the `sources` array
+
+    const handleDelete = async (sourceId, sourceTitle, sourceType) => {
+        // ... (handleDelete logic remains exactly the same) ...
+        if (sourceType === 'subject') {
+            toast.error("Admin-provided subjects cannot be deleted by users.");
+            return;
+        }
+        if (!window.confirm(`Are you sure you want to delete "${sourceTitle}"? This will remove it and all its associated data.`)) return;
+        
+        const toastId = toast.loading(`Deleting ${sourceTitle}...`);
+        try {
+            await api.deleteKnowledgeSource(sourceId);
+            toast.success(`"${sourceTitle}" deleted.`, { id: toastId });
+            fetchSources();
+            if (selectedSource === sourceTitle) {
+                onSelectSource(null);
+            }
+        } catch (err) {
+            toast.error(`Delete failed: ${err.message}`, { id: toastId });
+        }
+    };
+
+    if (loading) {
+        // ... (loading JSX remains the same) ...
+        return (
+            <div className="flex items-center justify-center p-4 text-text-muted-light dark:text-text-muted-dark">
+                <Loader2 size={20} className="animate-spin mr-2" /> Loading knowledge base...
+            </div>
+        );
+    }
+
+    if (error) {
+        // ... (error JSX remains the same) ...
+        return (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2">
+                <AlertTriangle size={18} /> {error}
+                <button onClick={() => fetchSources()} className="ml-auto text-xs underline hover:text-red-400">Retry</button>
+            </div>
+        );
+    }
+
+    if (sources.length === 0) {
+        // ... (empty JSX remains the same) ...
+        return <p className="text-center text-xs text-text-muted-light dark:text-text-muted-dark p-4">Your knowledge base is empty.</p>;
+    }
+
+    return (
+        // ... (the main return JSX with the list mapping remains exactly the same) ...
+        <div className="space-y-1.5 text-xs custom-scrollbar pr-1">
+            {sources.map(source => {
+                const isSelected = selectedSource === source.title;
+                const isProcessing = source.status && source.status.startsWith('processing');
+                const isFailed = source.status === 'failed';
+                const isSelectable = source.status === 'completed';
+                const Icon = getSourceIcon(source.sourceType);
+
+                return (
+                    <div
+                        key={source._id}
+                        onClick={() => isSelectable && onSelectSource(isSelected ? null : source.title)}
+                        className={`p-2.5 bg-surface-light dark:bg-gray-800 border rounded-md flex items-center justify-between transition-all duration-150
+                                    ${isSelectable ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-80'}
+                                    ${isSelected ? 'ring-2 ring-primary dark:ring-primary-light shadow-lg border-primary dark:border-primary-light' : 'border-border-light dark:border-border-dark'}`}
+                        title={isSelectable ? `Select ${source.title}` : `Status: ${source.status} - ${source.failureReason || ''}`}
+                    >
+                        <div className="flex items-center gap-2 truncate">
+                            {isSelected ? <CheckCircle size={16} className="text-green-500 flex-shrink-0" /> : <Icon size={16} className="text-primary dark:text-primary-light flex-shrink-0" />}
+                            <div className="truncate">
+                                <span className={`block truncate ${isSelected ? 'font-semibold text-primary dark:text-primary-light' : 'text-text-light dark:text-text-dark'}`}>{source.title}</span>
+                                <span className="text-[0.7rem] text-text-muted-light dark:text-text-muted-dark">
+                                    {formatRelativeTime(source.createdAt)}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                             {isProcessing && <Loader2 size={14} className="animate-spin text-accent" title={`Processing... (${source.status})`} />}
+                             {isFailed && <AlertTriangle size={14} className="text-red-500" title={`Processing failed: ${source.failureReason || 'Unknown error'}`} />}
+                             {source.sourceType !== 'subject' && (
+                                <IconButton icon={Trash2} size="sm" variant="ghost" title="Delete"
+                                    onClick={(e) => { e.stopPropagation(); handleDelete(source._id, source.title, source.sourceType); }}
+                                    className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 p-1"
+                                />
+                             )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+export default KnowledgeSourceList;
+```
+
+`frontend/src/components/documents/SourceIngestion.jsx`
+
+```javascript
+// frontend/src/components/documents/SourceIngestion.jsx
+import React, { useState, useRef } from 'react';
+import api from '../../services/api.js';
+import toast from 'react-hot-toast';
+import { UploadCloud, FileText, XCircle, Paperclip, Link as LinkIcon } from 'lucide-react';
+import Button from '../core/Button.jsx';
+
+function SourceIngestion({ onSourceAdded }) {
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [dragActive, setDragActive] = useState(false);
+    const [urlInput, setUrlInput] = useState('');
+    const [isIngestingUrl, setIsIngestingUrl] = useState(false);
+    const fileInputRef = useRef(null);
+
+    const handleFileChange = (e) => {
+        if (isUploading) return;
+        const file = e.target.files?.[0];
+        if (file) setSelectedFile(file);
+    };
+
+    const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); if (isUploading) return; setDragActive(e.type === "dragenter" || e.type === "dragover"); };
+    const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); if (isUploading) return; setDragActive(false); const file = e.dataTransfer.files?.[0]; if (file) setSelectedFile(file); };
+
+    const handleUpload = async () => {
+        if (!selectedFile) {
+            toast.error("Please select a file to upload.");
+            return;
+        }
+        setIsUploading(true);
+        const toastId = toast.loading(`Uploading "${selectedFile.name}"... This may take a moment.`);
+        
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        
+        try {
+            await api.uploadFile(formData);
+            toast.success(`'${selectedFile.name}' accepted! Processing has begun.`, { id: toastId, duration: 4000 });
+            setSelectedFile(null);
+            if (onSourceAdded) onSourceAdded();
+        } catch (error) {
+            const msg = error.response?.data?.message || error.message || "Upload failed.";
+            toast.error(`Upload failed: ${msg}`, { id: toastId });
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleIngestUrl = async () => {
+        const url = urlInput.trim();
+        if (!url) {
+            toast.error("Please enter a valid URL.");
+            return;
+        }
+        setIsIngestingUrl(true);
+        const toastId = toast.loading(`Ingesting URL: ${url.substring(0, 30)}...`);
+        try {
+            await api.addUrlSource(url);
+            toast.success("URL accepted! Processing has begun in the background.", { id: toastId });
+            setUrlInput('');
+            if (onSourceAdded) onSourceAdded();
+        } catch (error) {
+            const msg = error.response?.data?.message || error.message || "Failed to ingest URL.";
+            toast.error(msg, { id: toastId });
+        } finally {
+            setIsIngestingUrl(false);
+        }
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* --- File Upload Section --- */}
+            <div>
+                <label
+                    htmlFor="file-upload-input"
+                    onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                    className={`flex flex-col items-center justify-center w-full h-28 px-4 transition-colors duration-200 ease-in-out bg-surface-light dark:bg-gray-800 border-2 border-dashed rounded-lg cursor-pointer border-border-light dark:border-border-dark hover:border-primary dark:hover:border-primary-light ${dragActive ? "border-primary dark:border-primary-light ring-2 ring-primary dark:ring-primary-light bg-primary/10 dark:bg-primary-dark/20" : ""}`}
+                >
+                    <div className="flex flex-col items-center justify-center text-center">
+                        <Paperclip size={28} className={`mb-1 transition-colors ${dragActive ? 'text-primary dark:text-primary-light' : 'text-text-muted-light dark:text-text-muted-dark'}`} />
+                        <p className="text-sm text-text-muted-light dark:text-text-muted-dark"><span className="font-semibold text-primary dark:text-primary-light">Upload a file</span> or drag & drop</p>
+                        <p className="text-xs text-text-muted-light/70 dark:text-text-muted-dark/70">PDF, DOCX, Media, etc.</p>
+                    </div>
+                    <input ref={fileInputRef} id="file-upload-input" type="file" className="hidden" onChange={handleFileChange} accept=".pdf,.docx,.txt,.md,.mp3,.wav,.mp4,.mov,.png,.jpg,.jpeg" />
+                </label>
+                {selectedFile && (
+                    <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-between text-sm animate-fadeIn">
+                        <div className="flex items-center gap-2 truncate">
+                            <FileText size={18} className="text-primary flex-shrink-0" />
+                            <span className="truncate text-text-light dark:text-text-dark" title={selectedFile.name}>{selectedFile.name}</span>
+                        </div>
+                        <button onClick={() => setSelectedFile(null)} className="p-1 rounded-full text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors hover:bg-red-500/10">
+                            <XCircle size={18} />
+                        </button>
+                    </div>
+                )}
+                <Button onClick={handleUpload} fullWidth className="mt-2 text-sm" variant="primary" isLoading={isUploading} disabled={!selectedFile || isUploading} leftIcon={<UploadCloud size={16} />}>
+                    Process File
+                </Button>
+            </div>
+
+            {/* --- URL Ingestion Section --- */}
+            <div className="relative pt-4 border-t border-border-light dark:border-border-dark">
+                <p className="text-center text-xs text-text-muted-light dark:text-text-muted-dark absolute -top-2.5 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark px-2">OR</p>
+                <div className="flex items-center gap-2">
+                    <div className="relative flex-grow">
+                        <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted-light dark:text-text-muted-dark" />
+                        <input
+                            id="url-input"
+                            type="url"
+                            value={urlInput}
+                            onChange={(e) => setUrlInput(e.target.value)}
+                            placeholder="Enter YouTube or webpage URL..."
+                            className="input-field !pl-9 !py-2 !text-sm w-full"
+                            disabled={isIngestingUrl}
+                        />
+                    </div>
+                    <Button onClick={handleIngestUrl} size="md" className="!px-3 !py-2" isLoading={isIngestingUrl} disabled={!urlInput.trim() || isIngestingUrl}>
+                        Ingest
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default SourceIngestion;
 ```
 
 `frontend/src/components/documents/SubjectList.jsx`
@@ -12031,16 +12383,16 @@ export default LeftCollapsedNav;
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import DocumentUpload from '../documents/DocumentUpload.jsx';
-import DocumentList from '../documents/DocumentList.jsx';
-import SubjectList from '../documents/SubjectList.jsx'; // <<< NEW IMPORT
+import KnowledgeSourceList from '../documents/KnowledgeSourceList.jsx';
+import SubjectList from '../documents/SubjectList.jsx';
 import {
     PanelLeftClose, ChevronDown, ChevronUp, FilePlus, Settings2,
-    Bot, BookOpen, Lightbulb, Library, Loader2, AlertTriangle // Added AlertTriangle
+    Bot, BookOpen, Lightbulb, Library
 } from 'lucide-react';
 import IconButton from '../core/IconButton.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import api from '../../services/api.js'; // Main API service
+import api from '../../services/api.js';
 
 const PROMPT_PRESETS = [
      { id: 'friendly_tutor', name: 'Friendly Tutor', icon: Bot, text: "You are a friendly, patient, and encouraging tutor specializing in engineering and scientific topics for PhD students. Explain concepts clearly, break down complex ideas, use analogies, and offer positive reinforcement. Ask follow-up questions to ensure understanding." },
@@ -12054,42 +12406,35 @@ function LeftPanel() {
         setIsLeftPanelOpen,
         systemPrompt, setSystemPrompt,
         selectDocumentForAnalysis, selectedDocumentForAnalysis,
-        selectedSubject, setSelectedSubject // AppState context will handle setting this
+        selectedSubject, setSelectedSubject
     } = useAppState();
 
     const [isPromptSectionOpen, setIsPromptSectionOpen] = useState(true);
     const [isSubjectSectionOpen, setIsSubjectSectionOpen] = useState(true);
-    const [isDocManagementOpen, setIsDocManagementOpen] = useState(true);
+    const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState(true);
 
     const [selectedPresetId, setSelectedPresetId] = useState('custom');
-    const [availableSubjects, setAvailableSubjects] = useState([]);      // State to hold fetched subjects
-    const [isLoadingSubjects, setIsLoadingSubjects] = useState(false);   // Loading state for subjects
-    const [subjectFetchError, setSubjectFetchError] = useState('');     // Error state for subjects
-    const [docListKey, setDocListKey] = useState(Date.now()); // For user's own DocumentList refresh
+    const [availableSubjects, setAvailableSubjects] = useState([]);
+    const [isLoadingSubjects, setIsLoadingSubjects] = useState(false);
+    const [subjectFetchError, setSubjectFetchError] = useState('');
+    const [refreshKey, setRefreshKey] = useState(Date.now());
 
     useEffect(() => {
         const matchedPreset = PROMPT_PRESETS.find(p => p.text === systemPrompt);
         setSelectedPresetId(matchedPreset ? matchedPreset.id : 'custom');
     }, [systemPrompt]);
 
-    // Fetch subjects (admin document names) on component mount
     const fetchSubjects = useCallback(async () => {
         setIsLoadingSubjects(true);
-        setSubjectFetchError(''); // Clear previous errors
+        setSubjectFetchError('');
         try {
-            const response = await api.getSubjects(); // Calls /api/subjects
-            // The backend returns { subjects: ["Subject 1", "Subject 2", ...] }
+            const response = await api.getSubjects();
             const subjects = Array.isArray(response.subjects) ? response.subjects : [];
             setAvailableSubjects(subjects);
-            if (subjects.length === 0) {
-                // FIX: Changed toast.info to just toast() for a standard informational message.
-                toast("No admin-defined subjects found to select for chat focus.");
-            }
         } catch (error) {
-            const errorMsg = error.response?.data?.message || error.message || "Failed to load available subjects.";
+            const errorMsg = error.response?.data?.message || error.message || "Failed to load subjects.";
             toast.error(errorMsg);
-            setSubjectFetchError(errorMsg); // Store error message for display
-            console.error("Error fetching subjects:", error);
+            setSubjectFetchError(errorMsg);
         } finally {
             setIsLoadingSubjects(false);
         }
@@ -12106,12 +12451,11 @@ function LeftPanel() {
         if (selectedPreset) setSystemPrompt(selectedPreset.text);
     };
 
-    const handleUploadSuccessForUserDocs = () => {
-        setDocListKey(Date.now());
-        toast.success("Your document list refreshed after upload.");
+    // This function will now be responsible for triggering a refresh for all source additions
+    const handleSourceAdded = () => {
+        toast.success("New source added! Refreshing list...", { id: 'refresh-toast' });
+        setRefreshKey(Date.now()); // This triggers a re-render of KnowledgeSourceList
     };
-
-    // setSelectedSubject from AppStateContext is passed directly to SubjectList's onSelectSubject prop.
 
     const SelectedPresetIcon = PROMPT_PRESETS.find(p => p.id === selectedPresetId)?.icon || Settings2;
 
@@ -12128,7 +12472,7 @@ function LeftPanel() {
                 />
             </div>
 
-            {/* Custom Prompt Section (Existing) */}
+            {/* Custom Prompt Section */}
             <div className="mb-4">
                 <button onClick={() => setIsPromptSectionOpen(!isPromptSectionOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left text-text-light dark:text-text-dark bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark" aria-expanded={isPromptSectionOpen}>
                     <span className="flex items-center gap-2"><SelectedPresetIcon size={16} className="text-primary dark:text-primary-light" /> Custom Prompt</span>
@@ -12137,7 +12481,7 @@ function LeftPanel() {
                 <AnimatePresence>
                     {isPromptSectionOpen && (
                         <motion.div key="prompt-section-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="mt-2 p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner overflow-hidden">
-                            <label htmlFor="prompt-preset-select" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Prompt Mode:</label>
+                             <label htmlFor="prompt-preset-select" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Prompt Mode:</label>
                              <select id="prompt-preset-select" value={selectedPresetId} onChange={handlePresetChange} className="input-field mb-2 text-xs py-1.5">
                                  {PROMPT_PRESETS.map(preset => (<option key={preset.id} value={preset.id}>{preset.name}</option>))}
                              </select>
@@ -12148,33 +12492,19 @@ function LeftPanel() {
                 </AnimatePresence>
             </div>
 
-            {/* --- NEW: Select Subject Section --- */}
+            {/* Admin Subjects Section */}
             <div className="mb-4">
-                <button
-                    onClick={() => setIsSubjectSectionOpen(!isSubjectSectionOpen)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left text-text-light dark:text-text-dark bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark"
-                    aria-expanded={isSubjectSectionOpen}
-                >
-                    <span className="flex items-center gap-2">
-                        <Library size={16} className="text-primary dark:text-primary-light" /> Select Subject Focus
-                    </span>
+                <button onClick={() => setIsSubjectSectionOpen(!isSubjectSectionOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left text-text-light dark:text-text-dark bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark" aria-expanded={isSubjectSectionOpen}>
+                    <span className="flex items-center gap-2"><Library size={16} className="text-primary dark:text-primary-light" /> Admin Subjects</span>
                     {isSubjectSectionOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </button>
                 <AnimatePresence>
                     {isSubjectSectionOpen && (
-                        <motion.div
-                            key="subject-select-content"
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2, ease: "easeInOut" }}
-                            className="mt-2 p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner overflow-hidden"
-                        >
-                           {/* Using the new SubjectList component */}
+                        <motion.div key="subject-select-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="mt-2 p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner overflow-hidden">
                            <SubjectList
                                 subjects={availableSubjects}
                                 selectedSubject={selectedSubject}
-                                onSelectSubject={setSelectedSubject} // Pass the setter from AppStateContext
+                                onSelectSubject={setSelectedSubject}
                                 isLoading={isLoadingSubjects}
                                 error={subjectFetchError}
                            />
@@ -12183,21 +12513,23 @@ function LeftPanel() {
                 </AnimatePresence>
             </div>
 
-            {/* Document Management Section (For REGULAR USER's own documents) */}
+            {/* User's Knowledge Base Section */}
             <div className="flex-grow flex flex-col overflow-hidden">
-                <button onClick={() => setIsDocManagementOpen(!isDocManagementOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left text-text-light dark:text-text-dark bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark mb-2" aria-expanded={isDocManagementOpen}>
-                    <span className="flex items-center gap-2"><FilePlus size={16} className="text-primary dark:text-primary-light" /> My Documents (for Analysis Tools)</span>
-                    {isDocManagementOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                <button onClick={() => setIsKnowledgeBaseOpen(!isKnowledgeBaseOpen)} className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-left text-text-light dark:text-text-dark bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md focus:outline-none shadow-sm border border-border-light dark:border-border-dark mb-2" aria-expanded={isKnowledgeBaseOpen}>
+                    <span className="flex items-center gap-2"><FilePlus size={16} className="text-primary dark:text-primary-light" /> My Knowledge Base</span>
+                    {isKnowledgeBaseOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </button>
                 <AnimatePresence>
-                    {isDocManagementOpen && (
-                        <motion.div key="doc-management-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex-grow flex flex-col overflow-hidden p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner">
-                            <DocumentUpload onUploadSuccess={handleUploadSuccessForUserDocs} />
+                    {isKnowledgeBaseOpen && (
+                        <motion.div key="knowledge-base-content" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex-grow flex flex-col overflow-hidden p-3 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md shadow-inner">
+                            {/* MODIFIED: Pass 'onSourceAdded' prop here */}
+                            <DocumentUpload onSourceAdded={handleSourceAdded}  />
                             <div className="mt-3 flex-grow overflow-y-auto custom-scrollbar">
-                                <DocumentList
-                                    key={docListKey}
-                                    onSelectDocument={selectDocumentForAnalysis}
-                                    selectedDocument={selectedDocumentForAnalysis}
+                                <KnowledgeSourceList
+                                    key={refreshKey}
+                                    onSelectSource={selectDocumentForAnalysis}
+                                    selectedSource={selectedDocumentForAnalysis}
+                                    onRefreshNeeded={refreshKey}
                                 />
                             </div>
                         </motion.div>
@@ -12208,7 +12540,6 @@ function LeftPanel() {
     );
 }
 export default LeftPanel;
-
 ```
 
 `frontend/src/components/layout/LLMSelectionModal.jsx`
@@ -15801,13 +16132,28 @@ const api = {
     });
     return response.data;
   },
-  getFiles: async () => {
-    const response = await apiClient.get("/files");
+  // getFiles: async () => {
+  //   const response = await apiClient.get("/files");
+  //   return response.data;
+  // },
+  // deleteFile: async (serverFilename) => {
+  //   const response = await apiClient.delete(`/files/${serverFilename}`);
+  //   return response.data;
+  // },
+  getKnowledgeSources: async () => {
+    const response = await apiClient.get("/knowledge-sources");
     return response.data;
   },
-  deleteFile: async (serverFilename) => {
-    const response = await apiClient.delete(`/files/${serverFilename}`);
+  deleteKnowledgeSource: async (sourceId) => {
+    const response = await apiClient.delete(`/knowledge-sources/${sourceId}`);
     return response.data;
+  },
+  addUrlSource: async (url) => {
+    const response = await apiClient.post('/knowledge-sources', {
+      type: 'url',
+      content: url,
+    });
+    return response.data; // Returns the initial source object with "processing" status
   },
   updateUserLLMConfig: async (configData) => {
     console.log("[Frontend API] Sending LLM config update:", configData);
@@ -16210,13 +16556,14 @@ export default defineConfig({
 `server/.env`
 
 ```
-#server env
-
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
 # ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
-GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
+GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 # OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
@@ -17396,6 +17743,72 @@ const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
 module.exports = ChatHistory;
 ```
 
+`server/models/KnowledgeSource.js`
+
+```javascript
+// server/models/KnowledgeSource.js
+const mongoose = require('mongoose');
+
+const AnalysisSchema = new mongoose.Schema({
+    faq: { type: String, default: "" },
+    topics: { type: String, default: "" },
+    mindmap: { type: String, default: "" },
+}, { _id: false });
+
+const KnowledgeSourceSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true,
+    },
+    sourceType: {
+        type: String,
+        enum: ['document', 'youtube', 'webpage', 'audio', 'video', 'image'],
+        required: true,
+    },
+    title: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    // Only for URL-based sources
+    sourceUrl: {
+        type: String,
+        trim: true,
+    },
+    // Only for file-based sources
+    serverFilename: {
+        type: String,
+    },
+    status: {
+        type: String,
+        enum: ['processing_extraction', 'processing_analysis', 'completed', 'failed'],
+        default: 'processing_extraction',
+    },
+    failureReason: {
+        type: String,
+    },
+    textContent: {
+        type: String,
+    },
+    analysis: {
+        type: AnalysisSchema,
+        default: () => ({}),
+    },
+    kgStatus: {
+        type: String,
+        default: "pending", // pending, processing, completed, failed_extraction, skipped_no_chunks, failed_critical
+    },
+}, { timestamps: true }); // Adds createdAt and updatedAt automatically
+
+KnowledgeSourceSchema.index({ userId: 1, title: 1 }, { unique: true });
+
+const KnowledgeSource = mongoose.model('KnowledgeSource', KnowledgeSourceSchema);
+
+module.exports = KnowledgeSource;
+```
+
 `server/models/LearningPath.js`
 
 ```javascript
@@ -17552,25 +17965,25 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
   },
-  uploadedDocuments: [
-    {
-      filename: { type: String },
-      text: { type: String, default: "" },
-      analysis: {
-        faq: { type: String, default: "" },
-        topics: { type: String, default: "" },
-        mindmap: { type: String, default: "" },
-      },
-      ragStatus: { type: String, default: "pending" },
-      analysisStatus: { type: String, default: "pending" },
-      analysisTimestamp: { type: Date },
-      kgStatus: { type: String, default: "pending" },
-      kgNodesCount: { type: Number, default: 0 },
-      kgEdgesCount: { type: Number, default: 0 },
-      kgTimestamp: { type: Date },
-      uploadedAt: { type: Date, default: Date.now },
-    },
-  ],
+  // uploadedDocuments: [
+  //   {
+  //     filename: { type: String },
+  //     text: { type: String, default: "" },
+  //     analysis: {
+  //       faq: { type: String, default: "" },
+  //       topics: { type: String, default: "" },
+  //       mindmap: { type: String, default: "" },
+  //     },
+  //     ragStatus: { type: String, default: "pending" },
+  //     analysisStatus: { type: String, default: "pending" },
+  //     analysisTimestamp: { type: Date },
+  //     kgStatus: { type: String, default: "pending" },
+  //     kgNodesCount: { type: Number, default: 0 },
+  //     kgEdgesCount: { type: Number, default: 0 },
+  //     kgTimestamp: { type: Date },
+  //     uploadedAt: { type: Date, default: Date.now },
+  //   },
+  // ],
   learningPaths: [{ 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'LearningPath' 
@@ -18502,20 +18915,25 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
 
 
 # --- Main Orchestration Function ---
-def process_document_for_qdrant(file_path: str, original_name: str, user_id: str) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
+def process_document_for_qdrant(
+    file_path: str, # Could be empty if text_content_override is used
+    original_name: str,
+    user_id: str,
+    text_content_override: Optional[str] = None # NEW parameter
+) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
     """
-    Main orchestrator for processing a document.
+    Main orchestrator for processing a document or raw text.
     Returns:
         - final_chunks_for_qdrant: List of chunks with embeddings for Qdrant.
         - text_for_node_analysis: Consolidated text for Node.js general analysis (FAQ, Topics).
         - chunks_for_kg_worker: List of chunks with metadata (no embeddings) for KG worker.
     """
     logger.info(f"ai_core: Orchestrating document processing for '{original_name}', user '{user_id}'")
-    if not os.path.exists(file_path):
-        logger.error(f"File not found at ai_core entry: {file_path}")
-        # Return empty tuple of expected types
+    
+    # Check if source is valid (either text_content_override or existing file_path)
+    if not text_content_override and not (file_path and os.path.exists(file_path)):
+        logger.error(f"File not found at ai_core entry or no text_content_override: {file_path}")
         return [], None, []
-
 
     # Default return values for failure cases
     empty_qdrant_chunks = []
@@ -18523,26 +18941,38 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
     empty_kg_chunks = []
 
     try:
-        # 1. Initial Parsing (Rich Element Extraction)
-        parsed_doc_elements = _get_initial_parsed_document(file_path)
-        initial_text_from_parser = parsed_doc_elements.get('text_content')
-        images_from_parser = parsed_doc_elements.get('images', [])
-        tables_from_parser = parsed_doc_elements.get('tables', [])
-        is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
-        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+        initial_text_from_parser = None
+        images_from_parser = []
+        tables_from_parser = []
+        is_scanned_heuristic = False
+        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Default type from original name
 
-        # 2. OCR if needed
+        if text_content_override:
+            # If override is provided, use it directly, bypass file parsing.
+            logger.info(f"ai_core: Using text_content_override for '{original_name}'.")
+            initial_text_from_parser = text_content_override
+            file_type_from_parser = "text_override" # Custom type for metadata for debugging/tracking
+        else:
+            # Original file parsing logic
+            parsed_doc_elements = _get_initial_parsed_document(file_path)
+            initial_text_from_parser = parsed_doc_elements.get('text_content')
+            images_from_parser = parsed_doc_elements.get('images', [])
+            tables_from_parser = parsed_doc_elements.get('tables', [])
+            is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
+            file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+
+        # 2. OCR if needed (only if content was from a file/images and not explicitly overridden)
         ocr_text_output = ""
         ocr_applied_flag = False
+        
         # Decide if OCR is necessary:
-        # - Explicitly image file types.
-        # - Parser's heuristic says scanned.
-        # - Parser extracted no text but found images (strong indicator for OCR).
-        # - Parser extracted minimal text and images are present (e.g., a DOCX that's mostly a picture).
-        should_ocr = is_scanned_heuristic or \
-                     (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
-                     (not initial_text_from_parser and images_from_parser) or \
-                     (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser) # Heuristic for low text + images
+        # Only try OCR if there's no initial text (from parser or override) AND images were found
+        # OR if it's explicitly an image file type and no override.
+        should_ocr = (not text_content_override) and \
+                     (is_scanned_heuristic or \
+                      (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
+                      (not initial_text_from_parser and images_from_parser) or \
+                      (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser))
 
         if should_ocr and images_from_parser:
             if PYTESSERACT_AVAILABLE and pytesseract:
@@ -18552,7 +18982,7 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             else:
                 logger.warning(f"OCR needed for {original_name} but Pytesseract not available. Content may be incomplete.")
         
-        # 3. Combine Text (Parser + OCR)
+        # 3. Combine Text (Parser/Override + OCR)
         combined_raw_text_parts = []
         if initial_text_from_parser: combined_raw_text_parts.append(initial_text_from_parser)
         if ocr_text_output: combined_raw_text_parts.append(ocr_text_output)
@@ -18575,39 +19005,32 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             file_type_from_parser,
             original_name
         )
-        # This `text_for_further_processing` is a good candidate for Node.js analysis (FAQ, topics)
-        # as it's cleaned and has table context.
         raw_text_for_node_analysis = text_for_further_processing 
 
         # 6. Extract Comprehensive Metadata
         doc_metadata = extract_document_metadata_info(
-            file_path,
+            file_path if not text_content_override else f"virtual://{original_name}", # Provide a sensible path for metadata if override
             text_for_further_processing, # Pass the final text that will be chunked
-            parsed_doc_elements, # Pass the full initial parse results
+            parsed_doc_elements if not text_content_override else {}, # Pass initial parse results or empty if override
             original_name,
             user_id
         )
         doc_metadata['ocr_applied'] = ocr_applied_flag # Update with actual OCR status
+        doc_metadata['source_type_actual'] = file_type_from_parser # Capture true source type from URL processing
 
         # 7. Chunk Document
-        # We chunk `text_for_further_processing` which includes table representations.
         chunks_with_metadata_for_qdrant_and_kg = chunk_document_into_segments(
             text_for_further_processing,
             doc_metadata # Pass rich metadata to chunks
         )
         if not chunks_with_metadata_for_qdrant_and_kg:
             logger.warning(f"No chunks produced for {original_name}. Cannot proceed with Qdrant/KG.")
-            # Still return raw_text_for_node_analysis if it exists
             return empty_qdrant_chunks, raw_text_for_node_analysis, empty_kg_chunks
 
         # Prepare chunks for KG worker (these don't need embeddings yet)
-        # Important: Deep copy if you modify this list before embedding,
-        # or if embedding modifies in-place (unlikely with current generate_segment_embeddings)
         chunks_for_kg_worker = copy.deepcopy(chunks_with_metadata_for_qdrant_and_kg) 
-        # Remove embedding from KG chunks if it somehow got there, or any very large fields not needed by KG LLM
         for chunk in chunks_for_kg_worker:
             chunk.pop('embedding', None) 
-            # Consider removing other large metadata fields if KG LLM doesn't need them from each chunk's metadata
 
         # 8. Generate Embeddings for Qdrant chunks
         final_chunks_for_qdrant = generate_segment_embeddings(chunks_with_metadata_for_qdrant_and_kg)
@@ -18616,15 +19039,11 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
         return final_chunks_for_qdrant, raw_text_for_node_analysis, chunks_for_kg_worker
 
     except Exception as e:
-        # Check for specific critical errors like Tesseract not found
         if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):
             logger.critical(f"ai_core: Tesseract (OCR) not found processing {original_name}. OCR failed. Error: {e}", exc_info=False)
-            # Depending on policy, you might still want to return any text extracted *before* OCR attempt.
-            # For now, re-raise to indicate critical failure to the caller (app.py).
             raise
         
         logger.error(f"ai_core: Critical error processing {original_name}: {e}", exc_info=True)
-        # Re-raise the exception to be handled by the caller in app.py
         raise
 ```
 
@@ -18644,7 +19063,8 @@ import tempfile
 import shutil
 import json
 import re
-from werkzeug import utils as werkzeug_utils 
+import knowledge_engine
+import media_processor
 
 from duckduckgo_search import DDGS
 from qdrant_client import models as qdrant_models
@@ -18812,10 +19232,19 @@ def execute_code():
             f.write(code)
 
         if lang_config["compile_cmd"]:
-            compile_process = subprocess.run(
-                lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
-                text=True, timeout=10, encoding='utf-8'
-            )
+            # --- THIS IS THE FIX for FileNotFoundError ---
+            try:
+                compile_process = subprocess.run(
+                    lang_config["compile_cmd"], cwd=temp_dir, capture_output=True,
+                    text=True, timeout=10, encoding='utf-8', check=False
+                )
+            except FileNotFoundError:
+                compiler_name = lang_config["compile_cmd"][0]
+                error_msg = f"Compiler Error: The '{compiler_name}' command was not found. Please ensure the required compiler for '{language}' is installed and that its 'bin' directory is in your system's PATH environment variable."
+                logger.error(error_msg)
+                return jsonify({"compilationError": error_msg}), 200
+            # --- END OF FIX ---
+                
             if compile_process.returncode != 0:
                 error_output = (compile_process.stdout + "\n" + compile_process.stderr).strip()
                 logger.warning(f"Compilation failed for {language}. Error: {error_output}")
@@ -19070,17 +19499,49 @@ def health_check():
 def add_document_qdrant():
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
-    user_id, file_path, original_name = data.get('user_id'), data.get('file_path'), data.get('original_name')
-    if not all([user_id, file_path, original_name]): return create_error_response("Missing required fields", 400)
-    if not os.path.exists(file_path): return create_error_response(f"File not found: {file_path}", 404)
-    try:
-        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(file_path, original_name, user_id)
-        num_added, status = 0, "processed_no_content"
-        if processed_chunks:
-            num_added = app.vector_service.add_processed_chunks(processed_chunks)
-            if num_added > 0: status = "added_to_qdrant"
-        return jsonify({ "message": "Document processed.", "status": status, "filename": original_name, "num_chunks_added_to_qdrant": num_added, "raw_text_for_analysis": raw_text or "", "chunks_with_metadata": kg_chunks }), 201
-    except Exception as e: return create_error_response(f"Failed to process document: {str(e)}", 500)
+    
+    user_id = data.get('user_id')
+    file_path = data.get('file_path') # This might be temporary or empty for URL content
+    original_name = data.get('original_name')
+    text_content_override = data.get('text_content_override') # NEW parameter
+
+    if not all([user_id, original_name]):
+        return create_error_response("Missing 'user_id' or 'original_name'", 400)
+
+    # Conditional check for source of text
+    if text_content_override:
+        logger.info(f"Adding document '{original_name}' (from text_content_override), user '{user_id}'.")
+        # ai_core.process_document_for_qdrant needs to handle text_content_override
+        # Pass a dummy file_path as it's required by the signature, actual file is not read.
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path="",  # Dummy, as content is overridden
+            original_name=original_name,
+            user_id=user_id,
+            text_content_override=text_content_override # Pass the override
+        )
+    elif file_path and os.path.exists(file_path):
+        logger.info(f"Adding document '{original_name}' (from file_path), user '{user_id}'.")
+        processed_chunks, raw_text, kg_chunks = ai_core.process_document_for_qdrant(
+            file_path=file_path,
+            original_name=original_name,
+            user_id=user_id
+        )
+    else:
+        return create_error_response("Neither 'file_path' (and file exists) nor 'text_content_override' provided.", 400)
+
+    num_added, status = 0, "processed_no_content"
+    if processed_chunks:
+        num_added = app.vector_service.add_processed_chunks(processed_chunks)
+        if num_added > 0: status = "added_to_qdrant"
+    
+    return jsonify({
+        "message": "Document processed.",
+        "status": status,
+        "filename": original_name,
+        "num_chunks_added_to_qdrant": num_added,
+        "raw_text_for_analysis": raw_text or "",
+        "chunks_with_metadata": kg_chunks
+    }), 201
 
 
 @app.route('/academic_search', methods=['POST'])
@@ -19216,9 +19677,105 @@ def delete_kg_route(user_id, document_name):
         return jsonify({"message": "KG deleted"}) if deleted else create_error_response("KG not found", 404)
     except Exception as e: return create_error_response(f"KG deletion failed: {str(e)}", 500)
 
+@app.route('/query_kg', methods=['POST'])
+def query_kg_route():
+    current_app.logger.info("--- /query_kg Request (Knowledge Graph Search) ---")
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    query_text = data.get('query')
+    document_name = data.get('document_name')
+    user_id = data.get('user_id')
+
+    if not all([query_text, document_name, user_id]):
+        return create_error_response("Missing 'query', 'document_name', or 'user_id'", 400)
+
+    try:
+        # Call the Neo4j handler to search the KG
+        facts_from_kg = neo4j_handler.search_knowledge_graph(user_id, document_name, query_text)
+        
+        return jsonify({"success": True, "facts": facts_from_kg}), 200
+    except neo4j_exceptions.ClientError as e:
+        logger.error(f"Neo4j client error during KG query: {e}", exc_info=True)
+        return create_error_response(f"Database error during KG query: {str(e)}", 500)
+    except Exception as e:
+        logger.error(f"Error during KG query: {e}", exc_info=True)
+        return create_error_response(f"KG query failed: {str(e)}", 500)
+
+
 if __name__ == '__main__':
-    logger.info(f"--- Starting RAG API Service on port {config.API_PORT} ---")
-    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=True)
+    @app.route('/process_media_file', methods=['POST'])
+    def process_media_file_route():
+        """Handles direct file uploads of audio, video, or images for transcription/OCR."""
+        current_app.logger.info("--- /process_media_file Request ---")
+        data = request.get_json()
+        if not data:
+            return create_error_response("Request must be JSON", 400)
+
+        file_path = data.get('file_path')
+        media_type = data.get('media_type')  # Expected: 'audio', 'video', or 'image'
+
+        if not file_path or not media_type:
+            return create_error_response("Missing 'file_path' or 'media_type'", 400)
+        if not os.path.exists(file_path):
+            return create_error_response(f"File not found at path: {file_path}", 404)
+
+        try:
+            text_content = None
+            if media_type == 'audio':
+                text_content = media_processor.process_uploaded_audio(file_path)
+            elif media_type == 'video':
+                text_content = media_processor.process_uploaded_video(file_path)
+            elif media_type == 'image':
+                text_content = media_processor.process_uploaded_image(file_path)
+            else:
+                return create_error_response(f"Unsupported media_type: {media_type}", 400)
+            
+            if not text_content or not text_content.strip():
+                return create_error_response(f"Failed to extract meaningful text from the {media_type} file.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {media_type} file.",
+                "text_content": text_content,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_media_file for type '{media_type}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process {media_type} file: {str(e)}", 500)
+
+    @app.route('/process_url', methods=['POST'])
+    def process_url_source_route():
+        """Handles YouTube and generic web URLs."""
+        current_app.logger.info("--- /process_url Request ---")
+        data = request.get_json()
+        if not data: return create_error_response("Request must be JSON", 400)
+        
+        url = data.get('url')
+        user_id = data.get('user_id')
+
+        if not url or not user_id: return create_error_response("Missing 'url' or 'user_id'", 400)
+        
+        try:
+            # Delegate to the knowledge engine
+            extracted_text, final_title, source_type = knowledge_engine.process_url_source(url, user_id)
+            if not extracted_text:
+                return create_error_response(f"Failed to extract meaningful text from the {source_type}.", 422)
+
+            return jsonify({
+                "success": True,
+                "message": f"Successfully extracted text from {source_type}.",
+                "text_content": extracted_text,
+                "title": final_title,
+                "source_type": source_type,
+            }), 200
+        except Exception as e:
+            logger.error(f"Error in /process_url for URL '{url}': {e}", exc_info=True)
+            return create_error_response(f"Failed to process URL: {str(e)}", 500)
+
+    logger.info(f"--- Starting RAG & Knowledge API Service on port {config.API_PORT} ---")
+    # Using threaded=False for stability with external processes like ffmpeg/tesseract
+    app.run(host='0.0.0.0', port=config.API_PORT, debug=False, threaded=False)
+
 ```
 
 `server/rag_service/appBackup.py`
@@ -19964,6 +20521,40 @@ try:
     LANGCHAIN_SPLITTER_AVAILABLE = True
 except ImportError: LANGCHAIN_SPLITTER_AVAILABLE, RecursiveCharacterTextSplitter = False, None
 
+
+
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE, yt_dlp = False, None
+    
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE, whisper = False, None
+    
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE, sync_playwright = False, None
+    
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE, BeautifulSoup = False, None
+    
+try:
+    import ffmpeg
+    FFMPEG_PYTHON_AVAILABLE = True
+except ImportError:
+    FFMPEG_PYTHON_AVAILABLE, ffmpeg = False, None
+
+
+    
 # ─── Optional: Preload SpaCy & Embedding Model ───────
 nlp_spacy_core, SPACY_MODEL_LOADED = None, False
 try:
@@ -19980,6 +20571,16 @@ try:
     EMBEDDING_MODEL_LOADED = True
 except Exception as e:
     logger.warning(f"Failed to load Sentence Transformer model '{DOCUMENT_EMBEDDING_MODEL_NAME}': {e}")
+
+whisper_model, WHISPER_MODEL_LOADED = None, False
+try:
+    import whisper
+    # Using 'base' model is a good balance. Could be configured via .env in the future.
+    whisper_model = whisper.load_model("base")
+    WHISPER_MODEL_LOADED = True
+    logger.info("Successfully pre-loaded Whisper 'base' model.")
+except Exception as e:
+    logger.warning(f"Failed to pre-load Whisper model: {e}. Transcription will fail.")
 ```
 
 `server/rag_service/document_generator.py`
@@ -20390,6 +20991,151 @@ def chunk_text(text, file_name, user_id):
 
 ```
 
+`server/rag_service/knowledge_engine.py`
+
+```python
+# server/rag_service/knowledge_engine.py
+import os
+import re
+import tempfile
+import shutil
+import logging
+import time
+from typing import Tuple, Optional
+
+# --- Tool Imports ---
+# REMOVE the local try/except blocks for imports. We now rely on config.
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+# --- THIS IS THE FIX: Import the central config ---
+import config
+# --- END OF FIX ---
+
+logger = logging.getLogger(__name__)
+
+
+# --- YouTube Processing ---
+def _extract_youtube_text(url: str) -> Tuple[Optional[str], Optional[str]]:
+    # --- FIX: Reference config for availability and library objects ---
+    if not config.YTDLP_AVAILABLE or not config.WHISPER_MODEL_LOADED:
+        raise ImportError("YouTube processing requires 'yt-dlp' and the Whisper model to be loaded.")
+    # --- END FIX ---
+    
+    logger.info(f"Processing YouTube URL: {url}")
+    temp_dir = tempfile.mkdtemp()
+    try:
+        audio_filename_template = os.path.join(temp_dir, 'audio.%(ext)s')
+        ydl_opts = {
+            'format': 'm4a/bestaudio/best',
+            'outtmpl': audio_filename_template,
+            'noplaylist': True,
+            'quiet': True,
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'wav'}],
+        }
+
+        # --- FIX: Reference config for library object ---
+        with config.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # --- END FIX ---
+            info_dict = ydl.extract_info(url, download=True)
+            video_title = info_dict.get('title', 'YouTube Video')
+            audio_file_path = os.path.join(temp_dir, 'audio.wav')
+
+        logger.info(f"Transcribing audio for '{video_title}' with Whisper...")
+        result = config.whisper_model.transcribe(audio_file_path, fp16=False)
+        transcribed_text = result['text']
+        
+        logger.info(f"Transcription complete for '{video_title}'. Text length: {len(transcribed_text)}")
+        return transcribed_text, video_title
+    except Exception as e:
+        logger.error(f"yt-dlp/whisper error processing URL {url}: {e}")
+        raise ConnectionError(f"Failed to process YouTube video: {e}")
+    finally:
+        shutil.rmtree(temp_dir)
+
+# --- Webpage Content Processing ---
+def _extract_webpage_text(url: str, retries: int = 2) -> Tuple[Optional[str], Optional[str]]:
+    # --- FIX: Reference config for availability and library objects ---
+    if not config.PLAYWRIGHT_AVAILABLE or not config.BS4_AVAILABLE:
+        raise ImportError("Webpage processing requires 'playwright' and 'beautifulsoup4'.")
+    # --- END FIX ---
+
+    logger.info(f"Processing webpage URL: {url}")
+    
+    for attempt in range(retries):
+        logger.info(f"Scraping attempt {attempt + 1}/{retries} for URL: {url}")
+        try:
+            # --- FIX: Reference config for library object ---
+            with config.sync_playwright() as p:
+            # --- END FIX ---
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                )
+                page = context.new_page()
+                page.goto(url, wait_until='load', timeout=45000)
+                
+                page_title = page.title() or url
+                html_content = page.content()
+                browser.close()
+
+                logger.info(f"Successfully fetched content for '{page_title}'")
+                
+                # --- FIX: Reference config for library object ---
+                soup = config.BeautifulSoup(html_content, "html.parser")
+                # --- END FIX ---
+                for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "iframe"]):
+                    element.decompose()
+                
+                body = soup.find('body')
+                if body:
+                    text = body.get_text(separator='\n', strip=True)
+                    cleaned_text = re.sub(r'\n{3,}', '\n\n', text)
+                else:
+                    cleaned_text = ""
+                
+                logger.info(f"Extracted and cleaned text from '{page_title}'. Length: {len(cleaned_text)}")
+                return cleaned_text, page_title
+
+        except PlaywrightTimeoutError as e:
+            logger.warning(f"Attempt {attempt + 1} timed out for URL {url}. Error: {e}")
+            if attempt + 1 == retries:
+                logger.error(f"All {retries} scraping attempts failed for URL {url}.")
+                raise ConnectionError(f"Failed to scrape webpage after {retries} attempts: Timeout")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Playwright/BS4 error on attempt {attempt + 1} for URL {url}: {e}")
+            if attempt + 1 == retries:
+                 raise ConnectionError(f"Failed to scrape webpage after {retries} attempts: {e}")
+            time.sleep(2)
+
+# --- Main Orchestrator for URLs ---
+def process_url_source(url: str, user_id: str) -> Tuple[Optional[str], str, str]:
+    # ... (rest of the function is the same, no changes needed here)
+    logger.info(f"Knowledge Engine: Orchestrating URL processing for '{url}'")
+    
+    raw_text, final_title, source_type = None, url, 'webpage'
+    youtube_regex = (
+        r'(https?://)?(www\.)?'
+        '(youtube|youtu|youtube-nocookie)\.(com|be)/'
+        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
+    is_youtube = re.match(youtube_regex, url)
+
+    if is_youtube:
+        source_type = 'youtube'
+        raw_text, final_title = _extract_youtube_text(url)
+    else:
+        source_type = 'webpage'
+        raw_text, final_title = _extract_webpage_text(url)
+
+    if not raw_text:
+        return None, final_title, source_type
+
+    cleaned_text = re.sub(r'\s+', ' ', raw_text).strip()
+    
+    logger.info(f"Successfully processed URL '{url}'. Title: '{final_title}'. Type: '{source_type}'.")
+    return cleaned_text, final_title, source_type
+```
+
 `server/rag_service/knowledge_graph_generator.py`
 
 ```python
@@ -20452,6 +21198,91 @@ def generate_graph_from_text(document_text: str, llm_function) -> Dict[str, Any]
         raise ValueError("LLM returned invalid JSON format for the knowledge graph.") from e
 ```
 
+`server/rag_service/media_processor.py`
+
+```python
+# server/rag_service/media_processor.py
+import os
+import tempfile
+import shutil
+import logging
+from typing import Optional
+
+# --- Tool Imports are now centralized ---
+import config
+
+logger = logging.getLogger(__name__)
+
+if config.PYTESSERACT_AVAILABLE and config.TESSERACT_CMD:
+    config.pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
+
+def process_uploaded_audio(file_path: str) -> Optional[str]:
+    """Transcribes audio content from a given file path."""
+    if not config.WHISPER_MODEL_LOADED:
+        raise ImportError("Audio processing requires the Whisper model to be loaded.")
+    
+    logger.info(f"Transcribing audio file: {os.path.basename(file_path)}")
+    try:
+        result = config.whisper_model.transcribe(file_path, fp16=False)
+        transcribed_text = result['text']
+        logger.info(f"Transcription complete for audio file. Text length: {len(transcribed_text)}")
+        return transcribed_text
+    except Exception as e:
+        logger.error(f"Whisper error processing audio file {file_path}: {e}")
+        raise IOError(f"Failed to transcribe audio file: {e}")
+
+def process_uploaded_video(file_path: str) -> Optional[str]:
+    """Extracts audio from a video file and transcribes it using ffmpeg-python."""
+    if not config.FFMPEG_PYTHON_AVAILABLE:
+        raise ImportError("Video processing requires 'ffmpeg-python' and a system installation of ffmpeg.")
+
+    logger.info(f"Processing video file for audio extraction: {os.path.basename(file_path)}")
+    temp_dir = tempfile.mkdtemp()
+    temp_audio_path = os.path.join(temp_dir, "extracted_audio.wav")
+    try:
+        (
+            config.ffmpeg
+            .input(file_path)
+            .output(
+                temp_audio_path,
+                acodec='pcm_s16le',
+                ar=16000,
+                ac=1
+            )
+            .run(cmd=['ffmpeg', '-nostdin'], capture_stdout=True, capture_stderr=True, quiet=True)
+        )
+        
+        logger.info(f"Audio extracted to temporary file. Now transcribing.")
+        return process_uploaded_audio(temp_audio_path)
+    except config.ffmpeg.Error as e:
+        logger.error(f"FFmpeg error processing video file {file_path}:\n{e.stderr.decode()}")
+        raise IOError(f"Failed to extract audio from video using FFmpeg.")
+    except Exception as e:
+        logger.error(f"General error processing video file {file_path}: {e}")
+        raise IOError(f"An unexpected error occurred during video processing: {e}")
+    finally:
+        shutil.rmtree(temp_dir)
+
+def process_uploaded_image(file_path: str) -> Optional[str]:
+    """Performs OCR on an image file to extract text."""
+    if not config.PYTESSERACT_AVAILABLE:
+        raise ImportError("Image processing requires 'pytesseract' and 'Pillow'.")
+    
+    logger.info(f"Performing OCR on image file: {os.path.basename(file_path)}")
+    try:
+        img = config.Image.open(file_path)
+        processed_img = img.convert('L')
+        text = config.pytesseract.image_to_string(processed_img)
+        logger.info(f"OCR complete for image file. Text length: {len(text)}")
+        return text
+    except config.TESSERACT_ERROR:
+        logger.critical("Tesseract executable not found or not configured correctly in config.py.")
+        raise
+    except Exception as e:
+        logger.error(f"Pytesseract error processing image file {file_path}: {e}")
+        raise IOError(f"Failed to perform OCR on image: {e}")
+```
+
 `server/rag_service/neo4j_handler.py`
 
 ```python
@@ -20468,14 +21299,28 @@ _neo4j_driver = None
 def init_driver():
     global _neo4j_driver
     if _neo4j_driver is not None:
-        try: _neo4j_driver.verify_connectivity(); return
-        except Exception: 
+        try:
+            _neo4j_driver.verify_connectivity()
+            # If connected and healthy, try to create the index
+            try:
+                with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
+                    session.execute_write(_create_fulltext_index_if_not_exists)
+            except Exception as e:
+                logger.warning(f"Neo4j: Could not execute index creation during init_driver (non-fatal if already exists): {e}")
+            return # Driver already initialized and healthy, index check done
+        except Exception:
             if _neo4j_driver: _neo4j_driver.close()
-            _neo4j_driver = None
+            _neo4j_driver = None # Reset if not healthy
     try:
         _neo4j_driver = GraphDatabase.driver(config.NEO4J_URI, auth=(config.NEO4J_USERNAME, config.NEO4J_PASSWORD))
         _neo4j_driver.verify_connectivity()
         logger.info(f"Neo4j driver initialized. Connected to: {config.NEO4J_URI}")
+        
+        # --- IMPORTANT: Call index creation here after successful connection ---
+        with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
+            session.execute_write(_create_fulltext_index_if_not_exists)
+        # --- END IMPORTANT ---
+
     except Exception as e:
         logger.critical(f"Failed to initialize Neo4j driver: {e}", exc_info=True)
         _neo4j_driver = None
@@ -20495,8 +21340,33 @@ def _execute_read_tx(tx_function, *args, **kwargs):
 def _execute_write_tx(tx_function, *args, **kwargs):
     with get_driver_instance().session(database=config.NEO4J_DATABASE) as session:
         return session.execute_write(tx_function, *args, **kwargs)
+def _create_fulltext_index_if_not_exists(tx):
+    index_name = "node_search_index"
+    
+    # Check if index already exists
+    # Neo4j 5.x syntax to list indexes. Use `db.indexes()` for older versions.
+    result = tx.run(f"SHOW FULLTEXT INDEXES WHERE name = '{index_name}'")
+    if result.single():
+        logger.info(f"Neo4j: Full-text index '{index_name}' already exists.")
+        return
 
-
+    # If it doesn't exist, create it
+    create_query = (
+        f"CREATE FULLTEXT INDEX {index_name} "
+        f"FOR (n:KnowledgeNode) ON EACH [n.nodeId, n.description] "
+        f"OPTIONS {{indexConfig: {{`fulltext.analyzer`: 'standard', `fulltext.eventually_consistent`: true}}}}"
+    )
+    try:
+        tx.run(create_query)
+        logger.info(f"Neo4j: Successfully created full-text index '{index_name}'.")
+    except Exception as e:
+        # Handle cases where index might have been created by another process concurrently
+        if "already exists" in str(e):
+            logger.info(f"Neo4j: Full-text index '{index_name}' concurrently created or already exists (race condition). Proceeding.")
+        else:
+            logger.error(f"Neo4j: Failed to create full-text index '{index_name}': {e}", exc_info=True)
+            raise #
+            
 # --- Private Transactional Cypher Functions ---
 # (ingest/delete/add functions are correct and do not need changes)
 def _delete_kg_transactional(tx, user_id, document_name):
@@ -20753,9 +21623,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\n10", "expectedOutput": "15" }},
-{{ "input": "0\n0", "expectedOutput": "0" }},
-{{ "input": "-5\n5", "expectedOutput": "0" }}
+{{ "input": "5\\n10", "expectedOutput": "15" }},
+{{ "input": "0\\n0", "expectedOutput": "0" }},
+{{ "input": "-5\\n5", "expectedOutput": "0" }}
 ]
 LANGUAGE:
 {language}
@@ -20926,9 +21796,12 @@ python-docx
 reportlab
 google-generativeai
 gTTS
+yt-dlp
+openai-whisper
+beautifulsoup4
+playwright
+moviepy
 Werkzeug
-
-
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -21366,6 +22239,7 @@ const axios = require('axios');
 const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
+const { redisClient } = require('../config/redisClient');
 const { encrypt } = require('../utils/crypto');
 
 const router = express.Router();
@@ -21412,7 +22286,6 @@ router.get('/key-requests',cacheMiddleware(CACHE_DURATION_SECONDS), async (req, 
 });
 
 // @route   POST /api/admin/key-requests/approve
-// @desc    Approve a user's API key request
 router.post("/key-requests/approve", async (req, res) => {
   const { userId } = req.body;
   if (!userId) {
@@ -21438,6 +22311,14 @@ router.post("/key-requests/approve", async (req, res) => {
 
     await user.save();
 
+    // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
+    if (redisClient && redisClient.isOpen) {
+        await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
+        await redisClient.del('__express__/api/admin/dashboard-stats').catch(err => console.error("Redis DEL error:", err));
+        console.log(`Redis cache for '/api/admin/key-requests' and '/api/admin/dashboard-stats' invalidated.`);
+    }
+    // --- END NEW ---
+
     res.json({
       message: `API key request for ${user.email} has been approved.`,
     });
@@ -21445,8 +22326,7 @@ router.post("/key-requests/approve", async (req, res) => {
     console.error(`Error approving API key for user ${userId}:`, error);
     res.status(500).json({ message: "Server error while approving request." });
   }
-});
-
+})
 // @route   POST /api/admin/key-requests/reject
 // @desc    Reject a user's API key request
 router.post("/key-requests/reject", async (req, res) => {
@@ -21464,6 +22344,14 @@ router.post("/key-requests/reject", async (req, res) => {
     user.apiKeyRequestStatus = "rejected";
     await user.save();
 
+    // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
+    if (redisClient && redisClient.isOpen) {
+        await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
+        await redisClient.del('__express__/api/admin/dashboard-stats').catch(err => console.error("Redis DEL error:", err));
+        console.log(`Redis cache for '/api/admin/key-requests' and '/api/admin/dashboard-stats' invalidated.`);
+    }
+    // --- END NEW ---
+
     res.json({
       message: `API key request for ${user.email} has been rejected.`,
     });
@@ -21472,7 +22360,6 @@ router.post("/key-requests/reject", async (req, res) => {
     res.status(500).json({ message: "Server error while rejecting request." });
   }
 });
-
 // --- Document Management Routes ---
 
 const ADMIN_UPLOAD_DIR_BASE = path.join(
@@ -21870,46 +22757,40 @@ module.exports = router;
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
-const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const AdminDocument = require('../models/AdminDocument');
 
 // @route   GET /api/analysis/:documentFilename
-// @desc    Get analysis data (faq, topics, mindmap) for a specific document
-// @access  Private (requires auth)
+// @desc    Get analysis data for a user's knowledge source or an admin subject
+// @access  Private
 router.get('/:documentFilename', authMiddleware, async (req, res) => {
-    const userId = req.user._id; // From authMiddleware
+    const userId = req.user._id;
     const { documentFilename } = req.params;
-    
+
     if (!documentFilename) {
         return res.status(400).json({ message: 'Document filename parameter is required.' });
     }
 
     try {
-        const user = await User.findById(userId).select('uploadedDocuments');
-        if (!user) {
-            return res.status(404).json({ message: 'User not found.' });
+        let sourceDocument = null;
+
+        // 1. Check user-specific KnowledgeSource by its title
+        sourceDocument = await KnowledgeSource.findOne({ userId, title: documentFilename }).select('analysis').lean();
+        
+        // 2. If not found, fallback to AdminDocument (Subjects) by its originalName
+        if (!sourceDocument) {
+            sourceDocument = await AdminDocument.findOne({ originalName: documentFilename }).select('analysis').lean();
         }
 
-        const document = user.uploadedDocuments.find(doc => doc.filename === documentFilename);
-
-        if (!document) {
-            return res.status(404).json({ message: `Document '${documentFilename}' not found for this user.` });
-        }
-
-        if (!document.analysis) {
-            // This case might happen if the analysis object itself is missing, though schema has defaults.
-            console.warn(`Analysis object missing for document '${documentFilename}', user '${userId}'. Sending empty analysis.`);
-            return res.status(200).json({
-                faq: "",
-                topics: "",
-                mindmap: ""
-            });
+        if (!sourceDocument) {
+            return res.status(404).json({ message: `Document or Subject '${documentFilename}' not found.` });
         }
         
-        // Send the analysis sub-document
-        res.status(200).json(document.analysis);
+        // Send the analysis sub-document, ensuring it's an object even if empty
+        res.status(200).json(sourceDocument.analysis || { faq: "", topics: "", mindmap: "" });
 
     } catch (error) {
-        console.error(`Error fetching analysis for document '${documentFilename}', user '${userId}':`, error);
+        console.error(`Error fetching analysis for '${documentFilename}':`, error);
         res.status(500).json({ message: 'Server error while retrieving document analysis.' });
     }
 });
@@ -22569,282 +23450,282 @@ module.exports = router;
 `server/routes/files.js`
 
 ```javascript
-// server/routes/files.js
-const express = require('express');
-const fs = require('fs').promises;
-const path = require('path');
-const { authMiddleware } = require('../middleware/authMiddleware');
-const User = require('../models/User');
-const axios = require('axios');
-const router = express.Router();
+// // server/routes/files.js
+// const express = require('express');
+// const fs = require('fs').promises;
+// const path = require('path');
+// const { authMiddleware } = require('../middleware/authMiddleware');
+// const User = require('../models/User');
+// const axios = require('axios');
+// const router = express.Router();
 
-const ASSETS_DIR = path.join(__dirname, '..', 'assets');
-const BACKUP_DIR = path.join(__dirname, '..', 'backup_assets');
+// const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+// const BACKUP_DIR = path.join(__dirname, '..', 'backup_assets');
 
-// --- Helper functions (sanitizeUsernameForDir, parseServerFilename, ensureDirExists are existing) ---
-const sanitizeUsernameForDir = (username) => {
-    if (!username) return '';
-    return username.replace(/[^a-zA-Z0-9_-]/g, '_');
-};
+// // --- Helper functions (sanitizeUsernameForDir, parseServerFilename, ensureDirExists are existing) ---
+// const sanitizeUsernameForDir = (username) => {
+//     if (!username) return '';
+//     return username.replace(/[^a-zA-Z0-9_-]/g, '_');
+// };
 
-const parseServerFilename = (filename) => {
-    // Matches "timestamp-originalName.ext"
-    // Allows originalName to contain dots now.
-    const match = filename.match(/^(\d+)-(.+?)(\.\w+)$/);
-    if (match && match.length === 4) {
-        return { timestamp: match[1], originalName: `${match[2]}${match[3]}`, extension: match[3] };
-    }
-    // Fallback for names that might not perfectly fit the new pattern, or originalName without extension before timestamp
-    const ext = path.extname(filename);
-    const baseWithoutExt = filename.substring(0, filename.length - ext.length);
-    const tsMatch = baseWithoutExt.match(/^(\d+)-(.*)$/);
-    if (tsMatch) {
-        return { timestamp: tsMatch[1], originalName: `${tsMatch[2]}${ext}`, extension: ext };
-    }
-    // Final fallback if no timestamp prefix is reliably parsed
-    return { timestamp: null, originalName: filename, extension: path.extname(filename) };
-};
+// const parseServerFilename = (filename) => {
+//     // Matches "timestamp-originalName.ext"
+//     // Allows originalName to contain dots now.
+//     const match = filename.match(/^(\d+)-(.+?)(\.\w+)$/);
+//     if (match && match.length === 4) {
+//         return { timestamp: match[1], originalName: `${match[2]}${match[3]}`, extension: match[3] };
+//     }
+//     // Fallback for names that might not perfectly fit the new pattern, or originalName without extension before timestamp
+//     const ext = path.extname(filename);
+//     const baseWithoutExt = filename.substring(0, filename.length - ext.length);
+//     const tsMatch = baseWithoutExt.match(/^(\d+)-(.*)$/);
+//     if (tsMatch) {
+//         return { timestamp: tsMatch[1], originalName: `${tsMatch[2]}${ext}`, extension: ext };
+//     }
+//     // Final fallback if no timestamp prefix is reliably parsed
+//     return { timestamp: null, originalName: filename, extension: path.extname(filename) };
+// };
 
-const ensureDirExists = async (dirPath) => {
-    try { await fs.mkdir(dirPath, { recursive: true }); }
-    catch (error) { if (error.code !== 'EEXIST') { console.error(`Error creating dir ${dirPath}:`, error); throw error; } }
-};
+// const ensureDirExists = async (dirPath) => {
+//     try { await fs.mkdir(dirPath, { recursive: true }); }
+//     catch (error) { if (error.code !== 'EEXIST') { console.error(`Error creating dir ${dirPath}:`, error); throw error; } }
+// };
 
-async function callPythonDeletionEndpoint(method, endpointPath, userId, originalName, logContext) {
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Fallback if not set
-    if (!pythonServiceUrl) {
-        console.error(`Python Service Deletion Error for ${logContext}: PYTHON_RAG_SERVICE_URL not set.`);
-        return { success: false, message: "Python service URL not configured." };
-    }
+// async function callPythonDeletionEndpoint(method, endpointPath, userId, originalName, logContext) {
+//     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL || process.env.DEFAULT_PYTHON_RAG_URL || 'http://localhost:5000'; // Fallback if not set
+//     if (!pythonServiceUrl) {
+//         console.error(`Python Service Deletion Error for ${logContext}: PYTHON_RAG_SERVICE_URL not set.`);
+//         return { success: false, message: "Python service URL not configured." };
+//     }
 
-    const deleteUrl = `${pythonServiceUrl.replace(/\/$/, '')}${endpointPath}`;
+//     const deleteUrl = `${pythonServiceUrl.replace(/\/$/, '')}${endpointPath}`;
 
-    try {
-        console.log(`Calling Python Service (${method.toUpperCase()}) for deletion: ${deleteUrl} (Doc: ${originalName}, User: ${userId})`);
-        let response;
-        if (method.toUpperCase() === 'DELETE') {
-            // For DELETE, data is often in query params or path, but axios allows a 'data' field for body
-            response = await axios.delete(deleteUrl, {
-                data: { // For Python endpoints that expect a body (like a new Qdrant delete one)
-                    user_id: userId,
-                    document_name: originalName
-                },
-                timeout: 30000 // 30s timeout
-            });
-        } else {
-            throw new Error(`Unsupported method for Python deletion: ${method}`);
-        }
+//     try {
+//         console.log(`Calling Python Service (${method.toUpperCase()}) for deletion: ${deleteUrl} (Doc: ${originalName}, User: ${userId})`);
+//         let response;
+//         if (method.toUpperCase() === 'DELETE') {
+//             // For DELETE, data is often in query params or path, but axios allows a 'data' field for body
+//             response = await axios.delete(deleteUrl, {
+//                 data: { // For Python endpoints that expect a body (like a new Qdrant delete one)
+//                     user_id: userId,
+//                     document_name: originalName
+//                 },
+//                 timeout: 30000 // 30s timeout
+//             });
+//         } else {
+//             throw new Error(`Unsupported method for Python deletion: ${method}`);
+//         }
 
-        if (response.status === 200 || response.status === 204) { // 204 No Content is also success
-            return { success: true, message: response.data?.message || `Successfully deleted from ${endpointPath}` };
-        } else {
-            return { success: false, message: response.data?.message || `Python service returned ${response.status} for ${endpointPath}` };
-        }
-    } catch (error) {
-        const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || `Unknown error deleting from ${endpointPath}`;
-        console.error(`Error calling Python Service for deletion (${deleteUrl}) for ${originalName} (User: ${userId}): ${errorMsg}`, error.response ? { status: error.response.status, data: error.response.data } : error);
-        return { success: false, message: `Python service call failed for ${endpointPath}: ${errorMsg}` };
-    }
-}
-// --- End Helper Functions ---
+//         if (response.status === 200 || response.status === 204) { // 204 No Content is also success
+//             return { success: true, message: response.data?.message || `Successfully deleted from ${endpointPath}` };
+//         } else {
+//             return { success: false, message: response.data?.message || `Python service returned ${response.status} for ${endpointPath}` };
+//         }
+//     } catch (error) {
+//         const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || `Unknown error deleting from ${endpointPath}`;
+//         console.error(`Error calling Python Service for deletion (${deleteUrl}) for ${originalName} (User: ${userId}): ${errorMsg}`, error.response ? { status: error.response.status, data: error.response.data } : error);
+//         return { success: false, message: `Python service call failed for ${endpointPath}: ${errorMsg}` };
+//     }
+// }
+// // --- End Helper Functions ---
 
 
-// --- @route   GET /api/files ---
-// Use authMiddleware middleware 
-// TO GET FILE NAMES
-router.get('/', authMiddleware, async (req, res) => {
+// // --- @route   GET /api/files ---
+// // Use authMiddleware middleware 
+// // TO GET FILE NAMES
+// router.get('/', authMiddleware, async (req, res) => {
     
-    const userFiles = []
-    try {
-        const userId = req.user._id.toString();
+//     const userFiles = []
+//     try {
+//         const userId = req.user._id.toString();
 
-        // Find user by ID, select only uploadedDocuments to optimize
-        const user = await User.findById(userId).select('uploadedDocuments');
+//         // Find user by ID, select only uploadedDocuments to optimize
+//         const user = await User.findById(userId).select('uploadedDocuments');
 
-        if (!user) return res.status(404).json({ msg: 'User not found' });
+//         if (!user) return res.status(404).json({ msg: 'User not found' });
 
-        // Extract filenames
-        const filenames = user.uploadedDocuments
-        .map(doc => doc.filename)
-        .filter(Boolean)  // filter out undefined or null filenames just in case
-        .reverse();       // reverse the order
+//         // Extract filenames
+//         const filenames = user.uploadedDocuments
+//         .map(doc => doc.filename)
+//         .filter(Boolean)  // filter out undefined or null filenames just in case
+//         .reverse();       // reverse the order
 
-        return res.json({ filenames });
+//         return res.json({ filenames });
 
-    } catch (error) {
-        console.log(error.message);
-        return res.status(500).json({ msg: 'Server error' });
-    }
-});
+//     } catch (error) {
+//         console.log(error.message);
+//         return res.status(500).json({ msg: 'Server error' });
+//     }
+// });
 
 
-// --- @route   DELETE /api/files/:serverFilename ---
-// Use authMiddleware middleware
-router.delete('/:serverFilename', authMiddleware, async (req, res) => {
+// // --- @route   DELETE /api/files/:serverFilename ---
+// // Use authMiddleware middleware
+// router.delete('/:serverFilename', authMiddleware, async (req, res) => {
   
-    const { serverFilename } = req.params;
-    const userId = req.user._id.toString(); // Get userId from authenticated user
-    const usernameForLog = req.user.username;
+//     const { serverFilename } = req.params;
+//     const userId = req.user._id.toString(); // Get userId from authenticated user
+//     const usernameForLog = req.user.username;
 
-    if (!serverFilename) {
-        return res.status(400).json({ message: 'Server filename parameter is required.' });
-    }
+//     if (!serverFilename) {
+//         return res.status(400).json({ message: 'Server filename parameter is required.' });
+//     }
 
-    const parsedFileDetails = parseServerFilename(serverFilename);
-    const originalName = parsedFileDetails.originalName;
-    if (!originalName) {
-        console.error(`DELETE /api/files: Could not parse originalName from serverFilename: ${serverFilename}`);
-        return res.status(400).json({ message: 'Invalid server filename format for deletion.' });
-    }
-    const logContext = `File: '${originalName}' (server: ${serverFilename}), User: ${usernameForLog} (${userId})`;
-    console.log(`Attempting to delete all data for ${logContext}`);
+//     const parsedFileDetails = parseServerFilename(serverFilename);
+//     const originalName = parsedFileDetails.originalName;
+//     if (!originalName) {
+//         console.error(`DELETE /api/files: Could not parse originalName from serverFilename: ${serverFilename}`);
+//         return res.status(400).json({ message: 'Invalid server filename format for deletion.' });
+//     }
+//     const logContext = `File: '${originalName}' (server: ${serverFilename}), User: ${usernameForLog} (${userId})`;
+//     console.log(`Attempting to delete all data for ${logContext}`);
 
-    const results = {
-        mongodb: { success: false, message: "Not attempted" },
-        qdrant: { success: false, message: "Not attempted" },
-        neo4j: { success: false, message: "Not attempted" },
-        filesystem: { success: false, message: "Not attempted" },
-    };
-    let overallSuccess = true; // Assume success, set to false if any critical step fails
-    let httpStatus = 200;
-    let fileFoundInMongo = false;
-    let physicalFileFound = false;
+//     const results = {
+//         mongodb: { success: false, message: "Not attempted" },
+//         qdrant: { success: false, message: "Not attempted" },
+//         neo4j: { success: false, message: "Not attempted" },
+//         filesystem: { success: false, message: "Not attempted" },
+//     };
+//     let overallSuccess = true; // Assume success, set to false if any critical step fails
+//     let httpStatus = 200;
+//     let fileFoundInMongo = false;
+//     let physicalFileFound = false;
 
-    try {
-        // 1. Delete from MongoDB
-        try {
-            const user = await User.findById(userId);
-            if (!user) {
-                results.mongodb.message = "User not found.";
-                // If user not found, we can't confirm if the file was theirs.
-                // Treat as if the file wasn't found for this user.
-            } else {
-                const docIndex = user.uploadedDocuments.findIndex(doc => doc.filename === originalName);
-                if (docIndex > -1) {
-                    fileFoundInMongo = true;
-                    user.uploadedDocuments.splice(docIndex, 1);
-                    await user.save();
-                    results.mongodb.success = true;
-                    results.mongodb.message = "Successfully removed from user's document list.";
-                    console.log(`MongoDB: Document entry '${originalName}' removed for user ${userId}.`);
-                } else {
-                    results.mongodb.message = "Document not found in user's list.";
-                    console.log(`MongoDB: Document entry '${originalName}' not found for user ${userId}.`);
-                }
-            }
-        } catch (mongoError) {
-            console.error(`MongoDB Deletion Error for ${logContext}:`, mongoError);
-            results.mongodb.message = `MongoDB deletion failed: ${mongoError.message}`;
-            overallSuccess = false; // DB error is critical
-        }
+//     try {
+//         // 1. Delete from MongoDB
+//         try {
+//             const user = await User.findById(userId);
+//             if (!user) {
+//                 results.mongodb.message = "User not found.";
+//                 // If user not found, we can't confirm if the file was theirs.
+//                 // Treat as if the file wasn't found for this user.
+//             } else {
+//                 const docIndex = user.uploadedDocuments.findIndex(doc => doc.filename === originalName);
+//                 if (docIndex > -1) {
+//                     fileFoundInMongo = true;
+//                     user.uploadedDocuments.splice(docIndex, 1);
+//                     await user.save();
+//                     results.mongodb.success = true;
+//                     results.mongodb.message = "Successfully removed from user's document list.";
+//                     console.log(`MongoDB: Document entry '${originalName}' removed for user ${userId}.`);
+//                 } else {
+//                     results.mongodb.message = "Document not found in user's list.";
+//                     console.log(`MongoDB: Document entry '${originalName}' not found for user ${userId}.`);
+//                 }
+//             }
+//         } catch (mongoError) {
+//             console.error(`MongoDB Deletion Error for ${logContext}:`, mongoError);
+//             results.mongodb.message = `MongoDB deletion failed: ${mongoError.message}`;
+//             overallSuccess = false; // DB error is critical
+//         }
 
-        // 2. Delete from Qdrant (via Python service)
-        // This endpoint will need to be created in Python: e.g., /delete_qdrant_document_data
-        // It should expect { user_id: userId, document_name: originalName } in the body
-        const qdrantDeleteResult = await callPythonDeletionEndpoint(
-            'DELETE',
-            `/delete_qdrant_document_data`,
-            userId,
-            originalName,
-            logContext
-        );
-        results.qdrant = qdrantDeleteResult;
-        if (!qdrantDeleteResult.success) {
-            console.warn(`Qdrant deletion failed or reported no data for ${logContext}. Message: ${qdrantDeleteResult.message}`);
-            // overallSuccess = false; // Non-critical for now, but log
-        }
+//         // 2. Delete from Qdrant (via Python service)
+//         // This endpoint will need to be created in Python: e.g., /delete_qdrant_document_data
+//         // It should expect { user_id: userId, document_name: originalName } in the body
+//         const qdrantDeleteResult = await callPythonDeletionEndpoint(
+//             'DELETE',
+//             `/delete_qdrant_document_data`,
+//             userId,
+//             originalName,
+//             logContext
+//         );
+//         results.qdrant = qdrantDeleteResult;
+//         if (!qdrantDeleteResult.success) {
+//             console.warn(`Qdrant deletion failed or reported no data for ${logContext}. Message: ${qdrantDeleteResult.message}`);
+//             // overallSuccess = false; // Non-critical for now, but log
+//         }
 
-        // 3. Delete from Neo4j (via Python service)
-        // This uses the existing Python endpoint: /kg/<user_id>/<document_name>
-        const neo4jEndpointPath = `/kg/${userId}/${encodeURIComponent(originalName)}`;
-        const neo4jDeleteResult = await callPythonDeletionEndpoint(
-            'DELETE',
-            neo4jEndpointPath, // userId and originalName are in the path
-            userId, // still pass for logging consistency in helper
-            originalName, // still pass for logging consistency in helper
-            logContext
-        );
-        results.neo4j = neo4jDeleteResult;
-        if (!neo4jDeleteResult.success) {
-            console.warn(`Neo4j deletion failed or reported no data for ${logContext}. Message: ${neo4jDeleteResult.message}`);
-            // overallSuccess = false; // Non-critical for now, but log
-        }
+//         // 3. Delete from Neo4j (via Python service)
+//         // This uses the existing Python endpoint: /kg/<user_id>/<document_name>
+//         const neo4jEndpointPath = `/kg/${userId}/${encodeURIComponent(originalName)}`;
+//         const neo4jDeleteResult = await callPythonDeletionEndpoint(
+//             'DELETE',
+//             neo4jEndpointPath, // userId and originalName are in the path
+//             userId, // still pass for logging consistency in helper
+//             originalName, // still pass for logging consistency in helper
+//             logContext
+//         );
+//         results.neo4j = neo4jDeleteResult;
+//         if (!neo4jDeleteResult.success) {
+//             console.warn(`Neo4j deletion failed or reported no data for ${logContext}. Message: ${neo4jDeleteResult.message}`);
+//             // overallSuccess = false; // Non-critical for now, but log
+//         }
 
-        // 4. Move physical file to backup (filesystem operation)
-        let currentPath = null;
-        let fileType = '';
-        const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
-        const sanitizedUsernameForPath = sanitizeUsernameForDir(usernameForLog);
+//         // 4. Move physical file to backup (filesystem operation)
+//         let currentPath = null;
+//         let fileType = '';
+//         const fileTypesToSearch = ['docs', 'images', 'code', 'others'];
+//         const sanitizedUsernameForPath = sanitizeUsernameForDir(usernameForLog);
 
-        for (const type of fileTypesToSearch) {
-            const potentialPath = path.join(ASSETS_DIR, sanitizedUsernameForPath, type, serverFilename);
-            try {
-                await fs.access(potentialPath); // Check if file exists
-                currentPath = potentialPath;
-                fileType = type;
-                physicalFileFound = true;
-                break;
-            } catch (e) {
-                if (e.code !== 'ENOENT') {
-                    console.warn(`Filesystem: Error accessing ${potentialPath} during delete scan: ${e.message}`);
-                }
-            }
-        }
+//         for (const type of fileTypesToSearch) {
+//             const potentialPath = path.join(ASSETS_DIR, sanitizedUsernameForPath, type, serverFilename);
+//             try {
+//                 await fs.access(potentialPath); // Check if file exists
+//                 currentPath = potentialPath;
+//                 fileType = type;
+//                 physicalFileFound = true;
+//                 break;
+//             } catch (e) {
+//                 if (e.code !== 'ENOENT') {
+//                     console.warn(`Filesystem: Error accessing ${potentialPath} during delete scan: ${e.message}`);
+//                 }
+//             }
+//         }
 
-        if (currentPath) { // If physical file was found
-            const backupUserDir = path.join(BACKUP_DIR, sanitizedUsernameForPath, fileType);
-            await ensureDirExists(backupUserDir);
-            const backupPath = path.join(backupUserDir, serverFilename);
-            try {
-                await fs.rename(currentPath, backupPath);
-                results.filesystem = { success: true, message: "File moved to backup successfully." };
-                console.log(`Filesystem: Moved '${currentPath}' to '${backupPath}'.`);
-            } catch (fsError) {
-                console.error(`Filesystem: Error moving file ${currentPath} to backup for ${logContext}:`, fsError);
-                results.filesystem.message = `Filesystem move to backup failed: ${fsError.message}`;
-                // overallSuccess = false; // Decide if this is critical enough to mark overall failure
-            }
-        } else {
-            results.filesystem.message = "Physical file not found in assets, or already moved.";
-            console.log(`Filesystem: Physical file '${serverFilename}' not found for user ${usernameForLog}.`);
-        }
+//         if (currentPath) { // If physical file was found
+//             const backupUserDir = path.join(BACKUP_DIR, sanitizedUsernameForPath, fileType);
+//             await ensureDirExists(backupUserDir);
+//             const backupPath = path.join(backupUserDir, serverFilename);
+//             try {
+//                 await fs.rename(currentPath, backupPath);
+//                 results.filesystem = { success: true, message: "File moved to backup successfully." };
+//                 console.log(`Filesystem: Moved '${currentPath}' to '${backupPath}'.`);
+//             } catch (fsError) {
+//                 console.error(`Filesystem: Error moving file ${currentPath} to backup for ${logContext}:`, fsError);
+//                 results.filesystem.message = `Filesystem move to backup failed: ${fsError.message}`;
+//                 // overallSuccess = false; // Decide if this is critical enough to mark overall failure
+//             }
+//         } else {
+//             results.filesystem.message = "Physical file not found in assets, or already moved.";
+//             console.log(`Filesystem: Physical file '${serverFilename}' not found for user ${usernameForLog}.`);
+//         }
 
-        // Determine final status and message
-        const successfulDeletes = [results.mongodb.success, results.qdrant.success, results.neo4j.success, results.filesystem.success].filter(Boolean).length;
+//         // Determine final status and message
+//         const successfulDeletes = [results.mongodb.success, results.qdrant.success, results.neo4j.success, results.filesystem.success].filter(Boolean).length;
 
-        if (!fileFoundInMongo && !physicalFileFound) {
-            httpStatus = 404;
-            finalMessage = `File '${originalName}' not found for user.`;
-        } else if (results.mongodb.success) { // Primary record deleted
-            if (successfulDeletes === 4) {
-                finalMessage = `Successfully deleted all data associated with '${originalName}'.`;
-                httpStatus = 200;
-            } else {
-                finalMessage = `File '${originalName}' removed from your list. Some backend data cleanup attempts had issues. Check server logs for details.`;
-                httpStatus = 207; // Multi-Status
-            }
-        } else { // MongoDB deletion failed, but file might have existed
-            finalMessage = `Failed to remove '${originalName}' from your list. Some backend data cleanup may have also failed. Check server logs.`;
-            httpStatus = 500;
-        }
+//         if (!fileFoundInMongo && !physicalFileFound) {
+//             httpStatus = 404;
+//             finalMessage = `File '${originalName}' not found for user.`;
+//         } else if (results.mongodb.success) { // Primary record deleted
+//             if (successfulDeletes === 4) {
+//                 finalMessage = `Successfully deleted all data associated with '${originalName}'.`;
+//                 httpStatus = 200;
+//             } else {
+//                 finalMessage = `File '${originalName}' removed from your list. Some backend data cleanup attempts had issues. Check server logs for details.`;
+//                 httpStatus = 207; // Multi-Status
+//             }
+//         } else { // MongoDB deletion failed, but file might have existed
+//             finalMessage = `Failed to remove '${originalName}' from your list. Some backend data cleanup may have also failed. Check server logs.`;
+//             httpStatus = 500;
+//         }
 
-        console.log(`Deletion outcome for ${logContext}: HTTP Status=${httpStatus}, Overall Success Flag (was pre-status logic)=${overallSuccess}`);
-        return res.status(httpStatus).json({
-            message: finalMessage,
-            details: results
-        });
+//         console.log(`Deletion outcome for ${logContext}: HTTP Status=${httpStatus}, Overall Success Flag (was pre-status logic)=${overallSuccess}`);
+//         return res.status(httpStatus).json({
+//             message: finalMessage,
+//             details: results
+//         });
 
-    } catch (error) {
-        console.error(`!!! UNEXPECTED Error in DELETE /api/files/${serverFilename} for user ${usernameForLog}:`, error);
-        return res.status(500).json({
-            message: 'An unexpected server error occurred during file deletion.',
-            details: results // Send partial results if any
-        });
-    }
-});
+//     } catch (error) {
+//         console.error(`!!! UNEXPECTED Error in DELETE /api/files/${serverFilename} for user ${usernameForLog}:`, error);
+//         return res.status(500).json({
+//             message: 'An unexpected server error occurred during file deletion.',
+//             details: results // Send partial results if any
+//         });
+//     }
+// });
 
 
-module.exports = router;
+// module.exports = router;
 
 ```
 
@@ -23090,12 +23971,90 @@ module.exports = router;
 
 
 
+// // server/routes/generation.js
+// const express = require('express');
+// const axios = require('axios');
+// const router = express.Router();
+// const User = require('../models/User');
+// const AdminDocument = require('../models/AdminDocument');
+
+// router.post('/document', async (req, res) => {
+//     const { markdownContent, docType, sourceDocumentName } = req.body;
+//     const userId = req.user._id;
+
+//     if (!markdownContent || !docType || !sourceDocumentName) {
+//         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
+//     }
+
+//     try {
+//         let sourceDocumentText = null;
+
+//         const user = await User.findById(userId).select('uploadedDocuments');
+//         if (user) {
+//             const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
+//             if (userDocument && userDocument.text) {
+//                 sourceDocumentText = userDocument.text;
+//             }
+//         }
+
+//         if (!sourceDocumentText) {
+//             const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
+//             if (adminDocument && adminDocument.text) {
+//                 sourceDocumentText = adminDocument.text;
+//             }
+//         }
+        
+//         if (!sourceDocumentText) {
+//             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+//         }
+
+//         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+//         if (!pythonServiceUrl) {
+//             return res.status(500).json({ message: "Document generation service is not configured." });
+//         }
+
+//         const generationUrl = `${pythonServiceUrl}/generate_document`;
+        
+//         // 1. Ask Python to generate the document and get the filename
+//         const genResponse = await axios.post(generationUrl, {
+//             markdownContent, docType, sourceDocumentText
+//         }, { timeout: 300000 });
+
+//         if (!genResponse.data || !genResponse.data.success) {
+//             throw new Error(genResponse.data.error || "Python service failed to generate the document.");
+//         }
+
+//         const filename = genResponse.data.filename;
+//         const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
+
+//         // 2. Fetch the generated document from Python as a stream (blob)
+//         console.log(`[Generation Route] Fetching generated file from Python: ${downloadUrl}`);
+//         const fileResponse = await axios.get(downloadUrl, {
+//             responseType: 'stream'
+//         });
+
+//         // 3. Stream the file directly back to the client
+//         res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+//         res.setHeader('Content-Type', fileResponse.headers['content-type']);
+//         fileResponse.data.pipe(res);
+
+//     } catch (error) {
+//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
+//         console.error(`[Generation Route] Error: ${errorMsg}`);
+//         res.status(500).json({ message: errorMsg });
+//     }
+// });
+
+// module.exports = router;
+
 // server/routes/generation.js
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const User = require('../models/User');
+const User = require('../models/User'); // Still needed for API key
 const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource'); // <-- Import KnowledgeSource
+const { decrypt } = require('../utils/crypto'); // For user API key
 
 router.post('/document', async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
@@ -23107,36 +24066,43 @@ router.post('/document', async (req, res) => {
 
     try {
         let sourceDocumentText = null;
+        let apiKeyForRequest = null;
 
-        const user = await User.findById(userId).select('uploadedDocuments');
-        if (user) {
-            const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-            if (userDocument && userDocument.text) {
-                sourceDocumentText = userDocument.text;
+        // 1. Check user-specific KnowledgeSource and get API key
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) {
+                apiKeyForRequest = decrypt(user.encryptedApiKey);
             }
-        }
-
-        if (!sourceDocumentText) {
-            const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
-            if (adminDocument && adminDocument.text) {
-                sourceDocumentText = adminDocument.text;
+        } else {
+            // 2. Fallback to AdminDocument and use server key
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
             }
         }
         
         if (!sourceDocumentText) {
             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
         }
+        if (!apiKeyForRequest) {
+            return res.status(400).json({ message: "API Key for document generation is missing." });
+        }
 
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) {
             return res.status(500).json({ message: "Document generation service is not configured." });
         }
-
+        
         const generationUrl = `${pythonServiceUrl}/generate_document`;
         
-        // 1. Ask Python to generate the document and get the filename
+        // Ask Python to generate the document
         const genResponse = await axios.post(generationUrl, {
-            markdownContent, docType, sourceDocumentText
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
         }, { timeout: 300000 });
 
         if (!genResponse.data || !genResponse.data.success) {
@@ -23146,13 +24112,9 @@ router.post('/document', async (req, res) => {
         const filename = genResponse.data.filename;
         const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
 
-        // 2. Fetch the generated document from Python as a stream (blob)
-        console.log(`[Generation Route] Fetching generated file from Python: ${downloadUrl}`);
-        const fileResponse = await axios.get(downloadUrl, {
-            responseType: 'stream'
-        });
+        // Fetch the generated document as a stream and pipe it to the client
+        const fileResponse = await axios.get(downloadUrl, { responseType: 'stream' });
 
-        // 3. Stream the file directly back to the client
         res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
         res.setHeader('Content-Type', fileResponse.headers['content-type']);
         fileResponse.data.pipe(res);
@@ -23160,7 +24122,7 @@ router.post('/document', async (req, res) => {
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
         console.error(`[Generation Route] Error: ${errorMsg}`);
-        res.status(500).json({ message: errorMsg });
+        res.status(error.response?.status || 500).json({ message: errorMsg });
     }
 });
 
@@ -23245,6 +24207,231 @@ router.get('/visualize/:documentName', async (req, res) => {
         res.status(error.response?.status || 500).json({ error: errorMsg });
     }
 });
+
+module.exports = router;
+```
+
+`server/routes/knowledgeSource.js`
+
+```javascript
+// server/routes/knowledgeSource.js
+const express = require('express');
+const router = express.Router();
+const { Worker } = require('worker_threads');
+const path = require('path');
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
+const fs = require('fs').promises;
+
+// --- HELPER FOR PYTHON SERVICE DELETION ---
+async function callPythonDeletionEndpoint(endpointPath, userId, documentName) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        console.warn(`Python Service Deletion request for ${documentName} skipped: URL not configured.`);
+        return { success: false, message: "Python service URL not configured." };
+    }
+    const deleteUrl = `${pythonServiceUrl.replace(/\/$/, '')}${endpointPath}`;
+    try {
+        await axios.delete(deleteUrl, {
+            data: { user_id: userId, document_name: documentName },
+            timeout: 30000
+        });
+        return { success: true, message: `Successfully requested deletion from ${endpointPath}` };
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        console.error(`Error calling Python for deletion (${deleteUrl}): ${errorMsg}`);
+        return { success: false, message: errorMsg };
+    }
+}
+
+
+// @route   POST /api/knowledge-sources
+// @desc    Add a new URL-based knowledge source
+// @access  Private
+router.post('/', async (req, res) => {
+    const { type, content } = req.body;
+    const userId = req.user._id;
+
+    if (type !== 'url' || !content) {
+        return res.status(400).json({ message: "Request must be for type 'url' and include 'content'." });
+    }
+
+    let newSource;
+    try {
+        // Create initial record in DB to track progress
+        newSource = new KnowledgeSource({
+            userId,
+            sourceType: 'webpage', // Initial type, will be corrected by Python
+            title: content, 
+            sourceUrl: content,
+            status: 'processing_extraction',
+        });
+        await newSource.save();
+
+        // Immediately respond to the user so the UI doesn't hang
+        res.status(202).json({ 
+            message: "URL received. Processing has started in the background.",
+            source: newSource 
+        });
+        
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
+
+        // 1. Call Python to extract text from URL
+        const extractionResponse = await axios.post(`${pythonServiceUrl}/process_url`, {
+            url: content,
+            user_id: userId.toString(),
+        }, { timeout: 300000 }); // 5 min timeout for scraping/transcription
+
+        const { text_content, title, source_type } = extractionResponse.data;
+        if (!text_content) throw new Error("Failed to extract text from the URL source.");
+        
+        // 2. Call Python to add the extracted content to Qdrant and get KG chunks
+        // This is the CRITICAL NEW STEP for URL embedding
+        const addDocumentResponse = await axios.post(`${pythonServiceUrl}/add_document`, {
+            user_id: userId.toString(),
+            file_path: '', // Dummy path, as content is provided directly
+            original_name: title, // Use the extracted title as the original_name
+            text_content_override: text_content // Pass the actual content here
+        }, { timeout: 300000 }); // Large timeout for processing
+
+        const { num_chunks_added_to_qdrant, raw_text_for_analysis, chunks_with_metadata: chunksForKg } = addDocumentResponse.data;
+
+        if (num_chunks_added_to_qdrant === 0) {
+            throw new Error("No embeddings generated for the URL content. It might be too short or failed processing.");
+        }
+
+        // 3. Update the KnowledgeSource record in MongoDB with final details
+        const sourceDoc = await KnowledgeSource.findById(newSource._id);
+        if (!sourceDoc) throw new Error(`KnowledgeSource with ID ${newSource._id} disappeared during processing.`);
+
+        sourceDoc.textContent = text_content; // Store the extracted content
+        sourceDoc.title = title; // Update with proper title from Python
+        sourceDoc.sourceType = source_type; // Update with actual type from Python
+        sourceDoc.status = 'processing_analysis'; // Next step: analysis
+        await sourceDoc.save();
+
+        // 4. Trigger Analysis Worker
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        
+        const workerBaseData = {
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName: title, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
+        };
+        
+        const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
+            workerData: { ...workerBaseData, textForAnalysis: raw_text_for_analysis }
+        });
+        analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (URL: ${title}):`, err));
+        
+        // 5. Trigger KG Worker if chunks are available
+        if (chunksForKg && chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
+            });
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (URL: ${title}):`, err));
+        } else {
+            console.warn(`[KnowledgeSource Route] No chunks for KG processing for URL '${title}'.`);
+            await KnowledgeSource.updateOne(
+                { _id: sourceDoc._id },
+                { $set: { kgStatus: "skipped_no_chunks" } }
+            );
+        }
+
+    } catch (error) {
+        console.error(`Error processing URL source '${content}':`, error);
+        if (newSource) {
+            await KnowledgeSource.updateOne({ _id: newSource._id }, {
+                $set: { status: 'failed', failureReason: error.message }
+            });
+        }
+    }
+});
+
+// @route   GET /api/knowledge-sources
+// @desc    Get all knowledge sources for the user (files, urls) and admin (subjects)
+// @access  Private
+router.get('/', async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const userSourcesPromise = KnowledgeSource.find({ userId }).sort({ createdAt: -1 }).lean();
+        const adminSubjectsPromise = AdminDocument.find().sort({ originalName: 1 }).select('originalName createdAt').lean();
+
+        const [userSources, adminSubjects] = await Promise.all([userSourcesPromise, adminSubjectsPromise]);
+
+        const formattedAdminSubjects = adminSubjects.map(doc => ({
+            _id: `admin_${doc._id}`, // Create a unique ID for the frontend key
+            sourceType: 'subject',
+            title: doc.originalName,
+            status: 'completed',
+            createdAt: doc.createdAt // Pass the creation date
+        }));
+
+        res.json([...formattedAdminSubjects, ...userSources]);
+    } catch (error) {
+        console.error("Error fetching all knowledge sources:", error);
+        res.status(500).json({ message: "Server error while fetching knowledge sources." });
+    }
+});
+
+
+// --- NEW ---
+// @route   DELETE /api/knowledge-sources/:sourceId
+// @desc    Delete a knowledge source and all its associated data
+// @access  Private
+router.delete('/:sourceId', async (req, res) => {
+    const { sourceId } = req.params;
+    const userId = req.user._id.toString();
+    const username = req.user.username;
+
+    try {
+        const source = await KnowledgeSource.findOne({ _id: sourceId, userId });
+        if (!source) {
+            return res.status(404).json({ message: "Knowledge source not found or you do not have permission to delete it." });
+        }
+
+        console.log(`[Delete Source] Deleting source: '${source.title}' for user: ${username}`);
+
+        // 1. Delete from Vector DB (Qdrant) and Graph DB (Neo4j) via Python service
+        await callPythonDeletionEndpoint(`/delete_qdrant_document_data`, userId, source.title);
+        await callPythonDeletionEndpoint(`/kg/${userId}/${encodeURIComponent(source.title)}`, userId, source.title);
+
+        // 2. If it's a file, move the physical file to a backup location
+        if (source.sourceType === 'document' && source.serverFilename) {
+            const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const sourcePath = path.join(__dirname, '..', 'assets', sanitizedUsername, 'document', source.serverFilename);
+            const backupDir = path.join(__dirname, '..', 'backup_assets', sanitizedUsername, 'document');
+            
+            await fs.mkdir(backupDir, { recursive: true });
+            const backupPath = path.join(backupDir, source.serverFilename);
+            
+            try {
+                await fs.rename(sourcePath, backupPath);
+                console.log(`[Delete Source] Backed up file to ${backupPath}`);
+            } catch (fileError) {
+                if (fileError.code !== 'ENOENT') { // ENOENT = file not found, which is ok if it was already cleaned up
+                    console.warn(`[Delete Source] Could not back up physical file '${sourcePath}': ${fileError.message}`);
+                }
+            }
+        }
+
+        // 3. Delete from MongoDB
+        await KnowledgeSource.deleteOne({ _id: sourceId });
+        console.log(`[Delete Source] Removed MongoDB record for '${source.title}'`);
+
+        res.status(200).json({ message: `Successfully deleted '${source.title}'.` });
+    } catch (error) {
+        console.error(`[Delete Source] Error deleting source ID '${sourceId}':`, error);
+        res.status(500).json({ message: "An error occurred while deleting the knowledge source." });
+    }
+});
+
 
 module.exports = router;
 ```
@@ -23958,16 +25145,15 @@ module.exports = router;
 `server/routes/upload.js`
 
 ```javascript
-
-
 // server/routes/upload.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs').promises;
 const axios = require('axios');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
 
@@ -23975,23 +25161,25 @@ const router = express.Router();
 
 // --- Constants & Multer Config ---
 const UPLOAD_DIR = path.join(__dirname, '..', 'assets');
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // Increased to 50MB for media
 const allowedMimeTypes = {
-    'application/pdf': 'docs',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docs',
-    'application/msword': 'docs',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'docs',
-    'application/vnd.ms-powerpoint': 'docs',
-    'text/plain': 'docs', 'text/x-python': 'code', 'application/javascript': 'code',
-    'text/javascript': 'code', 'text/markdown': 'code', 'text/html': 'code',
-    'application/xml': 'code', 'text/xml': 'code', 'application/json': 'code',
-    'text/csv': 'code', 'image/jpeg': 'images', 'image/png': 'images',
-    'image/bmp': 'images', 'image/gif': 'images',
+    // Documents
+    'application/pdf': { type: 'document', processor: 'ai_core' },
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { type: 'document', processor: 'ai_core' },
+    'text/plain': { type: 'document', processor: 'ai_core' },
+    'text/markdown': { type: 'document', processor: 'ai_core' },
+    // Media
+    'audio/mpeg': { type: 'audio', processor: 'media' },
+    'audio/wav': { type: 'audio', processor: 'media' },
+    'video/mp4': { type: 'video', processor: 'media' },
+    'video/quicktime': { type: 'video', processor: 'media' },
+    'image/png': { type: 'image', processor: 'media' },
+    'image/jpeg': { type: 'image', processor: 'media' },
 };
-const allowedExtensions = [
-    '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.txt', '.py', '.js', '.md', 
-    '.html', '.xml', '.json', '.csv', '.log', '.jpg', '.jpeg', '.png', '.bmp', '.gif'
-];
+const allowedExtensions = Object.keys(allowedMimeTypes).flatMap(mime => {
+    const extMap = { 'application/pdf': '.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx', /* etc */ };
+    return extMap[mime] || []; // Simplified, a full map would be needed
+}); // This part can be improved if needed
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -24000,11 +25188,9 @@ const storage = multer.diskStorage({
         }
         const sanitizedUsername = req.user.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
         const fileMimeType = file.mimetype.toLowerCase();
-        const fileTypeSubfolder = allowedMimeTypes[fileMimeType] || 'others';
+        const fileTypeSubfolder = allowedMimeTypes[fileMimeType]?.type || 'others';
         const destinationPath = path.join(UPLOAD_DIR, sanitizedUsername, fileTypeSubfolder);
-        fs.mkdir(destinationPath, { recursive: true }, (err) => {
-             if (err) cb(err); else cb(null, destinationPath);
-         });
+        fs.mkdir(destinationPath, { recursive: true }).then(() => cb(null, destinationPath)).catch(cb);
     },
     filename: (req, file, cb) => {
         const timestamp = Date.now();
@@ -24016,140 +25202,99 @@ const storage = multer.diskStorage({
     }
 });
 
-const fileFilter = (req, file, cb) => {
-    if (!req.user) {
-         const err = new multer.MulterError('UNAUTHENTICATED');
-         err.message = 'User not authenticated.';
-         return cb(err, false);
-    }
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    const mimeType = file.mimetype.toLowerCase();
-    if (allowedMimeTypes[mimeType] && allowedExtensions.includes(fileExt)) {
-        cb(null, true);
-    } else {
-        const err = new multer.MulterError('LIMIT_UNEXPECTED_FILE');
-        err.message = `Invalid file type. Allowed: ${allowedExtensions.join(', ')}.`;
-        cb(err, false);
-    }
-};
+const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MAX_FILE_SIZE }});
-
-async function triggerPythonRagProcessing(userId, filePath, originalName) {
-    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-    if (!pythonServiceUrl) {
-        return { success: false, message: "RAG service URL not configured." };
-    }
-    const addDocumentUrl = `${pythonServiceUrl}/add_document`;
+// Main upload route
+router.post('/', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ message: "No file received." });
+    
+    const userId = req.user._id;
+    const { originalname: originalName, path: serverPath, mimetype } = req.file;
+    
+    let newSource;
     try {
-        const response = await axios.post(addDocumentUrl, { user_id: userId, file_path: filePath, original_name: originalName });
-        const pythonData = response.data;
-        const text = pythonData?.raw_text_for_analysis || null;
-        return {
-            success: !!(text && text.trim()),
-            status: pythonData?.status,
-            message: pythonData?.message || "No message from Python.",
-            text: text,
-            chunksForKg: pythonData?.chunks_with_metadata || []
+        const { type, processor } = allowedMimeTypes[mimetype.toLowerCase()] || {};
+        if (!type || !processor) {
+            throw new Error(`Unsupported file type: ${mimetype}`);
+        }
+
+        newSource = new KnowledgeSource({
+            userId,
+            sourceType: type,
+            title: originalName,
+            serverFilename: path.basename(serverPath),
+            status: 'processing_extraction'
+        });
+        await newSource.save();
+
+        res.status(202).json({ 
+            message: "File accepted. Processing has started in the background.",
+            source: newSource
+        });
+
+        // --- Start background processing ---
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) throw new Error("Python service URL not configured.");
+
+        let pythonEndpoint = '';
+        let pythonPayload = {};
+
+        if (processor === 'ai_core') {
+            pythonEndpoint = '/add_document';
+            pythonPayload = { user_id: userId.toString(), file_path: serverPath, original_name: originalName };
+        } else if (processor === 'media') {
+            pythonEndpoint = '/process_media_file';
+            pythonPayload = { file_path: serverPath, media_type: type };
+        }
+        
+        const extractionResponse = await axios.post(`${pythonServiceUrl}${pythonEndpoint}`, pythonPayload, { timeout: 600000 }); // 10 min timeout for media
+        
+        const text_content = extractionResponse.data?.text_content || (processor === 'ai_core' ? extractionResponse.data?.raw_text_for_analysis : null);
+        
+        if (!text_content) throw new Error("Failed to extract text from the source.");
+        
+        const sourceDoc = await KnowledgeSource.findById(newSource._id);
+        sourceDoc.textContent = text_content;
+        sourceDoc.status = 'processing_analysis';
+        await sourceDoc.save();
+
+        // Trigger analysis and KG workers...
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean();
+        const llmProvider = user?.preferredLlmProvider || 'gemini';
+        const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
+        
+        const workerBaseData = {
+            sourceId: sourceDoc._id.toString(), userId: userId.toString(), originalName, llmProvider,
+            ollamaModel: user.ollamaModel, apiKey: userApiKey, ollamaUrl: user.ollamaUrl
         };
-    } catch (error) {
-        return { success: false, message: `Python RAG call failed: ${error.response?.data?.error || error.message}`};
-    }
-}
-
-router.post('/', (req, res) => {
-    const uploader = upload.single('file');
-
-    uploader(req, res, async function (err) {
-        if (!req.user) {
-            return res.status(401).json({ message: "Authentication error: User context not found." });
-        }
-        if (err) {
-            console.error(`Upload Route: Multer error for user '${req.user.email}': ${err.message}`);
-            return res.status(err instanceof multer.MulterError ? 400 : 500).json({ message: err.message });
-        }
-        if (!req.file) {
-            return res.status(400).json({ message: "No file received or file type rejected." });
-        }
-
-        const userId = req.user._id.toString();
-        const { originalname: originalName, path: tempServerPath } = req.file;
-        if (!tempServerPath) {
-            return res.status(500).json({ message: "File upload failed, temporary path not created." });
-        }
-        const absoluteFilePath = path.resolve(tempServerPath);
-
-        try {
-            const user = await User.findById(userId).select('uploadedDocuments.filename preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
-            if (!user) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(404).json({ message: "User not found." });
-            }
-
-            if (user.uploadedDocuments.some(doc => doc.filename === originalName)) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(409).json({ message: `File '${originalName}' already exists.` });
-            }
-
-            const ragResult = await triggerPythonRagProcessing(userId, absoluteFilePath, originalName);
-
-            if (!ragResult.success) {
-                await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Cleanup Error: ${e.message}`));
-                return res.status(422).json({ message: ragResult.message || "Failed to extract text." });
-            }
-            
-            const newDocEntry = {
-                filename: originalName, text: ragResult.text,
-                analysis: {}, uploadedAt: new Date(), ragStatus: ragResult.status,
-                analysisStatus: "pending", kgStatus: "pending"
-            };
-            await User.updateOne({ _id: userId }, { $push: { uploadedDocuments: newDocEntry } });
-            
-            res.status(202).json({
-                message: `File '${originalName}' accepted. Background processing initiated.`,
-                originalname: originalName,
+        
+        const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { 
+            workerData: { ...workerBaseData, textForAnalysis: text_content }
+        });
+        analysisWorker.on('error', (err) => console.error(`Analysis Worker Error (File: ${originalName}):`, err));
+        
+        // KG worker logic for ai_core processed docs (needs refactor for unified chunks)
+        const chunksForKg = extractionResponse.data?.chunks_with_metadata || [];
+         if (chunksForKg.length > 0) {
+            const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { 
+                workerData: { ...workerBaseData, chunksForKg }
             });
-
-            const userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-            const llmProviderForWorkers = user.preferredLlmProvider || 'gemini';
-
-            if (llmProviderForWorkers === 'gemini' && !userApiKey) {
-                console.warn(`[Upload Route] User ${userId} selected Gemini but has no API key. Workers may fail.`);
-            }
-            
-            const workerData = { 
-                userId, 
-                originalName, 
-                textForAnalysis: ragResult.text, 
-                llmProvider: llmProviderForWorkers, 
-                ollamaModel: user.ollamaModel,
-                apiKey: userApiKey,
-                ollamaUrl: user.ollamaUrl
-            };
-            const kgWorkerData = { ...workerData, chunksForKg: ragResult.chunksForKg };
-
-            const analysisWorker = new Worker(path.resolve(__dirname, '../workers/analysisWorker.js'), { workerData });
-            analysisWorker.on('error', (err) => console.error(`Analysis Worker Error [${originalName}]:`, err));
-
-            if (ragResult.chunksForKg && ragResult.chunksForKg.length > 0) {
-                const kgWorker = new Worker(path.resolve(__dirname, '../workers/kgWorker.js'), { workerData: kgWorkerData });
-                kgWorker.on('error', (err) => console.error(`KG Worker Error [${originalName}]:`, err));
-            } else {
-                 await User.updateOne({ _id: userId, "uploadedDocuments.filename": originalName }, { $set: { "uploadedDocuments.$.kgStatus": "skipped_no_chunks" } });
-            }
-
-            await fs.promises.unlink(absoluteFilePath).catch(e => console.error(`Non-critical cleanup error: ${e.message}`));
-
-        } catch (error) {
-            console.error(`Overall Upload Error for ${originalName}:`, error);
-            if (fs.existsSync(tempServerPath)) {
-                await fs.promises.unlink(tempServerPath).catch(e => console.error(`Final Cleanup Error: ${e.message}`));
-            }
-            if (!res.headersSent) {
-                res.status(500).json({ message: "Server error during file processing." });
-            }
+            kgWorker.on('error', (err) => console.error(`KG Worker Error (File: ${originalName}):`, err));
         }
-    });
+
+
+    } catch (error) {
+        console.error(`Error processing uploaded file '${originalName}':`, error);
+        if (newSource) {
+            await KnowledgeSource.updateOne({ _id: newSource._id }, {
+                $set: { status: 'failed', failureReason: error.message }
+            });
+        }
+        // If headers not sent, send error to client. This happens for initial errors.
+        if (!res.headersSent) {
+             res.status(500).json({ message: error.message || "Server error during file processing." });
+        }
+    }
 });
 
 module.exports = router;
@@ -24269,7 +25414,7 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
-const filesRoutes = require("./routes/files");
+// const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
 const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
@@ -24280,7 +25425,7 @@ const llmConfigRoutes = require("./routes/llmConfig");
 const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
-
+const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -24319,7 +25464,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
 app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
-app.use("/api/files", filesRoutes);
+// app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/subjects", subjectsRoutes);
 app.use("/api/generate", generationRoutes);
@@ -24327,7 +25472,8 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
-
+app.use("/api/admin", adminApiRoutes);
+app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);
@@ -26481,14 +27627,13 @@ run();
 `server/workers/analysisWorker.js`
 
 ```javascript
-
-
 // server/workers/analysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 const path = require('path');
 
-const User = require('../models/User');
+// --- THIS IS THE NEW MODEL ---
+const KnowledgeSource = require('../models/KnowledgeSource');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService');
 const ollamaService = require('../services/ollamaService');
@@ -26496,15 +27641,15 @@ const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
-    const logPrefix = `[Analysis Worker ${process.pid}, Doc: ${originalName}]`;
+async function performFullAnalysis(sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
+    const logPrefix = `[AnalysisWorker ${process.pid}, SourceID: ${sourceId}]`;
     console.log(`${logPrefix} Starting analysis. Using provider: ${llmProvider}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
     if (llmProvider === 'gemini' && !apiKey) {
-        const errorMessage = "Error: Analysis failed because no valid user Gemini API key was provided to the worker.";
+        const errorMessage = "Error: Analysis failed because no valid Gemini API key was provided to the worker.";
         console.error(`${logPrefix} ${errorMessage}`);
         return { 
             success: false, 
@@ -26514,14 +27659,15 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
-            console.log(`${logPrefix} Generating ${type} for '${originalName}'.`);
+            console.log(`${logPrefix} Generating ${type}...`);
             const historyForLLM = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction provided." }] }];
             
             const llmOptions = { 
                 apiKey,
                 ollamaUrl,
                 model: ollamaModel,
-                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT
+                // Using a larger token limit for analysis tasks
+                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG 
             };
 
             const generatedText = llmProvider === 'ollama'
@@ -26559,22 +27705,24 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
         }
     });
     
-    const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
     try {
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
+        // --- REFACTORED DB UPDATE ---
+        // Now updates the KnowledgeSource document directly.
+        await KnowledgeSource.updateOne(
+            { _id: sourceId },
             {
                 $set: {
-                    "uploadedDocuments.$.analysis.faq": analysisResults.faq,
-                    "uploadedDocuments.$.analysis.topics": analysisResults.topics,
-                    "uploadedDocuments.$.analysis.mindmap": analysisResults.mindmap,
-                    "uploadedDocuments.$.analysisStatus": finalAnalysisStatus,
-                    "uploadedDocuments.$.analysisTimestamp": new Date()
+                    "analysis.faq": analysisResults.faq,
+                    "analysis.topics": analysisResults.topics,
+                    "analysis.mindmap": analysisResults.mindmap,
+                    "status": allIndividualAnalysesSuccessful ? "completed" : "failed",
+                    "failureReason": allIndividualAnalysesSuccessful ? "" : "One or more analysis steps failed."
                 }
             }
         );
-        console.log(`${logPrefix} Analysis results (Status: ${finalAnalysisStatus}) stored in DB.`);
+        console.log(`${logPrefix} Analysis results stored in DB.`);
         return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with some failures'}.` };
+        // --- END REFACTOR ---
     } catch (dbError) {
         console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
         return { success: false, message: `DB Error storing analysis: ${dbError.message}` };
@@ -26582,68 +27730,48 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 }
 
 async function run() {
-    const { userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
+    const { sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
     let dbConnected = false;
-    let overallTaskSuccess = false;
-    let finalMessageToParent = "Analysis worker encountered an issue.";
 
     try {
-        if (!process.env.MONGO_URI || !userId || !originalName) {
-            throw new Error("Worker started with incomplete data (MONGO_URI, userId, or originalName missing).");
+        if (!process.env.MONGO_URI || !sourceId) {
+            throw new Error("Worker started with incomplete data (MONGO_URI or sourceId missing).");
         }
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
-            { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
-        );
 
         if (!textForAnalysis || textForAnalysis.trim() === '') {
-            await User.updateOne(
-                { _id: userId, "uploadedDocuments.filename": originalName },
-                { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
-            );
-            overallTaskSuccess = true;
-            finalMessageToParent = "Analysis skipped: No text provided.";
+            await KnowledgeSource.updateOne({ _id: sourceId }, {
+                $set: { status: "failed", failureReason: "Analysis skipped: No text content was extracted." }
+            });
         } else {
-            const result = await performFullAnalysis(
-                userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
+            await performFullAnalysis(
+                sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
             );
-            overallTaskSuccess = result.success;
-            finalMessageToParent = result.message;
-        }
-
-        if (parentPort) {
-            parentPort.postMessage({ success: overallTaskSuccess, originalName, message: finalMessageToParent });
         }
 
     } catch (error) {
-        console.error(`[Analysis Worker] Critical error for '${originalName}':`, error);
-        finalMessageToParent = error.message;
-        if (dbConnected && userId && originalName) {
+        console.error(`[Analysis Worker] Critical error for sourceId '${sourceId}':`, error);
+        if (dbConnected && sourceId) {
             try {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
+                await KnowledgeSource.updateOne(
+                    { _id: sourceId },
+                    { $set: { status: "failed", failureReason: `Critical worker error: ${error.message}` } }
                 );
             } catch (dbUpdateError) {
                 console.error(`[Analysis Worker] Failed to update status to 'failed_critical':`, dbUpdateError);
             }
         }
-        if (parentPort) {
-            parentPort.postMessage({ success: false, originalName, error: finalMessageToParent });
-        }
     } finally {
         if (dbConnected) {
             await mongoose.disconnect();
         }
-        console.log(`[Analysis Worker] Finished task for ${originalName}. Success: ${overallTaskSuccess}`);
+        console.log(`[Analysis Worker] Finished task for sourceId ${sourceId}.`);
     }
 }
 
 run();
-
 ```
 
 `server/workers/kgWorker.js`
@@ -26653,79 +27781,64 @@ run();
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 
-// --- Models and Services ---
-const User = require('../models/User');
-const AdminDocument = require('../models/AdminDocument'); // Import AdminDocument model
+// --- REFACTORED MODELS ---
+const KnowledgeSource = require('../models/KnowledgeSource');
 const connectDB = require('../config/db');
 const kgService = require('../services/kgService');
 
 async function runKgGeneration() {
-    // --- Destructure all possible fields from workerData ---
-    const { chunksForKg, userId, originalName, llmProvider, ollamaModel, adminDocumentId } = workerData;
+    // --- REFACTORED DESTRUCTURING ---
+    const { chunksForKg, userId, originalName, llmProvider, ollamaModel, sourceId } = workerData;
     
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";
-    const logPrefix = `[KG Worker ${process.pid}, Doc: ${originalName}]`;
+    const logPrefix = `[KG Worker ${process.pid}, SourceID: ${sourceId}]`;
 
     try {
-        console.log(`${logPrefix} Received task. User/Context: '${userId}'. Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
-        if (!process.env.MONGO_URI) throw new Error("MONGO_URI not set in KG worker environment.");
-        if (!userId || !originalName) throw new Error("Missing userId or originalName in workerData.");
+        console.log(`${logPrefix} Received task. Chunks: ${chunksForKg ? chunksForKg.length : 0}`);
+        if (!process.env.MONGO_URI || !sourceId || !userId || !originalName) {
+            throw new Error("Missing critical worker data (MONGO_URI, sourceId, userId, or originalName).");
+        }
 
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
         console.log(`${logPrefix} DB Connected.`);
 
-        // --- THIS IS THE CORE REFACTORING LOGIC ---
-        // Determine which model to update based on the presence of adminDocumentId
-        const isProcessingAdminDoc = !!adminDocumentId;
-        const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
-        const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
-        const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
-
-        await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "processing" } });
-        console.log(`${logPrefix} Status set to 'processing' for ${isProcessingAdminDoc ? 'admin document' : 'user document'}.`);
+        // --- REFACTORED DB UPDATE LOGIC ---
+        await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "processing" } });
+        console.log(`${logPrefix} Status set to 'processing'.`);
 
         if (!chunksForKg || chunksForKg.length === 0) {
             finalMessage = "No chunks provided for KG generation.";
-            await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "skipped_no_chunks", kgTimestamp: new Date() } });
+            await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "skipped_no_chunks" } });
             overallSuccess = true;
         } else {
+            // NOTE: The `userId` and `originalName` are still passed to kgService for populating metadata in Neo4j.
             const kgExtractionResult = await kgService.generateAndStoreKg(chunksForKg, userId, originalName, llmProvider, ollamaModel);
 
             if (kgExtractionResult && kgExtractionResult.success) {
-                const updatePayload = {
-                    [isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus"]: "completed",
-                    [isProcessingAdminDoc ? "kgNodesCount" : "uploadedDocuments.$.kgNodesCount"]: kgExtractionResult.finalKgNodesCount,
-                    [isProcessingAdminDoc ? "kgEdgesCount" : "uploadedDocuments.$.kgEdgesCount"]: kgExtractionResult.finalKgEdgesCount,
-                    [isProcessingAdminDoc ? "kgTimestamp" : "uploadedDocuments.$.kgTimestamp"]: new Date()
-                };
-                await ModelToUpdate.updateOne(findQuery, { $set: updatePayload });
+                await KnowledgeSource.updateOne(
+                    { _id: sourceId }, 
+                    { $set: { "kgStatus": "completed" } }
+                );
                 overallSuccess = true;
                 finalMessage = kgExtractionResult.message || "KG generation and storage completed successfully.";
             } else {
-                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_extraction" } });
+                await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "failed_extraction" } });
                 finalMessage = kgExtractionResult?.message || "KG detailed extraction or storage failed.";
                 overallSuccess = false;
             }
         }
-
-        if (parentPort) {
-            parentPort.postMessage({ success: overallSuccess, originalName, message: finalMessage });
-        }
+        // --- END REFACTOR ---
 
     } catch (error) {
         console.error(`${logPrefix} CRITICAL error:`, error);
         finalMessage = error.message || "Unknown critical error in KG worker.";
         overallSuccess = false;
-        if (dbConnected && (userId || adminDocumentId)) {
+        if (dbConnected && sourceId) {
             try {
-                const isProcessingAdminDoc = !!adminDocumentId;
-                const ModelToUpdate = isProcessingAdminDoc ? AdminDocument : User;
-                const findQuery = isProcessingAdminDoc ? { _id: adminDocumentId } : { _id: userId, "uploadedDocuments.filename": originalName };
-                const statusUpdateField = isProcessingAdminDoc ? "kgStatus" : "uploadedDocuments.$.kgStatus";
-                await ModelToUpdate.updateOne(findQuery, { $set: { [statusUpdateField]: "failed_critical" } });
+                await KnowledgeSource.updateOne({ _id: sourceId }, { $set: { "kgStatus": "failed_critical" } });
             } catch (dbUpdateError) {
                 console.error(`${logPrefix} DB update error on critical fail:`, dbUpdateError);
             }

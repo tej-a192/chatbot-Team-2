@@ -803,7 +803,51 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 **FINAL JSON TEST CASE ARRAY:**
 `;
 
+// ==============================================================================
+// === PROMPT COACH PROMPTS ===
+// ==============================================================================
 
+const PROMPT_COACH_TEMPLATE = `
+You are an expert Prompt Engineering Coach. Your task is to analyze the user's provided prompt and rewrite it to be more specific, provide more context, and ultimately be more effective for an AI Tutor specializing in academic and technical topics.
+
+Your entire output MUST be a single, valid JSON object with two keys: "improvedPrompt" and "explanation".
+- "improvedPrompt": Your rewritten, superior version of the prompt.
+- "explanation": A brief, bulleted list in Markdown explaining the key improvements you made. Use "- " for each bullet point.
+
+User's Prompt: "{userPrompt}"
+
+Example Output for a user prompt of "tell me about python":
+{
+  "improvedPrompt": "Provide a beginner-friendly overview of Python. Cover its main uses (like web development, data science, and automation) and include a simple 'Hello, World!' code example.",
+  "explanation": "- **Added Specificity:** Asked for a 'beginner-friendly overview' to set the right tone.\\n- **Provided Context:** Mentioned specific uses to guide the AI's focus.\\n- **Requested Actionable Content:** Asked for a 'code example' to get a practical response."
+}
+
+FINAL JSON OUTPUT:
+`;
+
+const CRITICAL_THINKING_CUE_TEMPLATE = `
+You are a Devil's Advocate, a Fact-Checker, and a Practical Mentor AI. Your task is to read the following AI-generated text and identify opportunities to encourage deeper, more critical thinking.
+
+Based on the text, generate up to three distinct types of follow-up prompts for the user.
+
+Your entire output MUST be a single, valid JSON object. It can contain any of the following three keys: "verificationPrompt", "alternativePrompt", and "applicationPrompt".
+- "verificationPrompt": A prompt that asks for external evidence, sources, or data to back up a key claim.
+- "alternativePrompt": A prompt that asks for counterarguments, disadvantages, or different perspectives on the topic.
+- "applicationPrompt": A prompt that asks for a practical example, a "what-if" scenario, or how the concept applies to a real-world problem.
+
+If you cannot generate a meaningful prompt for a specific type, omit its key from the JSON. If no good prompts can be generated at all, return an empty JSON object: {}.
+
+AI-Generated Text: "{aiAnswer}"
+
+Example for "React is the best frontend framework due to its virtual DOM, which makes it faster than competitors.":
+{
+  "verificationPrompt": "Find sources and benchmarks comparing React's virtual DOM performance to Svelte's compiler-based approach.",
+  "alternativePrompt": "What are some common criticisms or disadvantages of using React?",
+  "applicationPrompt": "How would I handle global state management in a large-scale React application?"
+}
+
+FINAL JSON OUTPUT:
+`;
 
 module.exports = {
     // Analysis
@@ -825,4 +869,6 @@ module.exports = {
     DOCX_EXPANSION_PROMPT_TEMPLATE,
     PPTX_EXPANSION_PROMPT_TEMPLATE,
     PODCAST_SCRIPT_PROMPT_TEMPLATE,
+    PROMPT_COACH_TEMPLATE,
+    CRITICAL_THINKING_CUE_TEMPLATE
 };  

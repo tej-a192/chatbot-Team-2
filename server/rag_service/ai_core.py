@@ -762,20 +762,25 @@ def generate_segment_embeddings(document_chunks: List[Dict[str, Any]]) -> List[D
 
 
 # --- Main Orchestration Function ---
-def process_document_for_qdrant(file_path: str, original_name: str, user_id: str) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
+def process_document_for_qdrant(
+    file_path: str, # Could be empty if text_content_override is used
+    original_name: str,
+    user_id: str,
+    text_content_override: Optional[str] = None # NEW parameter
+) -> tuple[List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
     """
-    Main orchestrator for processing a document.
+    Main orchestrator for processing a document or raw text.
     Returns:
         - final_chunks_for_qdrant: List of chunks with embeddings for Qdrant.
         - text_for_node_analysis: Consolidated text for Node.js general analysis (FAQ, Topics).
         - chunks_for_kg_worker: List of chunks with metadata (no embeddings) for KG worker.
     """
     logger.info(f"ai_core: Orchestrating document processing for '{original_name}', user '{user_id}'")
-    if not os.path.exists(file_path):
-        logger.error(f"File not found at ai_core entry: {file_path}")
-        # Return empty tuple of expected types
+    
+    # Check if source is valid (either text_content_override or existing file_path)
+    if not text_content_override and not (file_path and os.path.exists(file_path)):
+        logger.error(f"File not found at ai_core entry or no text_content_override: {file_path}")
         return [], None, []
-
 
     # Default return values for failure cases
     empty_qdrant_chunks = []
@@ -783,26 +788,38 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
     empty_kg_chunks = []
 
     try:
-        # 1. Initial Parsing (Rich Element Extraction)
-        parsed_doc_elements = _get_initial_parsed_document(file_path)
-        initial_text_from_parser = parsed_doc_elements.get('text_content')
-        images_from_parser = parsed_doc_elements.get('images', [])
-        tables_from_parser = parsed_doc_elements.get('tables', [])
-        is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
-        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+        initial_text_from_parser = None
+        images_from_parser = []
+        tables_from_parser = []
+        is_scanned_heuristic = False
+        file_type_from_parser = os.path.splitext(original_name)[1].lower() # Default type from original name
 
-        # 2. OCR if needed
+        if text_content_override:
+            # If override is provided, use it directly, bypass file parsing.
+            logger.info(f"ai_core: Using text_content_override for '{original_name}'.")
+            initial_text_from_parser = text_content_override
+            file_type_from_parser = "text_override" # Custom type for metadata for debugging/tracking
+        else:
+            # Original file parsing logic
+            parsed_doc_elements = _get_initial_parsed_document(file_path)
+            initial_text_from_parser = parsed_doc_elements.get('text_content')
+            images_from_parser = parsed_doc_elements.get('images', [])
+            tables_from_parser = parsed_doc_elements.get('tables', [])
+            is_scanned_heuristic = parsed_doc_elements.get('is_scanned_heuristic', False)
+            file_type_from_parser = os.path.splitext(original_name)[1].lower() # Or get from parsed_doc_elements if available
+
+        # 2. OCR if needed (only if content was from a file/images and not explicitly overridden)
         ocr_text_output = ""
         ocr_applied_flag = False
+        
         # Decide if OCR is necessary:
-        # - Explicitly image file types.
-        # - Parser's heuristic says scanned.
-        # - Parser extracted no text but found images (strong indicator for OCR).
-        # - Parser extracted minimal text and images are present (e.g., a DOCX that's mostly a picture).
-        should_ocr = is_scanned_heuristic or \
-                     (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
-                     (not initial_text_from_parser and images_from_parser) or \
-                     (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser) # Heuristic for low text + images
+        # Only try OCR if there's no initial text (from parser or override) AND images were found
+        # OR if it's explicitly an image file type and no override.
+        should_ocr = (not text_content_override) and \
+                     (is_scanned_heuristic or \
+                      (file_type_from_parser in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif']) or \
+                      (not initial_text_from_parser and images_from_parser) or \
+                      (initial_text_from_parser and len(initial_text_from_parser) < 200 * len(images_from_parser) and images_from_parser))
 
         if should_ocr and images_from_parser:
             if PYTESSERACT_AVAILABLE and pytesseract:
@@ -812,7 +829,7 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             else:
                 logger.warning(f"OCR needed for {original_name} but Pytesseract not available. Content may be incomplete.")
         
-        # 3. Combine Text (Parser + OCR)
+        # 3. Combine Text (Parser/Override + OCR)
         combined_raw_text_parts = []
         if initial_text_from_parser: combined_raw_text_parts.append(initial_text_from_parser)
         if ocr_text_output: combined_raw_text_parts.append(ocr_text_output)
@@ -835,39 +852,32 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
             file_type_from_parser,
             original_name
         )
-        # This `text_for_further_processing` is a good candidate for Node.js analysis (FAQ, topics)
-        # as it's cleaned and has table context.
         raw_text_for_node_analysis = text_for_further_processing 
 
         # 6. Extract Comprehensive Metadata
         doc_metadata = extract_document_metadata_info(
-            file_path,
+            file_path if not text_content_override else f"virtual://{original_name}", # Provide a sensible path for metadata if override
             text_for_further_processing, # Pass the final text that will be chunked
-            parsed_doc_elements, # Pass the full initial parse results
+            parsed_doc_elements if not text_content_override else {}, # Pass initial parse results or empty if override
             original_name,
             user_id
         )
         doc_metadata['ocr_applied'] = ocr_applied_flag # Update with actual OCR status
+        doc_metadata['source_type_actual'] = file_type_from_parser # Capture true source type from URL processing
 
         # 7. Chunk Document
-        # We chunk `text_for_further_processing` which includes table representations.
         chunks_with_metadata_for_qdrant_and_kg = chunk_document_into_segments(
             text_for_further_processing,
             doc_metadata # Pass rich metadata to chunks
         )
         if not chunks_with_metadata_for_qdrant_and_kg:
             logger.warning(f"No chunks produced for {original_name}. Cannot proceed with Qdrant/KG.")
-            # Still return raw_text_for_node_analysis if it exists
             return empty_qdrant_chunks, raw_text_for_node_analysis, empty_kg_chunks
 
         # Prepare chunks for KG worker (these don't need embeddings yet)
-        # Important: Deep copy if you modify this list before embedding,
-        # or if embedding modifies in-place (unlikely with current generate_segment_embeddings)
         chunks_for_kg_worker = copy.deepcopy(chunks_with_metadata_for_qdrant_and_kg) 
-        # Remove embedding from KG chunks if it somehow got there, or any very large fields not needed by KG LLM
         for chunk in chunks_for_kg_worker:
             chunk.pop('embedding', None) 
-            # Consider removing other large metadata fields if KG LLM doesn't need them from each chunk's metadata
 
         # 8. Generate Embeddings for Qdrant chunks
         final_chunks_for_qdrant = generate_segment_embeddings(chunks_with_metadata_for_qdrant_and_kg)
@@ -876,13 +886,9 @@ def process_document_for_qdrant(file_path: str, original_name: str, user_id: str
         return final_chunks_for_qdrant, raw_text_for_node_analysis, chunks_for_kg_worker
 
     except Exception as e:
-        # Check for specific critical errors like Tesseract not found
         if TESSERACT_ERROR and isinstance(e, TESSERACT_ERROR):
             logger.critical(f"ai_core: Tesseract (OCR) not found processing {original_name}. OCR failed. Error: {e}", exc_info=False)
-            # Depending on policy, you might still want to return any text extracted *before* OCR attempt.
-            # For now, re-raise to indicate critical failure to the caller (app.py).
             raise
         
         logger.error(f"ai_core: Critical error processing {original_name}: {e}", exc_info=True)
-        # Re-raise the exception to be handled by the caller in app.py
         raise

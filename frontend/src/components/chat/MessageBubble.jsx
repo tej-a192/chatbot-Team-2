@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check } from 'lucide-react';
+import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
@@ -60,7 +60,7 @@ const AnimatedThinking = ({ content }) => {
     );
 };
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const contentRef = useRef(null);
@@ -149,21 +149,44 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     <details className="group/details text-xs">
-                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
-                            <span className="flex items-center gap-1">
-                                <LinkIcon size={14} /> References
-                            </span>
-                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
-                        </summary>
-                        <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
-                            {references.map((ref, index) => (
-                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
-                                    <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
-                                </li>
-                            ))}
-                        </ul>
-                    </details>
+                     {/* ... details block for references ... */}
+                </div>
+            )}
+            
+            {!isStreaming && !isUser && criticalThinkingCues && (
+                <div className="max-w-[85%] md:max-w-[75%] w-full mt-2 pl-2 animate-fadeIn">
+                    <div className="border-t border-dashed border-border-light dark:border-border-dark pt-2">
+                        <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark flex items-center gap-1.5 mb-2">
+                            <Lightbulb size={14} />
+                            Critical Thinking Prompts
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                            {criticalThinkingCues.verificationPrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.verificationPrompt)}
+                                    className="text-xs bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 px-2.5 py-1 rounded-full hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.verificationPrompt}
+                                </button>
+                            )}
+                            {criticalThinkingCues.alternativePrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.alternativePrompt)}
+                                    className="text-xs bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-1 rounded-full hover:bg-amber-500/20 dark:hover:bg-amber-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.alternativePrompt}
+                                </button>
+                            )}
+                            {criticalThinkingCues.applicationPrompt && (
+                                <button
+                                    onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
+                                    className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
+                                >
+                                    {criticalThinkingCues.applicationPrompt}
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

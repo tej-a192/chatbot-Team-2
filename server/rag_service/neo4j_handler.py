@@ -11,14 +11,28 @@ _neo4j_driver = None
 def init_driver():
     global _neo4j_driver
     if _neo4j_driver is not None:
-        try: _neo4j_driver.verify_connectivity(); return
-        except Exception: 
+        try:
+            _neo4j_driver.verify_connectivity()
+            # If connected and healthy, try to create the index
+            try:
+                with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
+                    session.execute_write(_create_fulltext_index_if_not_exists)
+            except Exception as e:
+                logger.warning(f"Neo4j: Could not execute index creation during init_driver (non-fatal if already exists): {e}")
+            return # Driver already initialized and healthy, index check done
+        except Exception:
             if _neo4j_driver: _neo4j_driver.close()
-            _neo4j_driver = None
+            _neo4j_driver = None # Reset if not healthy
     try:
         _neo4j_driver = GraphDatabase.driver(config.NEO4J_URI, auth=(config.NEO4J_USERNAME, config.NEO4J_PASSWORD))
         _neo4j_driver.verify_connectivity()
         logger.info(f"Neo4j driver initialized. Connected to: {config.NEO4J_URI}")
+        
+        # --- IMPORTANT: Call index creation here after successful connection ---
+        with _neo4j_driver.session(database=config.NEO4J_DATABASE) as session:
+            session.execute_write(_create_fulltext_index_if_not_exists)
+        # --- END IMPORTANT ---
+
     except Exception as e:
         logger.critical(f"Failed to initialize Neo4j driver: {e}", exc_info=True)
         _neo4j_driver = None
@@ -38,8 +52,33 @@ def _execute_read_tx(tx_function, *args, **kwargs):
 def _execute_write_tx(tx_function, *args, **kwargs):
     with get_driver_instance().session(database=config.NEO4J_DATABASE) as session:
         return session.execute_write(tx_function, *args, **kwargs)
+def _create_fulltext_index_if_not_exists(tx):
+    index_name = "node_search_index"
+    
+    # Check if index already exists
+    # Neo4j 5.x syntax to list indexes. Use `db.indexes()` for older versions.
+    result = tx.run(f"SHOW FULLTEXT INDEXES WHERE name = '{index_name}'")
+    if result.single():
+        logger.info(f"Neo4j: Full-text index '{index_name}' already exists.")
+        return
 
-
+    # If it doesn't exist, create it
+    create_query = (
+        f"CREATE FULLTEXT INDEX {index_name} "
+        f"FOR (n:KnowledgeNode) ON EACH [n.nodeId, n.description] "
+        f"OPTIONS {{indexConfig: {{`fulltext.analyzer`: 'standard', `fulltext.eventually_consistent`: true}}}}"
+    )
+    try:
+        tx.run(create_query)
+        logger.info(f"Neo4j: Successfully created full-text index '{index_name}'.")
+    except Exception as e:
+        # Handle cases where index might have been created by another process concurrently
+        if "already exists" in str(e):
+            logger.info(f"Neo4j: Full-text index '{index_name}' concurrently created or already exists (race condition). Proceeding.")
+        else:
+            logger.error(f"Neo4j: Failed to create full-text index '{index_name}': {e}", exc_info=True)
+            raise #
+            
 # --- Private Transactional Cypher Functions ---
 # (ingest/delete/add functions are correct and do not need changes)
 def _delete_kg_transactional(tx, user_id, document_name):
