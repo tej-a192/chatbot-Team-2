@@ -22,8 +22,6 @@ import tempfile
 import shutil
 import json
 
-import asyncio
-from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, check_facts_agentic
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +43,8 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
+    import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -682,7 +681,7 @@ def query_kg_route():
 def analyze_integrity_route():
     data = request.get_json()
     text = data.get('text')
-    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "facts"]
+    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
     api_key = data.get('api_key')
 
     if not text or not checks:
@@ -708,25 +707,27 @@ def analyze_integrity_route():
         
         if 'bias' in checks:
             try:
-                results['bias'] = check_bias_hybrid(text, llm_func)
+                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
             except Exception as e:
                 logger.error(f"Bias check failed: {e}")
                 results['bias'] = {"status": "error", "message": str(e)}
 
-        if 'facts' in checks:
+        # --- THIS IS THE REPLACEMENT ---
+        if 'readability' in checks:
             try:
-                # Running async function in a sync context
-                results['facts'] = loop.run_until_complete(check_facts_agentic(text, llm_func))
+                results['readability'] = integrity_services.analyze_readability(text)
             except Exception as e:
-                logger.error(f"Fact check failed: {e}")
-                results['facts'] = {"status": "error", "message": str(e)}
+                logger.error(f"Readability check failed: {e}")
+                results['readability'] = {"status": "error", "message": str(e)}
+        # --- END REPLACEMENT ---
         
         loop.close()
         return jsonify(results), 200
 
     except Exception as e:
         return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
-
+        
+             
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
     data = request.get_json()
@@ -735,16 +736,13 @@ def get_turnitin_report_route():
         return create_error_response("Missing 'submissionId'", 400)
         
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        report = loop.run_until_complete(get_turnitin_report(submission_id))
-        loop.close()
+        # Run the async report fetching function in a managed event loop
+        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
-
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])

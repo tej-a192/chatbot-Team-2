@@ -37,3 +37,4 @@ beautifulsoup4
 playwright
 moviepy
 Werkzeug
+aiohttp

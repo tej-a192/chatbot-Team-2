@@ -22,7 +22,7 @@ const availableTools = [
     },
     {
         title: 'Academic Integrity & Analysis',
-        description: 'Check your text for potential plagiarism, biased language, and factual inaccuracies.',
+        description: 'Check your text for potential plagiarism, biased language, and readability metrics..',
         icon: ShieldCheck, // This line will now work correctly
         path: '/tools/integrity-checker',
         status: 'active'

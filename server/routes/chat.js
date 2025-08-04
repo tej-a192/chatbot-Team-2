@@ -148,7 +148,7 @@ router.post('/message', async (req, res) => {
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
+                { upsert: false, new: true }
             );
             if (finalBotMessageObject) {
                 extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
