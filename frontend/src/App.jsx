@@ -147,22 +147,20 @@ function App() {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-    const handleNewChat = useCallback(async (callbackOrMessages) => {
-        const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
-        const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+        const messages = appStateMessages;
 
-        if (messages.length === 0 && currentSessionId) {
+        if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
+            if (callback) callback(currentSessionId);
             return;
         }
         
         setIsSessionLoading(true);
         try {
-            const data = await api.startNewSession(currentSessionId); 
+            const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
             if (data && data.newSessionId) {
                 setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-
                 if (data.studyPlanSuggestion) {
                     const { topic, reason } = data.studyPlanSuggestion;
                     toast.custom((t) => (
@@ -188,16 +186,24 @@ function App() {
                         </motion.div>
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                if (callback) callback(data.newSessionId);
+                if (callback) {
+                    // Only show "New chat started!" toast if not explicitly skipping analysis
+                    if (!skipSessionAnalysis) {
+                         toast.success("New chat started!"); 
+                    }
+                    callback(data.newSessionId);
+                }
             } else {
                 toast.error(data.message || "Could not start new chat session.");
+                if (callback) callback(null);
             }
         } catch (error) {
             toast.error(`Failed to start new chat: ${error.message}`);
+            if (callback) callback(null);
         } finally {
             setIsSessionLoading(false);
         }
-    }, [currentSessionId, setGlobalSessionId, navigate]);
+    }, [currentSessionId, setGlobalSessionId, navigate, appStateMessages]);
     
     const fetchChatHistory = useCallback(async (sid) => {
         if (!sid || !regularUserToken) {

@@ -351,6 +351,28 @@ html.light .code-block-copy-button:hover {
 .prose pre {
   @apply relative;
 }
+
+@property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.animated-border-button {
+  @apply relative z-0 inline-flex items-center justify-center overflow-hidden rounded-full;
+  background: conic-gradient(from var(--angle), #FFA000, #FF4500, #FFA000);
+  animation: spin-border 4s linear infinite; 
+  padding: 2px; 
+}
+
+.animated-border-button > span {
+  @apply block rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold px-5 py-2.5; /* Match padding to button content */
+  background: none;
+}
+
+.animated-border-button:hover > span {
+  @apply from-orange-600 to-red-600; 
+}
 }
 
 

@@ -69,9 +69,10 @@ const api = {
     const response = await apiClient.get("/chat/sessions");
     return response.data;
   },
-  startNewSession: async (previousSessionId) => {
+  startNewSession: async (previousSessionId, skipAnalysis = false) => {
     const response = await apiClient.post("/chat/history", {
       previousSessionId,
+      skipAnalysis
     });
     return response.data;
   },
@@ -302,6 +303,10 @@ const api = {
   getIntegrityReport: async (reportId) => {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
     return response.data; // Expects the full report object with status updates
+  },
+  deleteLearningPath: async (pathId) => {
+    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+    return response.data;
   },
 };
 
