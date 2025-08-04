@@ -495,8 +495,8 @@ Based on the CURRENT MODE and the USER'S QUERY, choose one action. Your entire o
   }
   \`\`\`
 
-Provide your JSON decision now.
-`;
+Your entire response MUST be this JSON object and nothing else. Do not add any conversational text, introductions, or explanations.
+Provide your JSON decision now.`;
 };
 
 

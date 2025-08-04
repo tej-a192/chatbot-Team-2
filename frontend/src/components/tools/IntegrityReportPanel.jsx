@@ -73,39 +73,54 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                 
                 {/* Bias Section */}
                 <Section title="Bias & Inclusivity" icon={Scale}>
-                    {!bias || bias.length === 0 ? (
-                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                    {/* --- THIS IS THE FIX --- */}
+                    {/* We must first check if 'bias' is an array before trying to map it. */}
+                    {Array.isArray(bias) ? (
+                        bias.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {bias.map((item, i) => (
+                                    <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
+                                        <p><strong>Found:</strong> "{item.text}"</p>
+                                        <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
                     ) : (
-                        <ul className="space-y-3">
-                            {bias.map((item, i) => (
-                                <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
-                                    <p><strong>Found:</strong> "{item.text}"</p>
-                                    <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
-                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
-                                </li>
-                            ))}
-                        </ul>
+                        // If bias is not an array, it's our error object.
+                        <p className="text-red-500">{bias?.message || "An error occurred during the bias check."}</p>
                     )}
+                    {/* --- END OF FIX --- */}
                 </Section>
 
                 {/* Fact-Checking Section */}
                 <Section title="Fact-Checking" icon={Lightbulb}>
-                     {!facts || facts.length === 0 ? (
-                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
+                    {Array.isArray(facts) ? (
+                        facts.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {facts.map((item, i) => (
+                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
+                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
+                                        onClick={() => onFindingSelect(item)}
+                                    >
+                                        <p><strong>Claim:</strong> "{item.claim}"</p>
+                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
                     ) : (
-                         <ul className="space-y-3">
-                            {facts.map((item, i) => (
-                                <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
-                                    ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
-                                    onClick={() => onFindingSelect(item)}
-                                >
-                                    <p><strong>Claim:</strong> "{item.claim}"</p>
-                                    <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
-                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
-                                </li>
-                            ))}
-                        </ul>
+                        // If facts is not an array, it's our error object.
+                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
                     )}
+                     {/* --- END OF FIX --- */}
                 </Section>
             </div>
         </div>

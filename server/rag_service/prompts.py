@@ -34,9 +34,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\\n10", "expectedOutput": "15" }},
-{{ "input": "0\\n0", "expectedOutput": "0" }},
-{{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{"input": "5\\n10", "expectedOutput": "15"}},
+{{"input": "0\\n0", "expectedOutput": "0"}},
+{{"input": "-5\\n5", "expectedOutput": "0"}}
 ]
 LANGUAGE:
 {language}
@@ -120,27 +120,27 @@ You are an expert in academic writing and ethical communication. Your task is to
     -   "suggestion": A more inclusive or objective alternative.
 
 **EXAMPLE OUTPUT:**
-{
+{{
   "findings": [
-    {
+    {{
       "text": "The forefathers of the nation...",
       "reason": "This term is gender-exclusive and overlooks the contributions of women.",
       "suggestion": "The founders of the nation..."
-    },
-    {
+    }},
+    {{
       "text": "A blind review process...",
       "reason": "Using 'blind' in this context can be seen as ableist language.",
       "suggestion": "An anonymized review process..."
-    }
+    }}
   ]
-}
+}}
 
 ---
 **TEXT TO ANALYZE:**
 {text_to_analyze}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """
 
 FACT_CHECK_EXTRACT_PROMPT_TEMPLATE = """
@@ -154,19 +154,19 @@ You are a meticulous research assistant. Your task is to read the provided text 
 5.  If no verifiable claims are found, the array should be empty.
 
 **EXAMPLE OUTPUT for a text containing "The Earth is the third planet from the Sun, and its population exceeds 8 billion people.":**
-{
+{{
   "claims": [
     "The Earth is the third planet from the Sun.",
     "The Earth's population exceeds 8 billion people."
   ]
-}
+}}
 
 ---
 **TEXT TO ANALYZE:**
 {text_to_analyze}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """
 
 FACT_CHECK_VERIFY_PROMPT_TEMPLATE = """
@@ -189,5 +189,5 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 {search_results}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """

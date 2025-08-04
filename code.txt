@@ -14710,39 +14710,54 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                 
                 {/* Bias Section */}
                 <Section title="Bias & Inclusivity" icon={Scale}>
-                    {!bias || bias.length === 0 ? (
-                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                    {/* --- THIS IS THE FIX --- */}
+                    {/* We must first check if 'bias' is an array before trying to map it. */}
+                    {Array.isArray(bias) ? (
+                        bias.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {bias.map((item, i) => (
+                                    <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
+                                        <p><strong>Found:</strong> "{item.text}"</p>
+                                        <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
                     ) : (
-                        <ul className="space-y-3">
-                            {bias.map((item, i) => (
-                                <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
-                                    <p><strong>Found:</strong> "{item.text}"</p>
-                                    <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
-                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
-                                </li>
-                            ))}
-                        </ul>
+                        // If bias is not an array, it's our error object.
+                        <p className="text-red-500">{bias?.message || "An error occurred during the bias check."}</p>
                     )}
+                    {/* --- END OF FIX --- */}
                 </Section>
 
                 {/* Fact-Checking Section */}
                 <Section title="Fact-Checking" icon={Lightbulb}>
-                     {!facts || facts.length === 0 ? (
-                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
+                    {Array.isArray(facts) ? (
+                        facts.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {facts.map((item, i) => (
+                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
+                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
+                                        onClick={() => onFindingSelect(item)}
+                                    >
+                                        <p><strong>Claim:</strong> "{item.claim}"</p>
+                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
                     ) : (
-                         <ul className="space-y-3">
-                            {facts.map((item, i) => (
-                                <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
-                                    ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
-                                    onClick={() => onFindingSelect(item)}
-                                >
-                                    <p><strong>Claim:</strong> "{item.claim}"</p>
-                                    <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
-                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
-                                </li>
-                            ))}
-                        </ul>
+                        // If facts is not an array, it's our error object.
+                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
                     )}
+                     {/* --- END OF FIX --- */}
                 </Section>
             </div>
         </div>
@@ -15403,16 +15418,18 @@ export default TestCaseManager;
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../core/Modal';
-import { Code, FileQuestion } from 'lucide-react';
+// --- THIS IS THE FIX: Added ShieldCheck to the import line ---
+import { Code, FileQuestion, ShieldCheck } from 'lucide-react'; 
+
 const availableTools = [
     {
-    title: 'Secure Code Executor',
-    description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
-    icon: Code,
-    path: '/tools/code-executor',
-    status: 'active'
+        title: 'Secure Code Executor',
+        description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
+        icon: Code,
+        path: '/tools/code-executor',
+        status: 'active'
     },
-     {
+    {
         title: 'AI Quiz Generator',
         description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
         icon: FileQuestion,
@@ -15422,12 +15439,12 @@ const availableTools = [
     {
         title: 'Academic Integrity & Analysis',
         description: 'Check your text for potential plagiarism, biased language, and factual inaccuracies.',
-        icon: ShieldCheck,
+        icon: ShieldCheck, // This line will now work correctly
         path: '/tools/integrity-checker',
         status: 'active'
     },
-
 ];
+
 const ToolsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
     const handleNavigate = (path) => {
@@ -15438,7 +15455,7 @@ const ToolsModal = ({ isOpen, onClose }) => {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Developer Tools" size="2xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Developer & Learning Tools" size="2xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {availableTools.map((tool) => (
                     <div
@@ -17858,8 +17875,8 @@ Based on the CURRENT MODE and the USER'S QUERY, choose one action. Your entire o
   }
   \`\`\`
 
-Provide your JSON decision now.
-`;
+Your entire response MUST be this JSON object and nothing else. Do not add any conversational text, introductions, or explanations.
+Provide your JSON decision now.`;
 };
 
 
@@ -20746,8 +20763,6 @@ import tempfile
 import shutil
 import json
 
-import asyncio
-from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, check_facts_agentic
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20769,7 +20784,8 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-
+    import integrity_services 
+    import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -21406,50 +21422,46 @@ def query_kg_route():
 def analyze_integrity_route():
     data = request.get_json()
     text = data.get('text')
-    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "facts"]
+    checks = data.get('checks', [])
     api_key = data.get('api_key')
 
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        results = {}
-        
-        # --- Plagiarism (Async Start) ---
-        if 'plagiarism' in checks:
-            try:
-                submission_id = loop.run_until_complete(submit_to_turnitin(text))
-                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-            except Exception as e:
-                logger.error(f"Turnitin submission failed: {e}")
-                results['plagiarism'] = {"status": "error", "message": str(e)}
+    results = {}
+    llm_func = lambda p: llm_wrapper(p, api_key)
 
-        # --- Bias & Fact-Checking (Sync) ---
-        llm_func = lambda p: llm_wrapper(p, api_key)
-        
-        if 'bias' in checks:
-            try:
-                results['bias'] = check_bias_hybrid(text, llm_func)
-            except Exception as e:
-                logger.error(f"Bias check failed: {e}")
-                results['bias'] = {"status": "error", "message": str(e)}
+    # We will run the checks sequentially for stability.
+    # The Turnitin check will still be asynchronous on their end.
+    
+    # 1. Plagiarism Check (Start)
+    if 'plagiarism' in checks:
+        try:
+            # We must run the async function in a managed event loop
+            submission_id = asyncio.run(integrity_services.submit_to_turnitin(text))
+            results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+        except Exception as e:
+            logger.error(f"Turnitin submission failed: {e}", exc_info=True)
+            results['plagiarism'] = {"status": "error", "message": str(e)}
 
-        if 'facts' in checks:
-            try:
-                # Running async function in a sync context
-                results['facts'] = loop.run_until_complete(check_facts_agentic(text, llm_func))
-            except Exception as e:
-                logger.error(f"Fact check failed: {e}")
-                results['facts'] = {"status": "error", "message": str(e)}
-        
-        loop.close()
-        return jsonify(results), 200
+    # 2. Bias Check
+    if 'bias' in checks:
+        try:
+            results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+        except Exception as e:
+            logger.error(f"Bias check failed: {e}", exc_info=True)
+            results['bias'] = {"status": "error", "message": str(e)}
 
-    except Exception as e:
-        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+    # 3. Fact Check
+    if 'facts' in checks:
+        try:
+            # Run the async fact-checking agent in a managed event loop
+            results['facts'] = asyncio.run(integrity_services.check_facts_agentic(text, llm_func))
+        except Exception as e:
+            logger.error(f"Fact check failed: {e}", exc_info=True)
+            results['facts'] = {"status": "error", "message": str(e)}
+    
+    return jsonify(results), 200
 
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
@@ -21459,16 +21471,13 @@ def get_turnitin_report_route():
         return create_error_response("Missing 'submissionId'", 400)
         
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        report = loop.run_until_complete(get_turnitin_report(submission_id))
-        loop.close()
+        # Run the async report fetching function in a managed event loop
+        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
-
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -22146,6 +22155,47 @@ if __name__ == '__main__':
 
 ```
 
+`server/rag_service/bias_wordlists.py`
+
+```python
+# server/rag_service/bias_wordlists.py
+
+"""
+This file contains dictionaries of terms for the fast, initial check
+in the hybrid bias detection system. It's designed to be easily editable
+by an administrator to add or change terms specific to their institution's style guide.
+"""
+
+# This list focuses on terms that are often non-inclusive or have more
+# objective, modern alternatives.
+INCLUSIVE_LANGUAGE_REPLACEMENTS = {
+    # Gendered Terms
+    "mankind": "humanity / people",
+    "man-made": "synthetic / artificial / human-made",
+    "forefathers": "ancestors / forebears / founders",
+    "chairman": "chair / chairperson",
+    "policeman": "police officer",
+    "housewife": "homemaker / stay-at-home parent",
+    "manpower": "workforce / staff / personnel",
+
+    # Ableist Language
+    "lame": "uninspiring / disappointing",
+    "crazy": "intense / wild / chaotic",
+    "insane": "unbelievable / shocking",
+    "blind review": "anonymized review",
+    "tone deaf": "insensitive / out of touch",
+
+    # Other potentially problematic terms
+    "whitelist": "allowlist / permitted list",
+    "blacklist": "denylist / blocklist",
+    "master/slave": "primary/replica or primary/secondary",
+    "sanity check": "quick check / confirmation check",
+}
+
+# This can be expanded with other categories in the future.
+# For example, culturally specific terms or jargon to avoid.
+```
+
 `server/rag_service/config.py`
 
 ```python
@@ -22784,14 +22834,34 @@ from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache for Turnitin token (could be replaced with Redis for multi-worker setups)
-turnitin_token_cache = {
-    "token": None,
-    "expires_at": 0
-}
+# In-memory cache for Turnitin token
+turnitin_token_cache = { "token": None, "expires_at": 0 }
+
+# --- NEW: Robust JSON Extraction Helper ---
+def _extract_json_from_llm_response(text: str) -> Dict[str, Any]:
+    """
+    Finds and parses a JSON object from a string that might contain other text,
+    including markdown code fences.
+    """
+    # Pattern to find JSON within ```json ... ``` or just ``` ... ```
+    json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
+    if json_match:
+        json_string = json_match.group(1)
+    else:
+        # Fallback to finding the first '{' and the last '}'
+        start_index = text.find('{')
+        end_index = text.rfind('}')
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_string = text[start_index:end_index+1]
+        else:
+            raise ValueError("No valid JSON object found in the LLM response.")
+            
+    return json.loads(json_string)
+# --- END NEW HELPER ---
+
 
 # --- Plagiarism Service (Turnitin) ---
-
+# ... (get_turnitin_auth_token, submit_to_turnitin, get_turnitin_report functions remain exactly the same) ...
 async def get_turnitin_auth_token() -> str:
     """Gets a JWT from Turnitin, using a simple in-memory cache."""
     if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
@@ -22847,31 +22917,34 @@ async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
             response.raise_for_status()
     raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
 
+
 # --- Bias & Inclusivity Service ---
 
 def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
     """Performs a hybrid check for biased language."""
-    # This is a placeholder for a real wordlist
-    simple_bias_wordlist = { "mankind": "humanity", "forefathers": "founders", "man-made": "synthetic" }
+    from bias_wordlists import INCLUSIVE_LANGUAGE_REPLACEMENTS
     
     findings = []
     # 1. Fast library check
-    for term, suggestion in simple_bias_wordlist.items():
-        if re.search(r'\b' + term + r'\b', text, re.IGNORECASE):
+    for term, suggestion in INCLUSIVE_LANGUAGE_REPLACEMENTS.items():
+        if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
             findings.append({
-                "text": term, "reason": "This term can be gender-exclusive.", "suggestion": suggestion
+                "text": term, 
+                "reason": "This term may have a more inclusive or objective alternative.", 
+                "suggestion": suggestion
             })
 
     # 2. Deep LLM check
-    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
     try:
         response_text = llm_function(prompt)
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            llm_findings = json.loads(json_match.group(0)).get("findings", [])
-            findings.extend(llm_findings)
+        # --- THIS IS THE FIX ---
+        llm_findings = _extract_json_from_llm_response(response_text).get("findings", [])
+        findings.extend(llm_findings)
     except Exception as e:
         logger.error(f"LLM bias check failed: {e}")
+        # Optionally, re-raise or handle the error, but don't let it crash
+        # For now, we log it and proceed with only the wordlist findings.
 
     # Deduplicate findings
     unique_findings = {f['text'].lower(): f for f in findings}
@@ -22882,12 +22955,11 @@ def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
 async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
     """Performs an agentic workflow to fact-check claims."""
     # 1. Extract Claims
-    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
     try:
+        # --- THIS IS THE FIX ---
         extract_response = llm_function(extract_prompt)
-        json_match = re.search(r'\{.*\}', extract_response, re.DOTALL)
-        if not json_match: return [{"claim": "Error", "status": "Failed", "evidence": "Could not extract claims from text."}]
-        claims = json.loads(json_match.group(0)).get("claims", [])
+        claims = _extract_json_from_llm_response(extract_response).get("claims", [])
     except Exception as e:
         logger.error(f"Fact-check claim extraction failed: {e}")
         return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
@@ -22915,11 +22987,13 @@ async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
         # 2b. Synthesize & Verify
         verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
         try:
+            # --- THIS IS THE FIX ---
             verify_response = llm_function(verify_prompt)
-            json_match = re.search(r'\{.*\}', verify_response, re.DOTALL)
-            if json_match:
-                synthesis = json.loads(json_match.group(0))
-                verified_claims.append({"claim": claim, **synthesis})
+            synthesis = _extract_json_from_llm_response(verify_response)
+            verified_claims.append({"claim": claim, **synthesis})
+
+            # time.sleep(4)
+
         except Exception as e:
             logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
             verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
@@ -23545,9 +23619,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\\n10", "expectedOutput": "15" }},
-{{ "input": "0\\n0", "expectedOutput": "0" }},
-{{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{"input": "5\\n10", "expectedOutput": "15"}},
+{{"input": "0\\n0", "expectedOutput": "0"}},
+{{"input": "-5\\n5", "expectedOutput": "0"}}
 ]
 LANGUAGE:
 {language}
@@ -23631,27 +23705,27 @@ You are an expert in academic writing and ethical communication. Your task is to
     -   "suggestion": A more inclusive or objective alternative.
 
 **EXAMPLE OUTPUT:**
-{
+{{
   "findings": [
-    {
+    {{
       "text": "The forefathers of the nation...",
       "reason": "This term is gender-exclusive and overlooks the contributions of women.",
       "suggestion": "The founders of the nation..."
-    },
-    {
+    }},
+    {{
       "text": "A blind review process...",
       "reason": "Using 'blind' in this context can be seen as ableist language.",
       "suggestion": "An anonymized review process..."
-    }
+    }}
   ]
-}
+}}
 
 ---
 **TEXT TO ANALYZE:**
 {text_to_analyze}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """
 
 FACT_CHECK_EXTRACT_PROMPT_TEMPLATE = """
@@ -23665,19 +23739,19 @@ You are a meticulous research assistant. Your task is to read the provided text 
 5.  If no verifiable claims are found, the array should be empty.
 
 **EXAMPLE OUTPUT for a text containing "The Earth is the third planet from the Sun, and its population exceeds 8 billion people.":**
-{
+{{
   "claims": [
     "The Earth is the third planet from the Sun.",
     "The Earth's population exceeds 8 billion people."
   ]
-}
+}}
 
 ---
 **TEXT TO ANALYZE:**
 {text_to_analyze}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """
 
 FACT_CHECK_VERIFY_PROMPT_TEMPLATE = """
@@ -23700,7 +23774,7 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 {search_results}
 ---
 
-**FINAL JSON OUTPUT (start immediately with `{`):**
+**FINAL JSON OUTPUT (start immediately with `{{`):**
 """
 ```
 
@@ -23814,6 +23888,7 @@ beautifulsoup4
 playwright
 moviepy
 Werkzeug
+aiohttp
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -25114,7 +25189,7 @@ router.post('/message', async (req, res) => {
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
+                { upsert: false, new: true }
             );
             if (finalBotMessageObject) {
                 extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
@@ -27928,193 +28003,148 @@ module.exports = {
 
 ```javascript
 // server/services/geminiService.js
-const {
-  GoogleGenerativeAI,
-  HarmCategory,
-  HarmBlockThreshold,
-} = require("@google/generative-ai");
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash-latest"; // Using a more stable model name
+const MODEL_NAME = "gemini-2.5-pro";
 
-const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192; // Standard for Flash
-const DEFAULT_MAX_OUTPUT_TOKENS_KG = 8192;
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
+const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
 
 const baseSafetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
 async function generateContentWithHistory(
-  chatHistory,
-  currentUserQuery,
-  systemPromptText = null,
-  options = {}
+    chatHistory,
+    currentUserQuery,
+    systemPromptText = null,
+    options = {} // Now accepts { maxOutputTokens, apiKey }
 ) {
-  const apiKeyToUse = options.apiKey || FALLBACK_API_KEY;
+    const apiKeyToUse = options.apiKey || FALLBACK_API_KEY;
 
-  if (!apiKeyToUse) {
-    console.error(
-      "FATAL ERROR: Gemini API key is not available for this request."
-    );
-    throw new Error("Gemini API key is missing. Please configure it.");
-  }
-
-  try {
-    const genAI = new GoogleGenerativeAI(apiKeyToUse);
-
-    if (
-      typeof currentUserQuery !== "string" ||
-      currentUserQuery.trim() === ""
-    ) {
-      throw new Error("currentUserQuery must be a non-empty string.");
+    if (!apiKeyToUse) {
+        console.error("FATAL ERROR: Gemini API key is not available for this request. Ensure server's GEMINI_API_KEY is set or user provides one.");
+        throw new Error("Gemini API key is missing. Please configure it.");
     }
 
-    const model = genAI.getGenerativeModel({
-      model: MODEL_NAME,
-      systemInstruction:
-        systemPromptText &&
-        typeof systemPromptText === "string" &&
-        systemPromptText.trim() !== ""
-          ? systemPromptText.trim()
-          : undefined,
-      safetySettings: baseSafetySettings,
-    });
+    try {
+        const genAI = new GoogleGenerativeAI(apiKeyToUse);
 
-    // --- THIS IS THE FIX ---
-    // We will use the more stable, stateless `generateContent` method.
-    // First, construct the full conversation history including the new query.
-    const contents = (chatHistory || [])
-      .map((msg) => ({
-        role: msg.role,
-        parts: Array.isArray(msg.parts)
-          ? msg.parts.map((part) => ({ text: part.text || "" }))
-          : [{ text: msg.text || "" }],
-      }))
-      .filter(
-        (msg) =>
-          msg.role &&
-          msg.parts &&
-          msg.parts.length > 0 &&
-          typeof msg.parts[0].text === "string"
-      );
-
-    // Add the current user query as the last part of the contents
-    contents.push({ role: "user", parts: [{ text: currentUserQuery }] });
-    // --- END OF FIX ---
-
-    const generationConfig = {
-      temperature: 0.7,
-      maxOutputTokens:
-        options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
-    };
-
-    // --- THIS IS THE CORRECTED LINE ---
-    console.log(
-      `Sending message to Gemini via generateContent. History length: ${
-        contents.length - 1
-      }. System Prompt: ${!!systemPromptText}.`
-    );
-    // --- END OF CORRECTION ---
-
-    // --- THIS IS THE FIX ---
-    // Call the stateless `generateContent` with the fully structured payload.
-    const result = await model.generateContent({
-      contents: contents,
-      generationConfig: generationConfig,
-    });
-    // --- END OF FIX ---
-
-    const response = result.response;
-    const candidate = response?.candidates?.[0];
-
-    if (
-      candidate &&
-      (candidate.finishReason === "STOP" ||
-        candidate.finishReason === "MAX_TOKENS")
-    ) {
-      const responseText = candidate?.content?.parts?.[0]?.text || "";
-      if (candidate.finishReason === "MAX_TOKENS") {
-        console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
-      }
-      return responseText;
-    } else {
-      const finishReason = candidate?.finishReason || "Unknown";
-      const safetyRatings = candidate?.safetyRatings;
-      console.warn("Gemini response was potentially blocked or had issues.", {
-        finishReason,
-        safetyRatings,
-      });
-      let blockMessage = `AI response generation failed or was blocked.`;
-      if (finishReason === "SAFETY") {
-        blockMessage += ` Reason: SAFETY.`;
-        if (safetyRatings) {
-          const blockedCategories = safetyRatings
-            .filter((r) => r.blocked)
-            .map((r) => r.category)
-            .join(", ");
-          if (blockedCategories)
-            blockMessage += ` Blocked Categories: ${blockedCategories}.`;
+        if (typeof currentUserQuery !== 'string' || currentUserQuery.trim() === '') {
+             throw new Error("currentUserQuery must be a non-empty string.");
         }
-      } else if (finishReason) {
-        blockMessage += ` Reason: ${finishReason}.`;
-      }
-      const error = new Error(blockMessage);
-      error.status = 400;
-      throw error;
+
+        const generationConfig = {
+            temperature: 0.7,
+            maxOutputTokens: options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
+        };
+
+        const model = genAI.getGenerativeModel({
+            model: MODEL_NAME,
+            systemInstruction: (systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '') ? 
+                { parts: [{ text: systemPromptText.trim() }] } : undefined,
+            safetySettings: baseSafetySettings,
+        });
+
+        const historyForStartChat = (chatHistory || [])
+            .map(msg => ({
+                 role: msg.role, 
+                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: msg.text || ''}] 
+            }))
+            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
+
+        const chat = model.startChat({
+            history: historyForStartChat,
+            generationConfig: generationConfig,
+        });
+
+        console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. System Prompt: ${!!systemPromptText}. Max Tokens: ${generationConfig.maxOutputTokens}`);
+        // console.log(`Current User Query to sendMessage (first 100): "${currentUserQuery.substring(0,100)}..."`); // Can be very long
+
+        // console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        // console.log("--- System Prompt Sent to Model ---");
+        // console.log(systemPromptText || "N/A");
+        // console.log("\n--- History Sent to Model ---");
+        // console.log(JSON.stringify(historyForStartChat, null, 2));
+        // console.log("\n--- Current User Query Sent to Model ---");
+        // console.log(currentUserQuery);
+        // console.log("==================== END GEMINI FINAL INPUT ====================\n");
+        // console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        // console.log("--- System Prompt Sent to Model ---");
+        // console.log(systemPromptText || "N/A");
+        // console.log("\n--- History Sent to Model ---");
+        // console.log(JSON.stringify(historyForStartChat, null, 2));
+        // console.log("\n--- Current User Query Sent to Model ---");
+        // console.log(currentUserQuery);
+        // console.log("==================== END GEMINI FINAL INPUT ====================\n");
+
+        const result = await chat.sendMessage(currentUserQuery);
+        const response = result.response;
+        const candidate = response?.candidates?.[0];
+
+        if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
+            const responseText = candidate?.content?.parts?.[0]?.text || "";
+            if (candidate.finishReason === 'MAX_TOKENS') {
+                console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
+            }
+            return responseText;
+        } else {
+             const finishReason = candidate?.finishReason || 'Unknown';
+             const safetyRatings = candidate?.safetyRatings;
+             console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
+             let blockMessage = `AI response generation failed or was blocked.`;
+             if (finishReason === 'SAFETY') {
+                 blockMessage += ` Reason: SAFETY.`;
+                 if (safetyRatings) {
+                    const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
+                    if (blockedCategories) blockMessage += ` Blocked Categories: ${blockedCategories}.`;
+                 }
+             } else if (finishReason) {
+                 blockMessage += ` Reason: ${finishReason}.`;
+             }
+             const error = new Error(blockMessage);
+             error.status = 400;
+             throw error;
+        }
+    } catch (error) {
+        console.error("Gemini API Call Error:", error?.message || error);
+        let clientMessage = "Failed to get response from AI service.";
+        if (error.message?.includes("API key not valid")) {
+            clientMessage = "Invalid API Key.";
+        } else if (error.message?.includes("API key not found")) {
+            clientMessage = "API Key not found";
+        } else if (error.message?.includes("API_KEY_INVALID")) {
+            clientMessage = "API Key not invalid. Please Provide the Valid one.";
+        } else if (error.message?.includes("enabled this API recently")) {
+            clientMessage = "Looks like new API key. Need some time to fully activate."
+        } else if (error.message?.includes("billing account")) {
+            clientMessage = "Billing account issue with the provided API Key.";
+        } else if (error.message?.includes("blocked due to safety")) {
+            clientMessage = "AI response blocked due to safety settings.";
+        } else if (error.message?.includes("Invalid JSON payload")) {
+            clientMessage = "Invalid request format sent to AI.";
+        } else if (error.message?.includes("User location is not supported")) {
+            clientMessage = "User location is not supported for this model.";
+        } else if (error.message?.includes("model is overloaded")) {
+            clientMessage = "The AI model is currently overloaded. Please try again in a moment.";
+        } else if (error.status === 400) {
+            clientMessage = `${error.message}`; 
+        }
+        const enhancedError = new Error(clientMessage);
+        enhancedError.status = error.status || 500; 
+        enhancedError.originalError = error; 
+        throw enhancedError;
     }
-  } catch (error) {
-    console.error("Gemini API Call Error:", error?.message || error);
-    let clientMessage = "Failed to get response from AI service.";
-    // Keep the detailed error parsing as it's still useful
-    if (error.message?.includes("API key not valid")) {
-      clientMessage = "Invalid API Key.";
-    } else if (error.message?.includes("API key not found")) {
-      clientMessage = "API Key not found";
-    } else if (error.message?.includes("API_KEY_INVALID")) {
-      clientMessage = "API Key not invalid. Please Provide the Valid one.";
-    } else if (error.message?.includes("enabled this API recently")) {
-      clientMessage =
-        "Looks like new API key. Need some time to fully activate.";
-    } else if (error.message?.includes("billing account")) {
-      clientMessage = "Billing account issue with the provided API Key.";
-    } else if (error.message?.includes("blocked due to safety")) {
-      clientMessage = "AI response blocked due to safety settings.";
-    } else if (error.message?.includes("Invalid JSON payload")) {
-      clientMessage = "Invalid request format sent to AI.";
-    } else if (error.message?.includes("User location is not supported")) {
-      clientMessage = "User location is not supported for this model.";
-    } else if (error.message?.includes("model is overloaded")) {
-      clientMessage =
-        "The AI model is currently overloaded. Please try again in a moment.";
-    } else if (error.status === 400) {
-      clientMessage = `${error.message}`;
-    }
-    const enhancedError = new Error(clientMessage);
-    enhancedError.status = error.status || 500;
-    enhancedError.originalError = error;
-    throw enhancedError;
-  }
-}
+};
 
 module.exports = {
-  generateContentWithHistory,
-  DEFAULT_MAX_OUTPUT_TOKENS_KG,
-};
+    generateContentWithHistory,
+    DEFAULT_MAX_OUTPUT_TOKENS_KG 
+}
 ```
 
 `server/services/kgExtractionService.js`

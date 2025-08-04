@@ -17,14 +17,34 @@ from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache for Turnitin token (could be replaced with Redis for multi-worker setups)
-turnitin_token_cache = {
-    "token": None,
-    "expires_at": 0
-}
+# In-memory cache for Turnitin token
+turnitin_token_cache = { "token": None, "expires_at": 0 }
+
+# --- NEW: Robust JSON Extraction Helper ---
+def _extract_json_from_llm_response(text: str) -> Dict[str, Any]:
+    """
+    Finds and parses a JSON object from a string that might contain other text,
+    including markdown code fences.
+    """
+    # Pattern to find JSON within ```json ... ``` or just ``` ... ```
+    json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
+    if json_match:
+        json_string = json_match.group(1)
+    else:
+        # Fallback to finding the first '{' and the last '}'
+        start_index = text.find('{')
+        end_index = text.rfind('}')
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_string = text[start_index:end_index+1]
+        else:
+            raise ValueError("No valid JSON object found in the LLM response.")
+            
+    return json.loads(json_string)
+# --- END NEW HELPER ---
+
 
 # --- Plagiarism Service (Turnitin) ---
-
+# ... (get_turnitin_auth_token, submit_to_turnitin, get_turnitin_report functions remain exactly the same) ...
 async def get_turnitin_auth_token() -> str:
     """Gets a JWT from Turnitin, using a simple in-memory cache."""
     if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
@@ -80,31 +100,34 @@ async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
             response.raise_for_status()
     raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
 
+
 # --- Bias & Inclusivity Service ---
 
 def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
     """Performs a hybrid check for biased language."""
-    # This is a placeholder for a real wordlist
-    simple_bias_wordlist = { "mankind": "humanity", "forefathers": "founders", "man-made": "synthetic" }
+    from bias_wordlists import INCLUSIVE_LANGUAGE_REPLACEMENTS
     
     findings = []
     # 1. Fast library check
-    for term, suggestion in simple_bias_wordlist.items():
-        if re.search(r'\b' + term + r'\b', text, re.IGNORECASE):
+    for term, suggestion in INCLUSIVE_LANGUAGE_REPLACEMENTS.items():
+        if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
             findings.append({
-                "text": term, "reason": "This term can be gender-exclusive.", "suggestion": suggestion
+                "text": term, 
+                "reason": "This term may have a more inclusive or objective alternative.", 
+                "suggestion": suggestion
             })
 
     # 2. Deep LLM check
-    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
     try:
         response_text = llm_function(prompt)
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            llm_findings = json.loads(json_match.group(0)).get("findings", [])
-            findings.extend(llm_findings)
+        # --- THIS IS THE FIX ---
+        llm_findings = _extract_json_from_llm_response(response_text).get("findings", [])
+        findings.extend(llm_findings)
     except Exception as e:
         logger.error(f"LLM bias check failed: {e}")
+        # Optionally, re-raise or handle the error, but don't let it crash
+        # For now, we log it and proceed with only the wordlist findings.
 
     # Deduplicate findings
     unique_findings = {f['text'].lower(): f for f in findings}
@@ -115,12 +138,11 @@ def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
 async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
     """Performs an agentic workflow to fact-check claims."""
     # 1. Extract Claims
-    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
     try:
+        # --- THIS IS THE FIX ---
         extract_response = llm_function(extract_prompt)
-        json_match = re.search(r'\{.*\}', extract_response, re.DOTALL)
-        if not json_match: return [{"claim": "Error", "status": "Failed", "evidence": "Could not extract claims from text."}]
-        claims = json.loads(json_match.group(0)).get("claims", [])
+        claims = _extract_json_from_llm_response(extract_response).get("claims", [])
     except Exception as e:
         logger.error(f"Fact-check claim extraction failed: {e}")
         return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
@@ -148,11 +170,13 @@ async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
         # 2b. Synthesize & Verify
         verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
         try:
+            # --- THIS IS THE FIX ---
             verify_response = llm_function(verify_prompt)
-            json_match = re.search(r'\{.*\}', verify_response, re.DOTALL)
-            if json_match:
-                synthesis = json.loads(json_match.group(0))
-                verified_claims.append({"claim": claim, **synthesis})
+            synthesis = _extract_json_from_llm_response(verify_response)
+            verified_claims.append({"claim": claim, **synthesis})
+
+            # time.sleep(4)
+
         except Exception as e:
             logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
             verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
