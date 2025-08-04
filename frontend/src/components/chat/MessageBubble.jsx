@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
+import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
@@ -60,11 +61,10 @@ const AnimatedThinking = ({ content }) => {
     );
 };
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const contentRef = useRef(null);
-    const [isCopied, setIsCopied] = useState(false);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
 
     const mainContent = text || '';
@@ -72,23 +72,68 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
     const showThinkingDropdown = !isUser && thinkingContent !== null;
 
     useEffect(() => {
-        if (!isStreaming && mainContent) {
-            const timer = setTimeout(() => {
-                if (contentRef.current) Prism.highlightAllUnder(contentRef.current);
-            }, 50);
-            return () => clearTimeout(timer);
-        }
-    }, [isStreaming, mainContent]);
-    
-    const handleCopy = () => {
-        if (isCopied) return;
-        const plainTextToCopy = getPlainTextFromMarkdown(mainContent);
-        navigator.clipboard.writeText(plainTextToCopy).then(() => {
-            setIsCopied(true);
-            setTimeout(() => setIsCopied(false), 1000);
-        });
-    };
-    
+        // This function encapsulates the logic for Prism highlighting and button attachment.
+        const processContent = () => {
+            // Ensure contentRef is available, content is not empty, and streaming has finished.
+            if (!contentRef.current || !mainContent || isStreaming) {
+                return;
+            }
+
+            // --- Existing Prism Highlighting Logic ---
+            // Ensure Prism highlights the code blocks once content is stable
+            Prism.highlightAllUnder(contentRef.current);
+            // --- End Existing Logic ---
+
+            // --- REFINED: CODE BLOCK COPY BUTTON LOGIC ---
+            const codeBlocks = contentRef.current.querySelectorAll('pre');
+            codeBlocks.forEach((preElement, index) => {
+                // Prevent adding multiple buttons if effect runs more than once without cleanup
+                if (preElement.querySelector('.code-block-copy-button')) {
+                    return; 
+                }
+
+                const copyButton = document.createElement('button');
+                copyButton.className = 'code-block-copy-button';
+                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`;
+                copyButton.title = 'Copy code';
+
+                copyButton.onclick = () => {
+                    const codeContent = preElement.querySelector('code')?.textContent || '';
+                    if (codeContent) {
+                        navigator.clipboard.writeText(codeContent).then(() => {
+                            copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check text-green-500"><path d="M20 6 9 17l-5-5"/></svg>`; // Check icon
+                            // Ensure a unique ID for the toast to avoid conflicts if multiple buttons are clicked fast
+                            toast.success('Code copied!', { id: `copy-toast-${messageId}-${index}` }); 
+                            setTimeout(() => {
+                                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`; // Reset to copy icon
+                            }, 1500);
+                        }).catch(err => {
+                            toast.error('Failed to copy code.', { id: `copy-toast-error-${messageId}-${index}` });
+                            console.error('Failed to copy code:', err);
+                        });
+                    }
+                };
+                preElement.appendChild(copyButton);
+            });
+            // --- END REFINED LOGIC ---
+        };
+
+        // Use a small timeout to ensure React has fully rendered the HTML content
+        // from dangerouslySetInnerHTML before we query the DOM.
+        const delayProcessing = setTimeout(processContent, 150); // Increased delay slightly for robustness
+
+        // Cleanup function: This runs when the component unmounts or before the effect re-runs
+        return () => {
+            clearTimeout(delayProcessing); // Clear any pending timeouts
+            // Remove any dynamically added buttons to prevent duplicates
+            if (contentRef.current) {
+                const existingButtons = contentRef.current.querySelectorAll('.code-block-copy-button');
+                existingButtons.forEach(button => button.remove());
+            }
+        };
+    }, [isStreaming, mainContent, messageId]);
+
+
     const formatTimestamp = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const getPipelineIcon = () => {
         if (!sourcePipeline) return null;
@@ -126,15 +171,16 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                         ? 'bg-surface-light text-text-light border border-border-light dark:bg-primary-dark dark:text-white dark:border-transparent rounded-br-lg' 
                         : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
                     }`}>
-                        <div ref={contentRef} className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" dangerouslySetInnerHTML={createMarkup(mainContent)} />
+                        <div 
+                            ref={contentRef} 
+                            className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" 
+                            dangerouslySetInnerHTML={createMarkup(mainContent)} 
+                        />
                         <div className="flex items-center justify-end mt-1.5 text-xs gap-1">
-                            <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
-                                <AnimatePresence mode="wait" initial={false}>
-                                    <motion.div key={isCopied ? 'check' : 'copy'} initial={{ scale: 0.6, opacity: 0, rotate: -30 }} animate={{ scale: 1, opacity: 1, rotate: 0 }} exit={{ scale: 0.6, opacity: 0, rotate: 30 }} transition={{ duration: 0.15 }}>
-                                        {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
-                                    </motion.div>
-                                </AnimatePresence>
-                            </button>
+                            {/* The old copy button for the entire message is now removed as per the problem statement
+                                and replaced by the dynamic buttons for code blocks.
+                                If you want a copy button for the *entire message*, this is where it would go.
+                            */}
                             <div className="flex items-center gap-2 pl-1 opacity-70">
                                 {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
                                 <span>{formatTimestamp(timestamp)}</span>
@@ -206,5 +252,6 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
         </div>
     );
 }
+
 
 export default MessageBubble;

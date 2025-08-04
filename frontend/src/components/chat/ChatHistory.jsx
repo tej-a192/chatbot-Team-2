@@ -25,17 +25,19 @@ function ChatHistory({ messages, onCueClick }) {
                         transition={{ duration: 0.3, ease: "easeOut" }}
                     >
                         <MessageBubble
-                            id={msg.id}
-                            sender={msg.sender}
-                            text={msg.text}
-                            thinking={msg.thinking}
-                            references={msg.references}
-                            timestamp={msg.timestamp}
-                            sourcePipeline={msg.source_pipeline}
-                            isStreaming={msg.isStreaming}
-                            criticalThinkingCues={msg.criticalThinkingCues}
-                            onCueClick={onCueClick}
-                        />
+                        id={msg.id}
+                        sender={msg.sender}
+                        text={msg.text}
+                        thinking={msg.thinking}
+                        references={msg.references}
+                        timestamp={msg.timestamp}
+                        sourcePipeline={msg.source_pipeline}
+                        isStreaming={msg.isStreaming}
+                        criticalThinkingCues={msg.criticalThinkingCues}
+                        onCueClick={onCueClick}
+                        messageId={msg.id}
+                    />
+
                     </motion.div>
                 ))}
             </AnimatePresence>

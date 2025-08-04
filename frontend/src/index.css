@@ -329,12 +329,35 @@
       transparent 80%
     );
   }
+
+
+.code-block-copy-button {
+  @apply absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200;
+  @apply opacity-0 group-hover:opacity-100; /* Will be triggered by parent .prose pre:hover */
 }
 
+.code-block-copy-button:hover {
+  @apply bg-gray-600/90 text-white;
+}
+
+html.light .code-block-copy-button {
+  @apply bg-gray-200/80 text-text-muted-light;
+}
+
+html.light .code-block-copy-button:hover {
+  @apply bg-gray-300/90 text-text-light;
+}
+
+.prose pre {
+  @apply relative;
+}
+}
+
+
+
+
+
 @layer utilities {
-  /* This is now a single, clean utilities layer */
-  
-  /* Keyframes for the border rotation */
   @keyframes spin-border {
     0% { --angle: 0deg; }
     100% { --angle: 360deg; }

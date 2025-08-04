@@ -9,7 +9,7 @@ import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame } from 'lucide-react';
+import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame, FileQuestion } from 'lucide-react';
 
 const features = [
     {
@@ -34,11 +34,12 @@ const features = [
         glowColor: 'orange'
     },
     {
-        icon: TestTubeDiagonal,
-        title: "API Endpoint Tester",
-        description: "A tool for testing and validating API endpoints will be available soon.",
-        status: 'soon',
-        glowColor: 'gray'
+        icon: FileQuestion,
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.', // Changed description
+        path: '/tools/quiz-generator',
+        status: 'active',
+        glowColor: 'yellow'
     }
 ];
 
@@ -46,6 +47,7 @@ const glowStyles = {
     blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
+    yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
     gray: "" // No glow for disabled/soon cards
 };
 
@@ -244,8 +246,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             case 'Secure Code Executor':
                 navigate('/tools/code-executor');
                 break;
-            case 'API Endpoint Tester':
-                toast.info("The API Endpoint Tester is coming soon!");
+            case 'AI Quiz Generator':
+                navigate('/tools/quiz-generator');
                 break;
             default:
                 break;
