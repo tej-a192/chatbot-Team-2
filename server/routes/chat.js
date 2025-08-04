@@ -39,7 +39,6 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
-
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -148,10 +147,11 @@ router.post('/message', async (req, res) => {
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
+                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
             );
-            if (finalBotMessageObject) {
-                extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
+
+            if (totResult.finalAnswer) {
+                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
             }
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
             res.end();
@@ -172,11 +172,11 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues // Add cues for client
+                criticalThinkingCues: criticalThinkingCues
             };
             
             const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+            delete aiMessageForDb.criticalThinkingCues;
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },

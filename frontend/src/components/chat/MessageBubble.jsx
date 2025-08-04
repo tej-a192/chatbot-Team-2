@@ -149,7 +149,21 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     {/* ... details block for references ... */}
+                     <details className="group/details text-xs">
+                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
+                            <span className="flex items-center gap-1">
+                                <LinkIcon size={14} /> References
+                            </span>
+                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
+                        </summary>
+                        <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
+                            {references.map((ref, index) => (
+                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
+                                    <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
+                                </li>
+                            ))}
+                        </ul>
+                    </details>
                 </div>
             )}
             

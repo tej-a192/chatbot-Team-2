@@ -2,24 +2,33 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../core/Modal';
-import { Code, FileQuestion } from 'lucide-react';
+// --- THIS IS THE FIX: Added ShieldCheck to the import line ---
+import { Code, FileQuestion, ShieldCheck } from 'lucide-react'; 
+
 const availableTools = [
     {
-    title: 'Secure Code Executor',
-    description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
-    icon: Code,
-    path: '/tools/code-executor',
-    status: 'active'
+        title: 'Secure Code Executor',
+        description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
+        icon: Code,
+        path: '/tools/code-executor',
+        status: 'active'
     },
-     {
+    {
         title: 'AI Quiz Generator',
         description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
         icon: FileQuestion,
         path: '/tools/quiz-generator',
         status: 'active'
     },
-
+    {
+        title: 'Academic Integrity & Analysis',
+        description: 'Check your text for potential plagiarism, biased language, and readability metrics..',
+        icon: ShieldCheck, // This line will now work correctly
+        path: '/tools/integrity-checker',
+        status: 'active'
+    },
 ];
+
 const ToolsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
     const handleNavigate = (path) => {
@@ -30,7 +39,7 @@ const ToolsModal = ({ isOpen, onClose }) => {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Developer Tools" size="2xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Developer & Learning Tools" size="2xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {availableTools.map((tool) => (
                     <div

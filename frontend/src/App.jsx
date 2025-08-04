@@ -21,6 +21,7 @@ import toast from 'react-hot-toast';
 import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
+import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -288,11 +289,21 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? <CodeExecutorPage /> : <Navigate to="/" />} />
-                 <Route path="/study-plan" element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />} />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? <QuizGeneratorPage /> : <Navigate to="/" />} />
-                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
+                    <CodeExecutorPage /> : <Navigate to="/" />} 
+                />
+                <Route
+                    path="/study-plan"
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
+                />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+                    <QuizGeneratorPage /> : <Navigate to="/" />} 
+                />
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+                    <AcademicIntegrityPage /> : <Navigate to="/" />}
+                />
+                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
                     handleNewChat={handleNewChat} 
                     isSessionLoading={isSessionLoading}

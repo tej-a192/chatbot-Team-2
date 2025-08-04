@@ -34,9 +34,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\\n10", "expectedOutput": "15" }},
-{{ "input": "0\\n0", "expectedOutput": "0" }},
-{{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{"input": "5\\n10", "expectedOutput": "15"}},
+{{"input": "0\\n0", "expectedOutput": "0"}},
+{{"input": "-5\\n5", "expectedOutput": "0"}}
 ]
 LANGUAGE:
 {language}
@@ -100,3 +100,94 @@ You are an expert educator and assessment creator. Your task is to generate a mu
 **FINAL QUIZ JSON ARRAY (start immediately with `[`):**
 """
 
+
+
+# ==============================================================================
+# === ACADEMIC INTEGRITY PROMPTS ===
+# ==============================================================================
+
+BIAS_CHECK_PROMPT_TEMPLATE = """
+You are an expert in academic writing and ethical communication. Your task is to analyze the provided text for any language that could be considered biased, non-inclusive, or contentious.
+
+**INSTRUCTIONS:**
+1.  Read the text carefully to identify words or phrases related to gender, race, disability, age, or other sensitive areas.
+2.  Look for stereotypes, generalizations, or potentially alienating language.
+3.  Your entire output MUST be a single, valid JSON object with one key: "findings".
+4.  The "findings" key must hold an array of objects. If no issues are found, the array should be empty.
+5.  Each finding object MUST have these keys:
+    -   "text": The exact biased phrase found in the text.
+    -   "reason": A brief, neutral explanation of why this phrase might be problematic.
+    -   "suggestion": A more inclusive or objective alternative.
+
+**EXAMPLE OUTPUT:**
+{{
+  "findings": [
+    {{
+      "text": "The forefathers of the nation...",
+      "reason": "This term is gender-exclusive and overlooks the contributions of women.",
+      "suggestion": "The founders of the nation..."
+    }},
+    {{
+      "text": "A blind review process...",
+      "reason": "Using 'blind' in this context can be seen as ableist language.",
+      "suggestion": "An anonymized review process..."
+    }}
+  ]
+}}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""
+
+FACT_CHECK_EXTRACT_PROMPT_TEMPLATE = """
+You are a meticulous research assistant. Your task is to read the provided text and extract all distinct, verifiable factual claims.
+
+**INSTRUCTIONS:**
+1.  Identify statements that present objective information, such as statistics, historical events, scientific statements, or specific data points.
+2.  Ignore subjective opinions, questions, or general statements that cannot be verified.
+3.  Your entire output MUST be a single, valid JSON object with one key: "claims".
+4.  The "claims" key must hold an array of strings. Each string is a direct quote of a factual claim from the text.
+5.  If no verifiable claims are found, the array should be empty.
+
+**EXAMPLE OUTPUT for a text containing "The Earth is the third planet from the Sun, and its population exceeds 8 billion people.":**
+{{
+  "claims": [
+    "The Earth is the third planet from the Sun.",
+    "The Earth's population exceeds 8 billion people."
+  ]
+}}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""
+
+FACT_CHECK_VERIFY_PROMPT_TEMPLATE = """
+You are an impartial fact-checker and synthesizer. You have been given a specific "CLAIM" and a set of "SEARCH RESULTS" from the web and academic sources. Your task is to determine the validity of the claim based ONLY on the provided search results.
+
+**INSTRUCTIONS:**
+1.  Carefully compare the "CLAIM" to the information in the "SEARCH RESULTS".
+2.  Your entire output MUST be a single, valid JSON object with two keys: "status" and "evidence".
+3.  The "status" key must be one of three strings: "Supported", "Refuted", or "Unverified".
+    -   "Supported": The search results contain clear evidence that validates the claim.
+    -   "Refuted": The search results contain clear evidence that contradicts the claim.
+    -   "Unverified": The search results do not contain enough information to either support or refute the claim.
+4.  The "evidence" key must be a string containing a brief, neutral summary of the findings from the search results that led to your status decision. This summary MUST cite the sources using bracket notation (e.g., [1], [2]).
+
+---
+**CLAIM TO VERIFY:**
+{claim}
+---
+**SEARCH RESULTS (Your ONLY source of information):**
+{search_results}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""

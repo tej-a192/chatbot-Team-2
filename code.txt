@@ -4,6 +4,17 @@
 
 ```
 
+`frontend/.env`
+
+```
+#REACT_APP_API_BASE_URL=http://localhost:5001/api
+# OR for Vite:
+VITE_API_BASE_URL=http://localhost:5001/api
+VITE_ADMIN_USERNAME=admin@admin.com
+VITE_ADMIN_PASSWORD=admin123
+
+```
+
 `frontend/code.txt`
 
 ```
@@ -7238,6 +7249,7 @@ import toast from 'react-hot-toast';
 import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
+import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -7261,13 +7273,23 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession, messages, setMessages }) {
+function MainAppLayout({ 
+    orchestratorStatus, 
+    handleNewChat, 
+    isSessionLoading, 
+    messages, 
+    setMessages 
+}) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
         isLeftPanelOpen,
         isRightPanelOpen,
         setSessionId: setGlobalSessionId,
+        initialPromptForNewSession,
+        setInitialPromptForNewSession,
+        initialActivityForNewSession,
+        setInitialActivityForNewSession
     } = useAppState();
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
@@ -7298,7 +7320,7 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages here
+            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -7343,10 +7365,6 @@ function App() {
         setSessionId: setGlobalSessionId, 
         currentSessionId, 
         isAdminSessionActive,
-        initialPromptForNewSession,      
-        setInitialPromptForNewSession, 
-        initialActivityForNewSession,    
-        setInitialActivityForNewSession
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
@@ -7354,11 +7372,10 @@ function App() {
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
-
-    // --- NEW LOGIC MOVED HERE FROM MainAppLayout ---
     const [appStateMessages, setAppStateMessages] = useState([]);
+    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-        const handleNewChat = useCallback(async (callbackOrMessages) => {
+    const handleNewChat = useCallback(async (callbackOrMessages) => {
         const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
         const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
 
@@ -7366,7 +7383,7 @@ function App() {
             toast('This is already a new chat!', { icon: '✨' });
             return;
         }
-
+        
         setIsSessionLoading(true);
         try {
             const data = await api.startNewSession(currentSessionId); 
@@ -7384,37 +7401,22 @@ function App() {
                             className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
                         >
                             <div className="flex items-start">
-                                <div className="flex-shrink-0 pt-0.5">
-                                    <GraduationCap className="h-6 w-6 text-primary" />
-                                </div>
+                                <div className="flex-shrink-0 pt-0.5"><GraduationCap className="h-6 w-6 text-primary" /></div>
                                 <div className="ml-3 flex-1">
                                     <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
                                     <div className="mt-4 flex gap-2">
-                                        <Button
-                                            size="sm"
-                                            onClick={() => {
-                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
-                                                toast.dismiss(t.id);
-                                            }}
-                                        >
+                                        <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
                                             Create Plan for "{topic}"
                                         </Button>
-                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
-                                            Dismiss
-                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
                                     </div>
                                 </div>
                             </div>
                         </motion.div>
-                    ), {
-                        id: `study-plan-toast-${topic}`,
-                        duration: Infinity,
-                    });
+                    ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                
                 if (callback) callback(data.newSessionId);
-
             } else {
                 toast.error(data.message || "Could not start new chat session.");
             }
@@ -7434,13 +7436,15 @@ function App() {
             const sessionData = await api.getChatHistory(sid);
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
-            toast.error(`History load failed: ${error.message}`);
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found. Starting a new session.");
-                handleNewChat();
+                console.warn("Stale session ID found in localStorage. It will be replaced.");
+                localStorage.removeItem('aiTutorSessionId');
+                setGlobalSessionId(null);
+            } else {
+                toast.error(`History load failed: ${error.message}`);
             }
         }
-    }, [regularUserToken, handleNewChat]);
+    }, [regularUserToken, setGlobalSessionId]);
 
     useEffect(() => {
         if (currentSessionId && regularUserToken) {
@@ -7449,41 +7453,50 @@ function App() {
             setAppStateMessages([]);
         }
     }, [currentSessionId, regularUserToken, fetchChatHistory]);
-    // --- END OF MOVED LOGIC ---
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
     
     useEffect(() => {
-        if (isAdminSessionActive) {
+        const handleAuthAndSession = async () => {
+            if (isAdminSessionActive) {
+                setAppInitializing(false); setShowAuthModal(false);
+                if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
+                return;
+            }
+            if (regularUserAuthLoading) {
+                setAppInitializing(true); return;
+            }
             setAppInitializing(false);
-            setShowAuthModal(false);
-            if (!location.pathname.startsWith('/admin')) {
-                navigate('/admin/dashboard', { replace: true });
+            
+            if (regularUserToken && regularUser) {
+                setShowAuthModal(false);
+                if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
+
+                const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+                if (shouldCreateSession && !isCreatingSession) {
+                    setIsCreatingSession(true);
+                    console.log("[App.jsx] Lock acquired. Creating initial session...");
+                    await handleNewChat();
+                    setIsCreatingSession(false);
+                    console.log("[App.jsx] Initial session created. Lock released.");
+                }
+            } else if (!location.pathname.startsWith('/admin')) {
+                setShowAuthModal(true);
             }
-            return;
-        }
-        if (regularUserAuthLoading) {
-            setAppInitializing(true);
-            return;
-        }
-        setAppInitializing(false);
-        if (regularUserToken && regularUser) {
-            setShowAuthModal(false);
-            if (location.pathname.startsWith('/admin')) {
-                navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
-                handleNewChat();
-            }
-        } else if (!location.pathname.startsWith('/admin')) {
-            setShowAuthModal(true);
-        }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
+        };
+        handleAuthAndSession();
+    }, [
+        regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+    ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            handleNewChat();
+            // After successful login, we ensure no session ID exists,
+            // which will trigger the useEffect above to create one cleanly.
+            setGlobalSessionId(null); 
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -7504,7 +7517,6 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
@@ -7515,21 +7527,18 @@ function App() {
                  <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
                     <QuizGeneratorPage /> : <Navigate to="/" />} 
                 />
-                
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+                    <AcademicIntegrityPage /> : <Navigate to="/" />}
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
-                    navigate={navigate} 
                     handleNewChat={handleNewChat} 
                     isSessionLoading={isSessionLoading}
-                    initialPromptForNewSession={initialPromptForNewSession}
-                    setInitialPromptForNewSession={setInitialPromptForNewSession}
-                    initialActivityForNewSession={initialActivityForNewSession}
-                    setInitialActivityForNewSession={setInitialActivityForNewSession}
                     messages={appStateMessages}
                     setMessages={setAppStateMessages}
-                /> : null} />
-                </Routes>
+                 /> : null} />
+            </Routes>
         </div>
     );
 }
@@ -10765,7 +10774,21 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     {/* ... details block for references ... */}
+                     <details className="group/details text-xs">
+                        <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
+                            <span className="flex items-center gap-1">
+                                <LinkIcon size={14} /> References
+                            </span>
+                            <ChevronDown size={14} className="transition-transform group-open/details:rotate-180" />
+                        </summary>
+                        <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
+                            {references.map((ref, index) => (
+                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
+                                    <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
+                                </li>
+                            ))}
+                        </ul>
+                    </details>
                 </div>
             )}
             
@@ -11004,12 +11027,14 @@ function ThinkingDropdown({ children, isOpen, setIsOpen, isStreaming }) {
             >
                 <BrainCircuit size={14} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors" />
 
-                <span className={isStreaming ? 'shimmer-text !text-transparent' : ''}>
+                {/* --- THIS SPAN IS THE ONLY CHANGE --- */}
+                <span className={isStreaming ? 'shimmer-container' : ''}>
                     Thinking Process
                 </span>
 
                 <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
+
 
             {/* ✅ Always render motion.div, but animate visibility */}
             <motion.div
@@ -13916,6 +13941,244 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
 export default ProfileSettingsModal;
 ```
 
+`frontend/src/components/tools/AcademicIntegrityPage.jsx`
+
+```javascript
+// frontend/src/components/tools/AcademicIntegrityPage.jsx
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Home, UploadCloud } from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import Editor from '@monaco-editor/react';
+import IntegrityReportPanel from './IntegrityReportPanel'; // We will create this next
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+import Button from '../core/Button';
+import { useTheme } from '../../hooks/useTheme';
+// For client-side text extraction
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import mammoth from 'mammoth';
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+const ANALYSIS_STEPS = [
+    { name: "Submitting for Analysis", progress: 10 },
+    { name: "Checking for Biased Language", progress: 30 },
+    // --- THIS IS THE FIX ---
+    { name: "Analyzing Readability", progress: 50 },
+    // --- END FIX ---
+    { name: "Submitting to Plagiarism Detector", progress: 70 },
+    { name: "Awaiting Plagiarism Report", progress: 90 },
+    { name: "Completed", progress: 100 }
+];
+
+const AcademicIntegrityPage = () => {
+    const { theme } = useTheme();
+    const [text, setText] = useState('');
+    const [report, setReport] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [currentStep, setCurrentStep] = useState(0);
+    const [error, setError] = useState('');
+    const [selectedFinding, setSelectedFinding] = useState(null);
+    
+    const editorRef = useRef(null);
+    const decorationsRef = useRef([]);
+    const pollingIntervalRef = useRef(null);
+
+    const handleEditorDidMount = (editor, monaco) => {
+        editorRef.current = editor;
+    };
+
+    const handleAnalyze = async () => {
+        if (text.trim().length < 50) {
+            toast.error("Please provide at least 50 characters of text for analysis.");
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        setReport(null);
+        setCurrentStep(0);
+
+        try {
+            const { reportId, initialReport } = await api.submitIntegrityCheck({ text });
+            setReport(initialReport);
+
+            // Update progress based on synchronous results
+            if(initialReport.bias) setCurrentStep(1);
+            if(initialReport.readability``) setCurrentStep(2);
+            if(initialReport.plagiarism) setCurrentStep(3);
+            
+            // If plagiarism check is pending, start polling
+            if (initialReport.plagiarism?.status === 'pending') {
+                setCurrentStep(4);
+                startPolling(reportId);
+            } else {
+                setIsLoading(false); // All checks were sync (or failed sync)
+                setCurrentStep(5);
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || "Failed to start analysis.";
+            setError(errorMessage);
+            toast.error(errorMessage);
+            setIsLoading(false);
+        }
+    };
+
+    const startPolling = (reportId) => {
+        pollingIntervalRef.current = setInterval(async () => {
+            try {
+                const updatedReport = await api.getIntegrityReport(reportId);
+                setReport(updatedReport);
+
+                if (updatedReport.plagiarism?.status === 'completed' || updatedReport.plagiarism?.status === 'error') {
+                    stopPolling();
+                    setIsLoading(false);
+                    setCurrentStep(5);
+                    toast.success("Plagiarism check complete!");
+                }
+            } catch (pollErr) {
+                stopPolling();
+                setIsLoading(false);
+                setError("Failed to retrieve the final plagiarism report.");
+                toast.error("Failed to retrieve the final plagiarism report.");
+            }
+        }, 5000); // Poll every 5 seconds
+    };
+    
+    const stopPolling = () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+    };
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => stopPolling();
+    }, []);
+
+    // Handle text highlighting
+    useEffect(() => {
+        if (!editorRef.current || !selectedFinding) return;
+
+        const editor = editorRef.current;
+        const model = editor.getModel();
+        if (!model) return;
+
+        const matches = model.findMatches(selectedFinding.text, true, false, true, null, true);
+        if (matches.length > 0) {
+            const range = matches[0].range;
+            const newDecorations = [{
+                range: new monaco.Range(range.startLineNumber, range.startColumn, range.endLineNumber, range.endColumn),
+                options: { className: 'highlighted-finding', isWholeLine: false }
+            }];
+            decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+            editor.revealRangeInCenter(range);
+        }
+    }, [selectedFinding]);
+
+    // File upload handler
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const toastId = toast.loading(`Extracting text from ${file.name}...`);
+        try {
+            let extractedText = '';
+            const fileType = file.type;
+            if (fileType === 'application/pdf') {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const typedarray = new Uint8Array(event.target.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    let fullText = '';
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        fullText += textContent.items.map(item => item.str).join(' ');
+                    }
+                    setText(fullText);
+                };
+                reader.readAsArrayBuffer(file);
+            } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const { value } = await mammoth.extractRawText({ arrayBuffer: event.target.result });
+                    setText(value);
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                extractedText = await file.text();
+                setText(extractedText);
+            }
+            toast.success("Text extracted successfully!", { id: toastId });
+        } catch (err) {
+            toast.error("Failed to extract text from file.", { id: toastId });
+        }
+    };
+
+
+    return (
+        <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
+             <style>{`.highlighted-finding { background-color: #fef9c3; } .monaco-editor .margin { background-color: ${theme === 'dark' ? '#1E293B' : '#FFFFFF'}; }`}</style>
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
+                <h1 className="text-xl font-bold">Academic Integrity Checker</h1>
+                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
+                    <Home size={16}/> Back to Main App
+                </Link>
+            </header>
+
+            <div className="flex-1 overflow-hidden p-2 md:p-4">
+                <PanelGroup direction="horizontal" className="h-full">
+                    <Panel defaultSize={50} minSize={30}>
+                        <div className="p-2 h-full flex flex-col">
+                            <div className="flex-shrink-0 flex justify-between items-center mb-2">
+                                <h2 className="font-semibold">Your Document</h2>
+                                <div className="flex items-center gap-2">
+                                     <Button
+                                        onClick={() => document.getElementById('file-upload').click()}
+                                        size="sm" variant="outline" leftIcon={<UploadCloud size={14}/>}
+                                    >
+                                        Upload
+                                    </Button>
+                                    <input type="file" id="file-upload" className="hidden" onChange={handleFileUpload} accept=".pdf,.docx,.txt" />
+                                    <Button onClick={handleAnalyze} size="sm" isLoading={isLoading}>
+                                        Analyze Document
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="flex-grow border border-border-light dark:border-border-dark rounded-md overflow-hidden">
+                                <Editor
+                                    onMount={handleEditorDidMount}
+                                    value={text}
+                                    onChange={(value) => setText(value || '')}
+                                    theme={theme === 'dark' ? 'vs-dark' : 'light'}
+                                    options={{ wordWrap: 'on', minimap: { enabled: false } }}
+                                />
+                            </div>
+                        </div>
+                    </Panel>
+                    <PanelResizeHandle className="w-2 panel-resize-handle" />
+                    <Panel defaultSize={50} minSize={30}>
+                        <div className="p-2 h-full">
+                            <IntegrityReportPanel
+                                report={report}
+                                isLoading={isLoading}
+                                error={error}
+                                steps={ANALYSIS_STEPS}
+                                currentStep={currentStep}
+                                onFindingSelect={setSelectedFinding}
+                            />
+                        </div>
+                    </Panel>
+                </PanelGroup>
+            </div>
+        </div>
+    );
+};
+
+export default AcademicIntegrityPage;
+```
+
 `frontend/src/components/tools/AIAssistantBot.jsx`
 
 ```javascript
@@ -14391,6 +14654,141 @@ const CodeExecutorPage = () => {
 };
 
 export default CodeExecutorPage;
+```
+
+`frontend/src/components/tools/IntegrityReportPanel.jsx`
+
+```javascript
+// frontend/src/components/tools/IntegrityReportPanel.jsx
+import React from 'react';
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const Section = ({ title, icon: Icon, children }) => (
+    <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
+        <h3 className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 border-b border-border-light dark:border-border-dark font-semibold">
+            <Icon className="text-primary" size={18} /> {title}
+        </h3>
+        <div className="p-4 text-sm">{children}</div>
+    </div>
+);
+
+const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, onFindingSelect }) => {
+    
+    if (isLoading) {
+        const stepInfo = steps[currentStep];
+        return (
+            <div className="h-full flex flex-col justify-center items-center text-center p-4">
+                <Loader2 className="animate-spin text-primary" size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis in Progress...</h3>
+                <div className="w-full max-w-sm bg-gray-200 dark:bg-gray-700 rounded-full h-2 my-3">
+                    <div className="bg-primary h-2 rounded-full transition-all duration-500" style={{ width: `${stepInfo.progress}%` }}></div>
+                </div>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">{stepInfo.name}</p>
+            </div>
+        );
+    }
+    
+    if (error) {
+        return (
+             <div className="h-full flex flex-col justify-center items-center text-center p-4 text-red-500">
+                <AlertTriangle size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis Failed</h3>
+                <p className="text-sm">{error}</p>
+            </div>
+        );
+    }
+
+    if (!report) {
+        return (
+            <div className="h-full flex flex-col justify-center items-center text-center p-4">
+                <ShieldCheck className="text-gray-400" size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis Report</h3>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                    Your academic integrity report will appear here once the analysis is complete.
+                </p>
+            </div>
+        );
+    }
+
+    const { plagiarism, bias, facts } = report;
+
+    return (
+        <div className="h-full flex flex-col bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
+            <header className="flex-shrink-0 p-4 border-b border-border-light dark:border-border-dark">
+                <h2 className="font-semibold">Analysis Report</h2>
+            </header>
+            <div className="flex-grow p-4 space-y-4 overflow-y-auto custom-scrollbar">
+                
+                {/* Plagiarism Section */}
+                <Section title="Plagiarism Check" icon={Percent}>
+                    {plagiarism?.status === 'pending' && <p className="text-text-muted-light dark:text-text-muted-dark">Awaiting report...</p>}
+                    {plagiarism?.status === 'error' && <p className="text-red-500">{plagiarism.message}</p>}
+                    {plagiarism?.status === 'completed' && plagiarism.report && (
+                        <div className="space-y-2">
+                             <p><strong>Overall Similarity Score:</strong> {plagiarism.report.overall_score}%</p>
+                             <a href={plagiarism.report.full_report_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View Full Turnitin Report</a>
+                        </div>
+                    )}
+                </Section>
+                
+                {/* Bias Section */}
+                <Section title="Bias & Inclusivity" icon={Scale}>
+                    {/* --- THIS IS THE FIX --- */}
+                    {/* We must first check if 'bias' is an array before trying to map it. */}
+                    {Array.isArray(bias) ? (
+                        bias.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {bias.map((item, i) => (
+                                    <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
+                                        <p><strong>Found:</strong> "{item.text}"</p>
+                                        <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
+                    ) : (
+                        // If bias is not an array, it's our error object.
+                        <p className="text-red-500">{bias?.message || "An error occurred during the bias check."}</p>
+                    )}
+                    {/* --- END OF FIX --- */}
+                </Section>
+
+                {/* Fact-Checking Section */}
+                <Section title="Fact-Checking" icon={Lightbulb}>
+                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
+                    {Array.isArray(facts) ? (
+                        facts.length === 0 ? (
+                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {facts.map((item, i) => (
+                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
+                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
+                                        onClick={() => onFindingSelect(item)}
+                                    >
+                                        <p><strong>Claim:</strong> "{item.claim}"</p>
+                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
+                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
+                    ) : (
+                        // If facts is not an array, it's our error object.
+                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
+                    )}
+                     {/* --- END OF FIX --- */}
+                </Section>
+            </div>
+        </div>
+    );
+};
+
+export default IntegrityReportPanel;
 ```
 
 `frontend/src/components/tools/OutputDisplay.jsx`
@@ -14926,6 +15324,18 @@ const QuizSetup = ({ onGenerate }) => {
 export default QuizSetup;
 ```
 
+`frontend/src/components/tools/ReadabilityMetrics.css`
+
+```css
+/* frontend/src/components/tools/ReadabilityMetrics.css */
+
+.gauge-progress-circle {
+    transition: stroke-dashoffset 0.8s ease-out;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+}
+```
+
 `frontend/src/components/tools/TestCaseManager.jsx`
 
 ```javascript
@@ -15044,24 +15454,33 @@ export default TestCaseManager;
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../core/Modal';
-import { Code, FileQuestion } from 'lucide-react';
+// --- THIS IS THE FIX: Added ShieldCheck to the import line ---
+import { Code, FileQuestion, ShieldCheck } from 'lucide-react'; 
+
 const availableTools = [
     {
-    title: 'Secure Code Executor',
-    description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
-    icon: Code,
-    path: '/tools/code-executor',
-    status: 'active'
+        title: 'Secure Code Executor',
+        description: 'Write, compile, and run code in a sandboxed environment with AI assistance.',
+        icon: Code,
+        path: '/tools/code-executor',
+        status: 'active'
     },
-     {
+    {
         title: 'AI Quiz Generator',
         description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
         icon: FileQuestion,
         path: '/tools/quiz-generator',
         status: 'active'
     },
-
+    {
+        title: 'Academic Integrity & Analysis',
+        description: 'Check your text for potential plagiarism, biased language, and readability metrics..',
+        icon: ShieldCheck, // This line will now work correctly
+        path: '/tools/integrity-checker',
+        status: 'active'
+    },
 ];
+
 const ToolsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
     const handleNavigate = (path) => {
@@ -15072,7 +15491,7 @@ const ToolsModal = ({ isOpen, onClose }) => {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Developer Tools" size="2xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Developer & Learning Tools" size="2xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {availableTools.map((tool) => (
                     <div
@@ -16038,144 +16457,88 @@ export const useWebSpeech = () => {
   .panel-resize-handle[data-active='true']::after {
     @apply bg-primary/50;
   }
+  
+  /* --- THIS IS THE CORRECTED SHIMMER CODE --- */
+  .shimmer-container {
+    @apply relative overflow-hidden;
+  }
 
-  /* --- NEW: Twinkling Title Effect --- */
-  .twinkling-title {
-    animation: twinkle-effect 4s ease-in-out infinite;
+  /* REPLACE the existing .shimmer-container::after block with this one */
+
+.shimmer-container::after {
+  content: '';
+  @apply absolute top-0 left-0 w-full h-full;
+  
+  /* The visual gradient for the shimmer */
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(0, 0, 0, 0.1) 50%, 
+    transparent 80%
+  );
+
+  /* THIS IS THE FIX: Use the Tailwind utility class for the animation */
+  @apply animate-shimmerSweep; 
+}
+
+  /* CORRECTED: Dark mode shimmer with rgba */
+  html.dark .shimmer-container::after {
+    background: linear-gradient(
+      90deg,
+      transparent 20%,
+      rgba(255, 255, 255, 0.15) 50%,
+      transparent 80%
+    );
   }
 }
 
 @layer utilities {
-  /* --- NEW: Keyframes --- */
-  @keyframes twinkle-effect {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-      text-shadow: 0 0 8px theme('colors.orange.400' / 0.5);
-    }
-    50% {
-      opacity: 0.85;
-      transform: scale(0.98);
-      text-shadow: 0 0 16px theme('colors.amber.400' / 0.7);
-    }
-  }
-}
-
-
-/* In frontend/src/index.css, add this at the end */
-
-@layer utilities {
+  /* This is now a single, clean utilities layer */
+  
   /* Keyframes for the border rotation */
   @keyframes spin-border {
-    0% {
-      --angle: 0deg;
-    }
-    100% {
-      --angle: 360deg;
-    }
+    0% { --angle: 0deg; }
+    100% { --angle: 360deg; }
   }
 
   /* Keyframes for the twinkling/shining effect on text and icons */
   @keyframes twinkle-effect {
     0%, 100% {
       opacity: 1;
+      transform: scale(1);
       text-shadow: 0 0 8px currentColor, 0 0 10px currentColor;
     }
     50% {
       opacity: 0.85;
+      transform: scale(0.98);
       text-shadow: 0 0 12px currentColor, 0 0 16px currentColor;
     }
   }
-
+  
   /* Utility class to apply the twinkling animation */
   .twinkling-text {
     animation: twinkle-effect 4s ease-in-out infinite;
   }
-
-  /* 
-    This is the core of the rotating border effect.
-    We register '--angle' as a CSS property that can be animated.
-    This is a modern CSS feature that makes this animation smooth and performant.
-  */
+  
+  /* Register --angle as a property for smooth animation */
   @property --angle {
     syntax: '<angle>';
     initial-value: 0deg;
     inherits: false;
   }
 
+  /* Keyframes for the sweeping underline effect */
   @keyframes sweep-underline {
-  from {
-    transform: translateX(-101%); /* Start completely off-screen to the left */
-  }
-  to {
-    transform: translateX(101%); /* End completely off-screen to the right */
-  }
-}
-
-/* --- Utility class for the animated underline --- */
-.animated-underline {
-  position: relative;
-  display: inline-block;
-  padding-bottom: 4px;
-  overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
-}
-
-/* REVISED PSEUDO-ELEMENT for a smooth sweep */
-.animated-underline::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%; /* The gradient bar is the same width as the text */
-  height: 2px;
-  background: linear-gradient(
-    90deg, 
-    transparent, /* Start transparent */
-    theme('colors.orange.500'),
-    theme('colors.red.500'),
-    theme('colors.amber.400'),
-    transparent /* End transparent */
-  );
-  animation: sweep-underline 4s linear infinite;
-}
-
-/* --- Keyframes for the fiery "Hot" tag effect --- */
-@keyframes fire-flicker {
-  0%, 100% {
-    transform: scale(1, 1);
-    box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
-  }
-  50% {
-    transform: scale(1.05, 1.05);
-    box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
-  }
-}
-
-/* --- Utility class for the fire animation --- */
-.fire-tag-animation {
-  animation: fire-flicker 2.5s ease-in-out infinite;
-}
-}
-
-
-
-@layer utilities {
-  /* --- Keyframes for the sweeping underline effect --- */
-  @keyframes sweep-underline {
-    from {
-      transform: translateX(-101%); /* Start completely off-screen to the left */
-    }
-    to {
-      transform: translateX(101%); /* End completely off-screen to the right */
-    }
+    from { transform: translateX(-101%); }
+    to { transform: translateX(101%); }
   }
 
-  /* --- Utility class for the animated underline --- */
+  /* Utility class for the animated underline */
   .animated-underline {
     position: relative;
     display: inline-block;
     padding-bottom: 4px;
-    overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+    overflow: hidden;
   }
 
   .animated-underline::after {
@@ -16183,7 +16546,7 @@ export const useWebSpeech = () => {
     position: absolute;
     bottom: 0;
     left: 0;
-    width: 100%; /* The gradient bar is the same width as the text */
+    width: 100%;
     height: 2px;
     background: linear-gradient(
       90deg, 
@@ -16196,7 +16559,7 @@ export const useWebSpeech = () => {
     animation: sweep-underline 4s linear infinite;
   }
 
-  /* --- Keyframes for the fiery "Hot" tag effect --- */
+  /* Keyframes for the fiery "Hot" tag effect */
   @keyframes fire-flicker {
     0%, 100% {
       transform: scale(1, 1);
@@ -16208,12 +16571,11 @@ export const useWebSpeech = () => {
     }
   }
 
-  /* --- Utility class for the fire animation --- */
+  /* Utility class for the fire animation */
   .fire-tag-animation {
     animation: fire-flicker 2.5s ease-in-out infinite;
   }
 }
-
 ```
 
 `frontend/src/main.jsx`
@@ -16253,7 +16615,6 @@ import 'prismjs/components/prism-java';
 
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
     <AuthProvider>
       <AppStateProvider>
         <Toaster
@@ -16300,7 +16661,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <AppWrapper />
       </AppStateProvider>
     </AuthProvider>
-  </React.StrictMode>,
 );
 ```
 
@@ -16678,18 +17038,21 @@ const api = {
     return response.data; // Should be { quiz: [...] }
   },
   analyzePrompt: async (promptText) => {
-<<<<<<< HEAD
     const response = await apiClient.post("/chat/analyze-prompt", {
       prompt: promptText,
     });
     return response.data; // Expects { improvedPrompt, explanation }
   },
-=======
-    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
-    return response.data; // Expects { improvedPrompt, explanation }
+   // --- Academic Integrity Tools ---
+  submitIntegrityCheck: async ({ text }) => {
+    const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
+    return response.data; // Expects { reportId, initialReport }
   },
-
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
+  
+  getIntegrityReport: async (reportId) => {
+    const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
+    return response.data; // Expects the full report object with status updates
+  },
 };
 
 export default api;
@@ -16882,19 +17245,22 @@ export default {
       keyframes: {
         fadeIn: { '0%': { opacity: '0', transform: 'translateY(5px)' }, '100%': { opacity: '1', transform: 'translateY(0px)' } },
         slideUp: { '0%': { transform: 'translateY(10px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } },
-        // --- ADDED THIS KEYFRAME ---
         pulseDots: {
           '0%, 100%': { opacity: '0.3', transform: 'scale(0.8)' },
           '50%': { opacity: '1', transform: 'scale(1)' },
+        },
+        shimmerSweep: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
         }
       },
       animation: {
         fadeIn: 'fadeIn 0.3s ease-out forwards',
         slideUp: 'slideUp 0.4s ease-out forwards',
-        // --- ADDED THESE ANIMATIONS ---
         pulseDot1: 'pulseDots 1.4s infinite 0s ease-in-out',
         pulseDot2: 'pulseDots 1.4s infinite 0.2s ease-in-out',
         pulseDot3: 'pulseDots 1.4s infinite 0.4s ease-in-out',
+        shimmerSweep: 'shimmerSweep 1.5s linear infinite',
       }
     },
   },
@@ -16931,8 +17297,8 @@ PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
 GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
-PROMPT_COACH_GEMINI_MODEL=gemini-1.5-flash-latest
-PROMPT_COACH_OLLAMA_MODEL=phi3:mini-instruct
+PROMPT_COACH_GEMINI_MODEL=gemini-2.5-pro
+PROMPT_COACH_OLLAMA_MODEL=qwen2.5:14b-instruct
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
@@ -17185,6 +17551,7 @@ const CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS = `You are an expert AI assistant. Yo
     *   **Code Blocks:** Use \`\`\`language ... \`\`\` for code. Specify the language if known.
     *   **Tables:** Use Markdown tables for structured data.
     *   **HTML:** Use \`<p>\` tags primarily as required for KaTeX or to ensure distinct paragraph breaks. Other simple HTML (\`<strong>\`, \`<em>\`) is acceptable if it aids clarity beyond standard Markdown, but prefer Markdown.
+    *   **CRITICAL: Do NOT wrap your entire response in a single Markdown code block (e.g., \`\`\`markdown ... \`\`\`). Use Markdown elements directly for formatting.**
 4.  **Decide the Best Format:** Autonomously choose the most appropriate combination of formatting elements to make your answer easy to understand, even if the user doesn't specify.
 
 **Working with "Context Documents" (RAG) for Your Response:**
@@ -17479,8 +17846,8 @@ Based on the CURRENT MODE and the USER'S QUERY, choose one action. Your entire o
   }
   \`\`\`
 
-Provide your JSON decision now.
-`;
+Your entire response MUST be this JSON object and nothing else. Do not add any conversational text, introductions, or explanations.
+Provide your JSON decision now.`;
 };
 
 
@@ -19365,76 +19732,80 @@ module.exports = {
 
 ```python
 # server/rag_service/academic_search.py
-import requests
+import asyncio
+import aiohttp
 import xml.etree.ElementTree as ET
 import logging
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def search_arxiv(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-    """Searches the ArXiv API for papers."""
+async def search_arxiv(session: aiohttp.ClientSession, query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches the ArXiv API for papers."""
     base_url = 'http://export.arxiv.org/api/query?'
     search_query = f'search_query=all:{query}&start=0&max_results={max_results}&sortBy=relevance'
     
     logger.info(f"Querying ArXiv with: {query}")
-    response = requests.get(base_url + search_query, timeout=10)
-    response.raise_for_status()
-    
-    root = ET.fromstring(response.content)
-    papers = []
-    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
-        paper = {
-            'source': 'ArXiv',
-            'title': entry.find('{http://www.w3.org/2005/Atom}title').text.strip(),
-            'url': entry.find('{http://www.w3.org/2005/Atom}id').text.strip(),
-            'summary': entry.find('{http://www.w3.org/2005/Atom}summary').text.strip(),
-            'authors': [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
-        }
-        papers.append(paper)
-    return papers
+    async with session.get(base_url + search_query) as response:
+        response.raise_for_status()
+        content = await response.text()
+        
+        root = ET.fromstring(content)
+        papers = []
+        for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+            paper = {
+                'source': 'ArXiv',
+                'title': entry.find('{http://www.w3.org/2005/Atom}title').text.strip(),
+                'url': entry.find('{http://www.w3.org/2005/Atom}id').text.strip(),
+                'summary': entry.find('{http://www.w3.org/2005/Atom}summary').text.strip(),
+                'authors': [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
+            }
+            papers.append(paper)
+        return papers
 
-def search_semantic_scholar(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-    """Searches the Semantic Scholar API."""
+async def search_semantic_scholar(session: aiohttp.ClientSession, query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches the Semantic Scholar API."""
     base_url = 'https://api.semanticscholar.org/graph/v1/paper/search'
     params = {'query': query, 'limit': max_results, 'fields': 'title,url,abstract,authors'}
     
     logger.info(f"Querying Semantic Scholar with: {query}")
-    response = requests.get(base_url, params=params, timeout=10)
-    response.raise_for_status()
-    
-    data = response.json()
-    papers = []
-    if 'data' in data:
-        for item in data['data']:
-            paper = {
-                'source': 'Semantic Scholar',
-                'title': item.get('title'),
-                'url': item.get('url'),
-                'summary': item.get('abstract'),
-                'authors': [author['name'] for author in item.get('authors', []) if 'name' in author]
-            }
-            papers.append(paper)
-    return papers
+    async with session.get(base_url, params=params) as response:
+        response.raise_for_status()
+        
+        data = await response.json()
+        papers = []
+        if 'data' in data:
+            for item in data['data']:
+                paper = {
+                    'source': 'Semantic Scholar',
+                    'title': item.get('title'),
+                    'url': item.get('url'),
+                    'summary': item.get('abstract'),
+                    'authors': [author['name'] for author in item.get('authors', []) if 'name' in author]
+                }
+                papers.append(paper)
+        return papers
 
-def search_all_apis(query: str, max_results_per_api: int = 3) -> List[Dict[str, Any]]:
-    """Searches all configured academic APIs and aggregates results."""
-    all_results = []
-    
-    api_functions = {
-        'ArXiv': search_arxiv,
-        'Semantic Scholar': search_semantic_scholar
-    }
-    
-    for api_name, search_func in api_functions.items():
-        try:
-            results = search_func(query, max_results=max_results_per_api)
-            all_results.extend(results)
-            logger.info(f"Found {len(results)} results from {api_name}.")
-        except Exception as e:
-            logger.warning(f"Could not retrieve results from {api_name}: {e}")
-            
-    # Simple de-duplication based on title to avoid showing the same paper from two sources
+async def search_all_apis(query: str, max_results_per_api: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches all configured academic APIs and aggregates results."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        tasks = [
+            search_arxiv(session, query, max_results=max_results_per_api),
+            search_semantic_scholar(session, query, max_results=max_results_per_api)
+        ]
+        
+        results_from_tasks = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        all_results = []
+        api_names = ['ArXiv', 'Semantic Scholar']
+        for i, result in enumerate(results_from_tasks):
+            if isinstance(result, Exception):
+                logger.warning(f"Could not retrieve results from {api_names[i]}: {result}")
+            else:
+                all_results.extend(result)
+                logger.info(f"Found {len(result)} results from {api_names[i]}.")
+
+    # Simple de-duplication based on title
     unique_results = {paper['title'].lower(): paper for paper in all_results if paper.get('title')}.values()
     
     return list(unique_results)
@@ -20042,20 +20413,21 @@ def extract_document_metadata_info(
     file_type_from_parser = os.path.splitext(original_file_name)[1].lower() # Fallback if not in parser_meta
 
     doc_meta = {
+        'user_id': user_id,
+        'original_name': original_file_name,
         'file_name': original_file_name,
         'file_path_on_server': file_path,
         'original_file_type': parser_meta.get('file_type', file_type_from_parser),
-        'processing_user': user_id,
-        'title': parser_meta.get('title', original_file_name), # Prioritize parser title
-        'author': parser_meta.get('author', "Unknown"),       # Prioritize parser author
-        'creation_date': parser_meta.get('creation_date'),   # Expect ISO format from parser
-        'modification_date': parser_meta.get('modification_date'), # Expect ISO format
+        'title': parser_meta.get('title', original_file_name),
+        'author': parser_meta.get('author', "Unknown"),
+        'creation_date': parser_meta.get('creation_date'),
+        'modification_date': parser_meta.get('modification_date'),
         'page_count': parser_meta.get('page_count', 0),
         'char_count_processed_text': len(processed_text),
         'named_entities': {},
         'structural_elements': "Paragraphs" + (", Tables" if parsed_doc_elements.get('tables') else ""),
-        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False), # Initial guess
-        'ocr_applied': False # Will be set to True if OCR text was actually used
+        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False),
+        'ocr_applied': False
     }
 
     # OS-level metadata (can augment or be overridden by parser_meta)
@@ -20358,13 +20730,14 @@ import re
 import knowledge_engine
 import media_processor
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
 import subprocess
 import tempfile
 import shutil
 import json
+
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20386,7 +20759,8 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
+    import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -21018,6 +21392,73 @@ def query_kg_route():
         logger.error(f"Error during KG query: {e}", exc_info=True)
         return create_error_response(f"KG query failed: {str(e)}", 500)
 
+
+@app.route('/analyze_integrity', methods=['POST'])
+def analyze_integrity_route():
+    data = request.get_json()
+    text = data.get('text')
+    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
+    api_key = data.get('api_key')
+
+    if not text or not checks:
+        return create_error_response("Missing 'text' or 'checks' list", 400)
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        results = {}
+        
+        # --- Plagiarism (Async Start) ---
+        if 'plagiarism' in checks:
+            try:
+                submission_id = loop.run_until_complete(submit_to_turnitin(text))
+                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+            except Exception as e:
+                logger.error(f"Turnitin submission failed: {e}")
+                results['plagiarism'] = {"status": "error", "message": str(e)}
+
+        # --- Bias & Fact-Checking (Sync) ---
+        llm_func = lambda p: llm_wrapper(p, api_key)
+        
+        if 'bias' in checks:
+            try:
+                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+            except Exception as e:
+                logger.error(f"Bias check failed: {e}")
+                results['bias'] = {"status": "error", "message": str(e)}
+
+        # --- THIS IS THE REPLACEMENT ---
+        if 'readability' in checks:
+            try:
+                results['readability'] = integrity_services.analyze_readability(text)
+            except Exception as e:
+                logger.error(f"Readability check failed: {e}")
+                results['readability'] = {"status": "error", "message": str(e)}
+        # --- END REPLACEMENT ---
+        
+        loop.close()
+        return jsonify(results), 200
+
+    except Exception as e:
+        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+        
+             
+@app.route('/get_turnitin_report', methods=['POST'])
+def get_turnitin_report_route():
+    data = request.get_json()
+    submission_id = data.get('submissionId')
+    if not submission_id:
+        return create_error_response("Missing 'submissionId'", 400)
+        
+    try:
+        # Run the async report fetching function in a managed event loop
+        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
+        return jsonify({"status": "completed", "report": report}), 200
+    except TimeoutError:
+        return jsonify({"status": "pending"}), 202
+    except Exception as e:
+        return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -21695,6 +22136,47 @@ if __name__ == '__main__':
 
 ```
 
+`server/rag_service/bias_wordlists.py`
+
+```python
+# server/rag_service/bias_wordlists.py
+
+"""
+This file contains dictionaries of terms for the fast, initial check
+in the hybrid bias detection system. It's designed to be easily editable
+by an administrator to add or change terms specific to their institution's style guide.
+"""
+
+# This list focuses on terms that are often non-inclusive or have more
+# objective, modern alternatives.
+INCLUSIVE_LANGUAGE_REPLACEMENTS = {
+    # Gendered Terms
+    "mankind": "humanity / people",
+    "man-made": "synthetic / artificial / human-made",
+    "forefathers": "ancestors / forebears / founders",
+    "chairman": "chair / chairperson",
+    "policeman": "police officer",
+    "housewife": "homemaker / stay-at-home parent",
+    "manpower": "workforce / staff / personnel",
+
+    # Ableist Language
+    "lame": "uninspiring / disappointing",
+    "crazy": "intense / wild / chaotic",
+    "insane": "unbelievable / shocking",
+    "blind review": "anonymized review",
+    "tone deaf": "insensitive / out of touch",
+
+    # Other potentially problematic terms
+    "whitelist": "allowlist / permitted list",
+    "blacklist": "denylist / blocklist",
+    "master/slave": "primary/replica or primary/secondary",
+    "sanity check": "quick check / confirmation check",
+}
+
+# This can be expanded with other categories in the future.
+# For example, culturally specific terms or jargon to avoid.
+```
+
 `server/rag_service/config.py`
 
 ```python
@@ -21734,6 +22216,10 @@ def setup_logging():
 # --- API Keys and Service URLs ---
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or your preferred Gemini model
+
+TURNITIN_API_URL = os.getenv('TURNITIN_API_URL')
+TURNITIN_API_KEY = os.getenv('TURNITIN_API_KEY')
+TURNITIN_API_SECRET = os.getenv('TURNITIN_API_SECRET')
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:8768")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
@@ -22305,6 +22791,240 @@ def chunk_text(text, file_name, user_id):
         logger.error(f"Error during text splitting for file {file_name}: {e}", exc_info=True)
         return [] # Return empty list on error
 
+```
+
+`server/rag_service/integrity_services.py`
+
+```python
+# server/rag_service/integrity_services.py
+import logging
+import requests
+import time
+import re
+import json
+from typing import Dict, Any, List
+import textstat
+import config
+from prompts import (
+    BIAS_CHECK_PROMPT_TEMPLATE, 
+    FACT_CHECK_EXTRACT_PROMPT_TEMPLATE,
+    FACT_CHECK_VERIFY_PROMPT_TEMPLATE
+)
+from academic_search import search_all_apis as academic_search
+from ddgs import DDGS
+
+logger = logging.getLogger(__name__)
+
+# In-memory cache for Turnitin token
+turnitin_token_cache = { "token": None, "expires_at": 0 }
+
+# --- NEW: Robust JSON Extraction Helper ---
+def _extract_json_from_llm_response(text: str) -> Dict[str, Any]:
+    """
+    Finds and parses a JSON object from a string that might contain other text,
+    including markdown code fences.
+    """
+    # Pattern to find JSON within ```json ... ``` or just ``` ... ```
+    json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
+    if json_match:
+        json_string = json_match.group(1)
+    else:
+        # Fallback to finding the first '{' and the last '}'
+        start_index = text.find('{')
+        end_index = text.rfind('}')
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_string = text[start_index:end_index+1]
+        else:
+            raise ValueError("No valid JSON object found in the LLM response.")
+            
+    return json.loads(json_string)
+# --- END NEW HELPER ---
+
+
+# --- Plagiarism Service (Turnitin) ---
+# ... (get_turnitin_auth_token, submit_to_turnitin, get_turnitin_report functions remain exactly the same) ...
+async def get_turnitin_auth_token() -> str:
+    """Gets a JWT from Turnitin, using a simple in-memory cache."""
+    if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
+        return turnitin_token_cache["token"]
+
+    if not all([config.TURNITIN_API_URL, config.TURNITIN_API_KEY, config.TURNITIN_API_SECRET]):
+        raise ValueError("Turnitin API credentials are not configured on the server.")
+
+    url = f"{config.TURNITIN_API_URL}/oauth/token"
+    payload = {
+        'grant_type': 'client_credentials',
+        'client_id': config.TURNITIN_API_KEY,
+        'client_secret': config.TURNITIN_API_SECRET
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
+    response = requests.post(url, data=payload, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+
+    turnitin_token_cache["token"] = data['access_token']
+    turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60  # 60s buffer
+    return data['access_token']
+
+async def submit_to_turnitin(text: str, filename: str = "pasted_text.txt") -> str:
+    """Submits text to Turnitin and returns a submission ID."""
+    token = await get_turnitin_auth_token()
+    url = f"{config.TURNITIN_API_URL}/submissions"
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    payload = {
+        'owner': 'api-user@example.com', # A generic owner identifier
+        'title': f"Integrity Check - {filename}",
+        'file_content': text
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()['id']
+
+async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
+    """Polls for and returns the final Turnitin similarity report."""
+    token = await get_turnitin_auth_token()
+    report_url = f"{config.TURNITIN_API_URL}/submissions/{submission_id}/similarity_report"
+    headers = {'Authorization': f'Bearer {token}'}
+
+    for _ in range(12):  # Poll for up to 2 minutes (12 * 10s)
+        response = requests.get(report_url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 202: # Accepted, but not ready
+            time.sleep(10)
+        else:
+            response.raise_for_status()
+    raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
+
+
+# --- Bias & Inclusivity Service ---
+
+def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs a hybrid check for biased language."""
+    from bias_wordlists import INCLUSIVE_LANGUAGE_REPLACEMENTS
+    
+    findings = []
+    # 1. Fast library check
+    for term, suggestion in INCLUSIVE_LANGUAGE_REPLACEMENTS.items():
+        if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
+            findings.append({
+                "text": term, 
+                "reason": "This term may have a more inclusive or objective alternative.", 
+                "suggestion": suggestion
+            })
+
+    # 2. Deep LLM check
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+    try:
+        response_text = llm_function(prompt)
+        # --- THIS IS THE FIX ---
+        llm_findings = _extract_json_from_llm_response(response_text).get("findings", [])
+        findings.extend(llm_findings)
+    except Exception as e:
+        logger.error(f"LLM bias check failed: {e}")
+        # Optionally, re-raise or handle the error, but don't let it crash
+        # For now, we log it and proceed with only the wordlist findings.
+
+    # Deduplicate findings
+    unique_findings = {f['text'].lower(): f for f in findings}
+    return list(unique_findings.values())
+
+
+# --- Fact-Checking Service ---
+async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs an agentic workflow to fact-check claims."""
+    # 1. Extract Claims
+    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+    try:
+        # --- THIS IS THE FIX ---
+        extract_response = llm_function(extract_prompt)
+        claims = _extract_json_from_llm_response(extract_response).get("claims", [])
+    except Exception as e:
+        logger.error(f"Fact-check claim extraction failed: {e}")
+        return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
+
+    if not claims: return []
+
+    # 2. Verify each claim
+    verified_claims = []
+    for claim in claims:
+        # 2a. Gather Evidence
+        web_results = []
+        try:
+            with DDGS() as ddgs:
+                web_results = list(ddgs.text(claim, max_results=3))
+        except Exception as e:
+            logger.warning(f"DDGS web search failed for claim '{claim}': {e}")
+        
+        academic_results = await academic_search(claim, 2)
+        
+        search_results_text = "WEB RESULTS:\n"
+        search_results_text += "\n\n".join([f"[{i+1}] {r['title']}\n{r['body']}" for i, r in enumerate(web_results)])
+        search_results_text += "\n\nACADEMIC RESULTS:\n"
+        search_results_text += "\n\n".join([f"[A{i+1}] {r['title']}\n{r['summary']}" for i, r in enumerate(academic_results)])
+
+        # 2b. Synthesize & Verify
+        verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
+        try:
+            # --- THIS IS THE FIX ---
+            verify_response = llm_function(verify_prompt)
+            synthesis = _extract_json_from_llm_response(verify_response)
+            verified_claims.append({"claim": claim, **synthesis})
+
+            # time.sleep(4)
+
+        except Exception as e:
+            logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
+            verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
+
+    return verified_claims
+
+
+def analyze_readability(text: str) -> Dict[str, Any]:
+    """
+    Analyzes the text for readability using the textstat library.
+    Returns a dictionary of key metrics.
+    """
+    if not text or not text.strip():
+        return {}
+        
+    logger.info("Performing readability analysis...")
+    try:
+        # Flesch Reading Ease: Score from 0-100. Higher is easier. 60-70 is standard.
+        flesch_ease = textstat.flesch_reading_ease(text)
+        
+        # Flesch-Kincaid Grade Level: US school grade level equivalent.
+        flesch_grade = textstat.flesch_kincaid_grade(text)
+        
+        # Gunning Fog Index: Grade level, higher is harder.
+        gunning_fog = textstat.gunning_fog(text)
+        
+        # Dale-Chall Readability Score: Best for general audiences.
+        dale_chall = textstat.dale_chall_readability_score(text)
+        
+        # Word Count
+        word_count = textstat.lexicon_count(text, removepunct=True)
+        
+        # Sentence Count
+        sentence_count = textstat.sentence_count(text)
+
+        # Average sentence length
+        avg_sentence_length = round(word_count / sentence_count, 2) if sentence_count > 0 else 0
+
+        return {
+            "fleschReadingEase": flesch_ease,
+            "fleschKincaidGrade": flesch_grade,
+            "gunningFog": gunning_fog,
+            "daleChall": dale_chall,
+            "wordCount": word_count,
+            "sentenceCount": sentence_count,
+            "avgSentenceLength": avg_sentence_length
+        }
+    except Exception as e:
+        logger.error(f"Textstat readability analysis failed: {e}")
+        raise ValueError(f"Could not compute readability scores: {e}")
 ```
 
 `server/rag_service/knowledge_engine.py`
@@ -22925,9 +23645,9 @@ Each object in the array must have two keys: input (a string) and expectedOutput
 For inputs that require multiple lines, use the newline character \\n.
 Example Output Format:
 [
-{{ "input": "5\\n10", "expectedOutput": "15" }},
-{{ "input": "0\\n0", "expectedOutput": "0" }},
-{{ "input": "-5\\n5", "expectedOutput": "0" }}
+{{"input": "5\\n10", "expectedOutput": "15"}},
+{{"input": "0\\n0", "expectedOutput": "0"}},
+{{"input": "-5\\n5", "expectedOutput": "0"}}
 ]
 LANGUAGE:
 {language}
@@ -22992,6 +23712,96 @@ You are an expert educator and assessment creator. Your task is to generate a mu
 """
 
 
+
+# ==============================================================================
+# === ACADEMIC INTEGRITY PROMPTS ===
+# ==============================================================================
+
+BIAS_CHECK_PROMPT_TEMPLATE = """
+You are an expert in academic writing and ethical communication. Your task is to analyze the provided text for any language that could be considered biased, non-inclusive, or contentious.
+
+**INSTRUCTIONS:**
+1.  Read the text carefully to identify words or phrases related to gender, race, disability, age, or other sensitive areas.
+2.  Look for stereotypes, generalizations, or potentially alienating language.
+3.  Your entire output MUST be a single, valid JSON object with one key: "findings".
+4.  The "findings" key must hold an array of objects. If no issues are found, the array should be empty.
+5.  Each finding object MUST have these keys:
+    -   "text": The exact biased phrase found in the text.
+    -   "reason": A brief, neutral explanation of why this phrase might be problematic.
+    -   "suggestion": A more inclusive or objective alternative.
+
+**EXAMPLE OUTPUT:**
+{{
+  "findings": [
+    {{
+      "text": "The forefathers of the nation...",
+      "reason": "This term is gender-exclusive and overlooks the contributions of women.",
+      "suggestion": "The founders of the nation..."
+    }},
+    {{
+      "text": "A blind review process...",
+      "reason": "Using 'blind' in this context can be seen as ableist language.",
+      "suggestion": "An anonymized review process..."
+    }}
+  ]
+}}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""
+
+FACT_CHECK_EXTRACT_PROMPT_TEMPLATE = """
+You are a meticulous research assistant. Your task is to read the provided text and extract all distinct, verifiable factual claims.
+
+**INSTRUCTIONS:**
+1.  Identify statements that present objective information, such as statistics, historical events, scientific statements, or specific data points.
+2.  Ignore subjective opinions, questions, or general statements that cannot be verified.
+3.  Your entire output MUST be a single, valid JSON object with one key: "claims".
+4.  The "claims" key must hold an array of strings. Each string is a direct quote of a factual claim from the text.
+5.  If no verifiable claims are found, the array should be empty.
+
+**EXAMPLE OUTPUT for a text containing "The Earth is the third planet from the Sun, and its population exceeds 8 billion people.":**
+{{
+  "claims": [
+    "The Earth is the third planet from the Sun.",
+    "The Earth's population exceeds 8 billion people."
+  ]
+}}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""
+
+FACT_CHECK_VERIFY_PROMPT_TEMPLATE = """
+You are an impartial fact-checker and synthesizer. You have been given a specific "CLAIM" and a set of "SEARCH RESULTS" from the web and academic sources. Your task is to determine the validity of the claim based ONLY on the provided search results.
+
+**INSTRUCTIONS:**
+1.  Carefully compare the "CLAIM" to the information in the "SEARCH RESULTS".
+2.  Your entire output MUST be a single, valid JSON object with two keys: "status" and "evidence".
+3.  The "status" key must be one of three strings: "Supported", "Refuted", or "Unverified".
+    -   "Supported": The search results contain clear evidence that validates the claim.
+    -   "Refuted": The search results contain clear evidence that contradicts the claim.
+    -   "Unverified": The search results do not contain enough information to either support or refute the claim.
+4.  The "evidence" key must be a string containing a brief, neutral summary of the findings from the search results that led to your status decision. This summary MUST cite the sources using bracket notation (e.g., [1], [2]).
+
+---
+**CLAIM TO VERIFY:**
+{claim}
+---
+**SEARCH RESULTS (Your ONLY source of information):**
+{search_results}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{{`):**
+"""
 ```
 
 `server/rag_service/quiz_utils.py`
@@ -23104,6 +23914,7 @@ beautifulsoup4
 playwright
 moviepy
 Werkzeug
+aiohttp
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -23472,11 +24283,11 @@ class VectorDBService:
         qdrant_filter = models.Filter(
             must=[
                 models.FieldCondition(
-                    key="processing_user", # The metadata field storing the user ID
+                    key="user_id",
                     match=models.MatchValue(value=user_id)
                 ),
                 models.FieldCondition(
-                    key="file_name", # The metadata field storing the original document name
+                    key="file_name",
                     match=models.MatchValue(value=document_name)
                 )
             ]
@@ -24267,10 +25078,7 @@ const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
-<<<<<<< HEAD
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
-=======
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
 const router = express.Router();
 
 
@@ -24396,7 +25204,7 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues // Add cues for client
+                criticalThinkingCues: criticalThinkingCues
             };
 
             streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
@@ -24407,7 +25215,7 @@ router.post('/message', async (req, res) => {
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
+                { upsert: false, new: true }
             );
             if (finalBotMessageObject) {
                 extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
@@ -24445,10 +25253,7 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
-<<<<<<< HEAD
             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
-=======
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
         }
 
     } catch (error) {
@@ -26244,6 +27049,9 @@ const FormData = require("form-data");
 const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
+const { v4: uuidv4 } = require('uuid'); 
+const integrityReportCache = new Map();
+
 
 // --- THIS IS THE FIX ---
 // We switch from a simple 'dest' to a 'storage' configuration
@@ -26459,6 +27267,84 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
       );
   }
 });
+
+
+// @desc    Initiates an academic integrity check.
+// @access  Private
+router.post('/analyze-integrity/submit', async (req, res) => {
+    const { text } = req.body;
+    if (!text || text.trim().length < 50) {
+        return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: 'Analysis service is not configured.' });
+    }
+
+    try {
+        const apiKey = await getApiKeyForRequest(req.user._id);
+        // --- THIS IS THE FIX: Changed 'facts' to 'readability' ---
+        const checks = ['plagiarism', 'bias', 'readability'];
+
+        const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
+            text,
+            checks,
+            api_key: apiKey
+        }, { timeout: 120000 });
+
+        const initialReport = response.data;
+        const reportId = uuidv4();
+        
+        integrityReportCache.set(reportId, initialReport);
+        
+        res.status(202).json({ reportId, initialReport });
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        console.error(`[Node Integrity Submit] Error: ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+// @route   GET /api/tools/analyze-integrity/report/:reportId
+// @desc    Polls for the status and results of an integrity check.
+// @access  Private
+router.get('/analyze-integrity/report/:reportId', async (req, res) => {
+    const { reportId } = req.params;
+    const report = integrityReportCache.get(reportId);
+
+    if (!report) {
+        return res.status(404).json({ message: 'Report not found or has expired.' });
+    }
+
+    // If plagiarism check is still pending, poll the Python service
+    if (report.plagiarism && report.plagiarism.status === 'pending') {
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        try {
+            const pollResponse = await axios.post(`${pythonServiceUrl}/get_turnitin_report`, {
+                submissionId: report.plagiarism.submissionId
+            }, { timeout: 15000 });
+
+            // Update the plagiarism part of the cached report
+            report.plagiarism = pollResponse.data;
+            integrityReportCache.set(reportId, report);
+
+            // If it's now completed, we can remove it from cache after a delay
+            if(report.plagiarism.status === 'completed') {
+                setTimeout(() => integrityReportCache.delete(reportId), 5 * 60 * 1000); // Expire after 5 mins
+            }
+        } catch (error) {
+             // Don't fail the whole request, just report the polling error
+            report.plagiarism.status = 'error';
+            report.plagiarism.message = 'Failed to poll for report status.';
+            console.error(`[Node Integrity Poll] Error polling Turnitin status: ${error.message}`);
+        }
+    }
+    
+    res.status(200).json(report);
+});
+
 
 module.exports = router;
 
@@ -26879,25 +27765,37 @@ startServer();
 
 ```javascript
 // server/services/agentService.js
-const { CHAT_MAIN_SYSTEM_PROMPT, createSynthesizerPrompt, createAgenticSystemPrompt } = require('../config/promptTemplates.js');
-const { availableTools } = require('./toolRegistry.js');
-const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
-const geminiService = require('./geminiService.js');
-const ollamaService = require('./ollamaService.js');
+const {
+  CHAT_MAIN_SYSTEM_PROMPT,
+  createSynthesizerPrompt,
+  createAgenticSystemPrompt,
+} = require("../config/promptTemplates.js");
+const { availableTools } = require("./toolRegistry.js");
+const {
+  createModelContext,
+  createAgenticContext,
+} = require("../protocols/contextProtocols.js");
+const geminiService = require("./geminiService.js");
+const ollamaService = require("./ollamaService.js");
 
 function parseToolCall(responseText) {
-    try {
-        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
-        const jsonString = jsonMatch ? jsonMatch[2] : responseText;
-        const jsonResponse = JSON.parse(jsonString);
-        if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
-            return jsonResponse.tool_call;
-        }
-        return null;
-    } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(0, 200)}...`);
-        return null;
+  try {
+    const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+    const jsonString = jsonMatch ? jsonMatch[2] : responseText;
+    const jsonResponse = JSON.parse(jsonString);
+    if (jsonResponse && typeof jsonResponse.tool_call !== "undefined") {
+      return jsonResponse.tool_call;
     }
+    return null;
+  } catch (e) {
+    console.warn(
+      `[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(
+        0,
+        200
+      )}...`
+    );
+    return null;
+  }
 }
 
 async function processAgenticRequest(
@@ -27054,77 +27952,10 @@ async function processAgenticRequest(
   }
 }
 
-
 module.exports = {
-    processAgenticRequest,
+  processAgenticRequest,
 };
-```
 
-`server/services/criticalThinkingService.js`
-
-```javascript
-// server/services/criticalThinkingService.js
-const geminiService = require('./geminiService');
-const ollamaService = require('./ollamaService');
-const { CRITICAL_THINKING_CUE_TEMPLATE } = require('../config/promptTemplates');
-
-const CUE_GEMINI_MODEL = process.env.PROMPT_COACH_GEMINI_MODEL || 'gemini-1.5-flash-latest';
-const CUE_OLLAMA_MODEL = process.env.PROMPT_COACH_OLLAMA_MODEL || 'phi3:mini-instruct';
-
-/**
- * Analyzes an AI's final answer to generate critical thinking cue prompts.
- * @param {string} aiAnswerText - The final text of the AI's response.
- * @param {object} llmConfig - Configuration object containing the user's provider, key, URL, etc.
- * @returns {Promise<object|null>} An object with cue prompts, or null if none are generated or an error occurs.
- */
-async function generateCues(aiAnswerText, llmConfig) {
-    if (!aiAnswerText || aiAnswerText.trim().length < 50) {
-        // Don't generate cues for very short or empty answers
-        return null;
-    }
-
-    const { llmProvider, ollamaUrl, apiKey } = llmConfig;
-    const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
-
-    const promptForLlm = CRITICAL_THINKING_CUE_TEMPLATE.replace('{aiAnswer}', aiAnswerText.substring(0, 2000)); // Limit context size for speed
-
-    const llmOptions = {
-        model: llmProvider === 'ollama' ? CUE_OLLAMA_MODEL : CUE_GEMINI_MODEL,
-        apiKey: apiKey,
-        ollamaUrl: ollamaUrl,
-        temperature: 0.4 // Lower temperature for more deterministic, structured output
-    };
-
-    try {
-        console.log(`[CriticalThinkingService] Generating cues using ${llmProvider} with model ${llmOptions.model}.`);
-        const responseText = await llmService.generateContentWithHistory([], promptForLlm, null, llmOptions);
-
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            console.warn("[CriticalThinkingService] LLM response did not contain a valid JSON object.");
-            return null;
-        }
-        
-        const parsedResponse = JSON.parse(jsonMatch[0]);
-
-        // Validate that at least one valid key exists
-        if (parsedResponse.verificationPrompt || parsedResponse.alternativePrompt || parsedResponse.applicationPrompt) {
-            return parsedResponse;
-        }
-
-        // Return null if the object is empty ({})
-        return null;
-
-    } catch (error) {
-        console.error(`[CriticalThinkingService] Failed to generate cues: ${error.message}`);
-        // Return null on any error to ensure this feature doesn't block the main response
-        return null;
-    }
-}
-
-module.exports = {
-    generateCues
-};
 ```
 
 `server/services/criticalThinkingService.js`
@@ -27198,192 +28029,148 @@ module.exports = {
 
 ```javascript
 // server/services/geminiService.js
-const {
-  GoogleGenerativeAI,
-  HarmCategory,
-  HarmBlockThreshold,
-} = require("@google/generative-ai");
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash-latest"; // Using a more stable model name
+const MODEL_NAME = "gemini-2.5-pro";
 
-const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 8192; // Standard for Flash
-const DEFAULT_MAX_OUTPUT_TOKENS_KG = 8192;
+const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
+const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
 
 const baseSafetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
 async function generateContentWithHistory(
-  chatHistory,
-  currentUserQuery,
-  systemPromptText = null,
-  options = {}
+    chatHistory,
+    currentUserQuery,
+    systemPromptText = null,
+    options = {} // Now accepts { maxOutputTokens, apiKey }
 ) {
-  const apiKeyToUse = options.apiKey || FALLBACK_API_KEY;
+    const apiKeyToUse = options.apiKey || FALLBACK_API_KEY;
 
-  if (!apiKeyToUse) {
-    console.error(
-      "FATAL ERROR: Gemini API key is not available for this request."
-    );
-    throw new Error("Gemini API key is missing. Please configure it.");
-  }
-
-  try {
-    const genAI = new GoogleGenerativeAI(apiKeyToUse);
-
-    if (
-      typeof currentUserQuery !== "string" ||
-      currentUserQuery.trim() === ""
-    ) {
-      throw new Error("currentUserQuery must be a non-empty string.");
+    if (!apiKeyToUse) {
+        console.error("FATAL ERROR: Gemini API key is not available for this request. Ensure server's GEMINI_API_KEY is set or user provides one.");
+        throw new Error("Gemini API key is missing. Please configure it.");
     }
 
-    const model = genAI.getGenerativeModel({
-      model: MODEL_NAME,
-      systemInstruction:
-        systemPromptText &&
-        typeof systemPromptText === "string" &&
-        systemPromptText.trim() !== ""
-          ? systemPromptText.trim()
-          : undefined,
-      safetySettings: baseSafetySettings,
-    });
+    try {
+        const genAI = new GoogleGenerativeAI(apiKeyToUse);
 
-    // --- THIS IS THE FIX ---
-    // We will use the more stable, stateless `generateContent` method.
-    // First, construct the full conversation history including the new query.
-    const contents = (chatHistory || [])
-      .map((msg) => ({
-        role: msg.role,
-        parts: Array.isArray(msg.parts)
-          ? msg.parts.map((part) => ({ text: part.text || "" }))
-          : [{ text: msg.text || "" }],
-      }))
-      .filter(
-        (msg) =>
-          msg.role &&
-          msg.parts &&
-          msg.parts.length > 0 &&
-          typeof msg.parts[0].text === "string"
-      );
-
-    // Add the current user query as the last part of the contents
-    contents.push({ role: "user", parts: [{ text: currentUserQuery }] });
-    // --- END OF FIX ---
-
-    const generationConfig = {
-      temperature: 0.7,
-      maxOutputTokens:
-        options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
-    };
-
-    console.log(
-      `Sending message to Gemini via generateContent. History length: ${
-        contents.length - 1
-      }. System Prompt: ${!!systemPromptText}.`
-    );
-
-    // --- THIS IS THE FIX ---
-    // Call the stateless `generateContent` with the fully structured payload.
-    const result = await model.generateContent({
-      contents: contents,
-      generationConfig: generationConfig,
-    });
-    // --- END OF FIX ---
-
-    const response = result.response;
-    const candidate = response?.candidates?.[0];
-
-    if (
-      candidate &&
-      (candidate.finishReason === "STOP" ||
-        candidate.finishReason === "MAX_TOKENS")
-    ) {
-      const responseText = candidate?.content?.parts?.[0]?.text || "";
-      if (candidate.finishReason === "MAX_TOKENS") {
-        console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
-      }
-      return responseText;
-    } else {
-      const finishReason = candidate?.finishReason || "Unknown";
-      const safetyRatings = candidate?.safetyRatings;
-      console.warn("Gemini response was potentially blocked or had issues.", {
-        finishReason,
-        safetyRatings,
-      });
-      let blockMessage = `AI response generation failed or was blocked.`;
-      if (finishReason === "SAFETY") {
-        blockMessage += ` Reason: SAFETY.`;
-        if (safetyRatings) {
-          const blockedCategories = safetyRatings
-            .filter((r) => r.blocked)
-            .map((r) => r.category)
-            .join(", ");
-          if (blockedCategories)
-            blockMessage += ` Blocked Categories: ${blockedCategories}.`;
+        if (typeof currentUserQuery !== 'string' || currentUserQuery.trim() === '') {
+             throw new Error("currentUserQuery must be a non-empty string.");
         }
-      } else if (finishReason) {
-        blockMessage += ` Reason: ${finishReason}.`;
-      }
-      const error = new Error(blockMessage);
-      error.status = 400;
-      throw error;
-    }
-  } catch (error) {
-    console.error("Gemini API Call Error:", error?.message || error);
-    let clientMessage = "Failed to get response from AI service.";
-    // Keep the detailed error parsing as it's still useful
-    if (error.message?.includes("API key not valid")) {
-      clientMessage = "Invalid API Key.";
-    } else if (error.message?.includes("API key not found")) {
-      clientMessage = "API Key not found";
-    } else if (error.message?.includes("API_KEY_INVALID")) {
-      clientMessage = "API Key not invalid. Please Provide the Valid one.";
-    } else if (error.message?.includes("enabled this API recently")) {
-      clientMessage =
-        "Looks like new API key. Need some time to fully activate.";
-    } else if (error.message?.includes("billing account")) {
-      clientMessage = "Billing account issue with the provided API Key.";
-    } else if (error.message?.includes("blocked due to safety")) {
-      clientMessage = "AI response blocked due to safety settings.";
-    } else if (error.message?.includes("Invalid JSON payload")) {
-      clientMessage = "Invalid request format sent to AI.";
-    } else if (error.message?.includes("User location is not supported")) {
-      clientMessage = "User location is not supported for this model.";
-    } else if (error.message?.includes("model is overloaded")) {
-      clientMessage =
-        "The AI model is currently overloaded. Please try again in a moment.";
-    } else if (error.status === 400) {
-      clientMessage = `${error.message}`;
-    }
-    const enhancedError = new Error(clientMessage);
-    enhancedError.status = error.status || 500;
-    enhancedError.originalError = error;
-    throw enhancedError;
-  }
-}
 
-module.exports = {
-  generateContentWithHistory,
-  DEFAULT_MAX_OUTPUT_TOKENS_KG,
+        const generationConfig = {
+            temperature: 0.7,
+            maxOutputTokens: options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
+        };
+
+        const model = genAI.getGenerativeModel({
+            model: MODEL_NAME,
+            systemInstruction: (systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '') ? 
+                { parts: [{ text: systemPromptText.trim() }] } : undefined,
+            safetySettings: baseSafetySettings,
+        });
+
+        const historyForStartChat = (chatHistory || [])
+            .map(msg => ({
+                 role: msg.role, 
+                 parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: msg.text || ''}] 
+            }))
+            .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
+
+        const chat = model.startChat({
+            history: historyForStartChat,
+            generationConfig: generationConfig,
+        });
+
+        console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. System Prompt: ${!!systemPromptText}. Max Tokens: ${generationConfig.maxOutputTokens}`);
+        // console.log(`Current User Query to sendMessage (first 100): "${currentUserQuery.substring(0,100)}..."`); // Can be very long
+
+        // console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        // console.log("--- System Prompt Sent to Model ---");
+        // console.log(systemPromptText || "N/A");
+        // console.log("\n--- History Sent to Model ---");
+        // console.log(JSON.stringify(historyForStartChat, null, 2));
+        // console.log("\n--- Current User Query Sent to Model ---");
+        // console.log(currentUserQuery);
+        // console.log("==================== END GEMINI FINAL INPUT ====================\n");
+        // console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        // console.log("--- System Prompt Sent to Model ---");
+        // console.log(systemPromptText || "N/A");
+        // console.log("\n--- History Sent to Model ---");
+        // console.log(JSON.stringify(historyForStartChat, null, 2));
+        // console.log("\n--- Current User Query Sent to Model ---");
+        // console.log(currentUserQuery);
+        // console.log("==================== END GEMINI FINAL INPUT ====================\n");
+
+        const result = await chat.sendMessage(currentUserQuery);
+        const response = result.response;
+        const candidate = response?.candidates?.[0];
+
+        if (candidate && (candidate.finishReason === 'STOP' || candidate.finishReason === 'MAX_TOKENS')) {
+            const responseText = candidate?.content?.parts?.[0]?.text || "";
+            if (candidate.finishReason === 'MAX_TOKENS') {
+                console.warn("Gemini response was truncated due to MAX_TOKENS limit.");
+            }
+            return responseText;
+        } else {
+             const finishReason = candidate?.finishReason || 'Unknown';
+             const safetyRatings = candidate?.safetyRatings;
+             console.warn("Gemini response was potentially blocked or had issues.", { finishReason, safetyRatings });
+             let blockMessage = `AI response generation failed or was blocked.`;
+             if (finishReason === 'SAFETY') {
+                 blockMessage += ` Reason: SAFETY.`;
+                 if (safetyRatings) {
+                    const blockedCategories = safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
+                    if (blockedCategories) blockMessage += ` Blocked Categories: ${blockedCategories}.`;
+                 }
+             } else if (finishReason) {
+                 blockMessage += ` Reason: ${finishReason}.`;
+             }
+             const error = new Error(blockMessage);
+             error.status = 400;
+             throw error;
+        }
+    } catch (error) {
+        console.error("Gemini API Call Error:", error?.message || error);
+        let clientMessage = "Failed to get response from AI service.";
+        if (error.message?.includes("API key not valid")) {
+            clientMessage = "Invalid API Key.";
+        } else if (error.message?.includes("API key not found")) {
+            clientMessage = "API Key not found";
+        } else if (error.message?.includes("API_KEY_INVALID")) {
+            clientMessage = "API Key not invalid. Please Provide the Valid one.";
+        } else if (error.message?.includes("enabled this API recently")) {
+            clientMessage = "Looks like new API key. Need some time to fully activate."
+        } else if (error.message?.includes("billing account")) {
+            clientMessage = "Billing account issue with the provided API Key.";
+        } else if (error.message?.includes("blocked due to safety")) {
+            clientMessage = "AI response blocked due to safety settings.";
+        } else if (error.message?.includes("Invalid JSON payload")) {
+            clientMessage = "Invalid request format sent to AI.";
+        } else if (error.message?.includes("User location is not supported")) {
+            clientMessage = "User location is not supported for this model.";
+        } else if (error.message?.includes("model is overloaded")) {
+            clientMessage = "The AI model is currently overloaded. Please try again in a moment.";
+        } else if (error.status === 400) {
+            clientMessage = `${error.message}`; 
+        }
+        const enhancedError = new Error(clientMessage);
+        enhancedError.status = error.status || 500; 
+        enhancedError.originalError = error; 
+        throw enhancedError;
+    }
 };
 
+module.exports = {
+    generateContentWithHistory,
+    DEFAULT_MAX_OUTPUT_TOKENS_KG 
+}
 ```
 
 `server/services/kgExtractionService.js`
@@ -28452,19 +29239,22 @@ const axios = require('axios');
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_RAG_SERVICE_URL;
 
-async function queryPythonRagService(query, documentContextName, clientFilter = null, k = 5) {
-    if (!PYTHON_SERVICE_URL) {
+async function queryPythonRagService(
+    query, documentContextNameToPass, userId, criticalThinkingEnabled, clientFilter = null, k = 5
+) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
         throw new Error("RAG service is not configured on the server.");
     }
-    const searchUrl = `${PYTHON_SERVICE_URL}/query`;
-    
+    const searchUrl = `${pythonServiceUrl}/query`;
+    console.log(`[ragQueryService] Querying Python RAG: User="${userId}", Query="${query.substring(0, 50)}...", DocContext=${documentContextNameToPass}`);
+
     const payload = {
         query: query,
         k: k,
-        user_id: "agent_user", // The user is validated in Node.js; agent uses a generic ID for Python
-        documentContextName: documentContextName || null,
-        // CRITICAL FIX: Ensure filter is always an object, even if empty.
-        // The Python service expects the key to exist.
+        user_id: userId, // <<< THIS IS THE KEY ADDITION
+        use_kg_critical_thinking: !!criticalThinkingEnabled,
+        documentContextName: documentContextNameToPass || null,
         filter: clientFilter || {} 
     };
 
@@ -28484,9 +29274,9 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         
         const toolOutput = relevantDocs.length > 0
             ? response.data.formatted_context_snippet
-            : "No relevant documents were found for this topic."; // More specific message
+            : "No relevant documents were found for this topic.";
         
-        return { references, toolOutput, retrieved_documents_list: relevantDocs }; // Pass full list back
+        return { references, toolOutput, retrieved_documents_list: relevantDocs };
 
     } catch (error) {
         let errorMsg = error.message;
@@ -28587,7 +29377,13 @@ const availableTools = {
   rag_search: {
     description: "Searches the content of a specific, user-provided document to answer questions based on its text.",
     execute: async (params, context) => {
-        return await queryPythonRagService(params.query, context.documentContextName, context.filter);
+        return await queryPythonRagService(
+            params.query, 
+            context.documentContextName, 
+            context.userId, // <-- Pass the userId
+            context.criticalThinkingEnabled, // <-- Pass the flag
+            context.filter
+        );
     },
     requiredParams: ['query'],
   },
@@ -28858,7 +29654,7 @@ async function performWebSearch(query) {
 
     try {
         console.log(`[WebSearch Service] Calling Python endpoint for search: ${searchUrl}`);
-        const response = await axios.post(searchUrl, { query: query }, { timeout: 15000 });
+        const response = await axios.post(searchUrl, { query: query }, { timeout: 45000 });
 
         if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             const topResults = response.data;

@@ -76,13 +76,13 @@ async function generateContentWithHistory(
     }
     // --- END OF FIX ---
 
-    console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}.`);
+    // console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}.`);
 
-    console.log("\n==================== START OLLAMA FINAL INPUT ====================");
-    console.log(`--- Endpoint: ${endpoint} ---`);
-    console.log("--- Request Payload Sent to Model ---");
-    console.log(JSON.stringify(requestPayload, null, 2));
-    console.log("==================== END OLLAMA FINAL INPUT ====================\n");
+    // console.log("\n==================== START OLLAMA FINAL INPUT ====================");
+    // console.log(`--- Endpoint: ${endpoint} ---`);
+    // console.log("--- Request Payload Sent to Model ---");
+    // console.log(JSON.stringify(requestPayload, null, 2));
+    // console.log("==================== END OLLAMA FINAL INPUT ====================\n");
 
     
     try {
