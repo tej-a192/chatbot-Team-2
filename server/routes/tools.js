@@ -8,6 +8,9 @@ const FormData = require("form-data");
 const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
+const { v4: uuidv4 } = require('uuid'); 
+const integrityReportCache = new Map();
+
 
 // --- THIS IS THE FIX ---
 // We switch from a simple 'dest' to a 'storage' configuration
@@ -223,5 +226,83 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
       );
   }
 });
+
+
+// @desc    Initiates an academic integrity check.
+// @access  Private
+router.post('/analyze-integrity/submit', async (req, res) => {
+    const { text } = req.body;
+    if (!text || text.trim().length < 50) {
+        return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: 'Analysis service is not configured.' });
+    }
+
+    try {
+        const apiKey = await getApiKeyForRequest(req.user._id);
+        const checks = ['plagiarism', 'bias', 'facts'];
+
+        const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
+            text,
+            checks,
+            api_key: apiKey
+        }, { timeout: 120000 }); // 2 min timeout for sync parts
+
+        const initialReport = response.data;
+        const reportId = uuidv4();
+        
+        // Store the initial report (with pending plagiarism) in our cache
+        integrityReportCache.set(reportId, initialReport);
+        
+        res.status(202).json({ reportId, initialReport });
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        console.error(`[Node Integrity Submit] Error: ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+// @route   GET /api/tools/analyze-integrity/report/:reportId
+// @desc    Polls for the status and results of an integrity check.
+// @access  Private
+router.get('/analyze-integrity/report/:reportId', async (req, res) => {
+    const { reportId } = req.params;
+    const report = integrityReportCache.get(reportId);
+
+    if (!report) {
+        return res.status(404).json({ message: 'Report not found or has expired.' });
+    }
+
+    // If plagiarism check is still pending, poll the Python service
+    if (report.plagiarism && report.plagiarism.status === 'pending') {
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        try {
+            const pollResponse = await axios.post(`${pythonServiceUrl}/get_turnitin_report`, {
+                submissionId: report.plagiarism.submissionId
+            }, { timeout: 15000 });
+
+            // Update the plagiarism part of the cached report
+            report.plagiarism = pollResponse.data;
+            integrityReportCache.set(reportId, report);
+
+            // If it's now completed, we can remove it from cache after a delay
+            if(report.plagiarism.status === 'completed') {
+                setTimeout(() => integrityReportCache.delete(reportId), 5 * 60 * 1000); // Expire after 5 mins
+            }
+        } catch (error) {
+             // Don't fail the whole request, just report the polling error
+            report.plagiarism.status = 'error';
+            report.plagiarism.message = 'Failed to poll for report status.';
+            console.error(`[Node Integrity Poll] Error polling Turnitin status: ${error.message}`);
+        }
+    }
+    
+    res.status(200).json(report);
+});
+
 
 module.exports = router;

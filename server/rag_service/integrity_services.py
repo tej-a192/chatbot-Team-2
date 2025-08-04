@@ -1,0 +1,160 @@
+# server/rag_service/integrity_services.py
+import logging
+import requests
+import time
+import re
+import json
+from typing import Dict, Any, List
+
+import config
+from prompts import (
+    BIAS_CHECK_PROMPT_TEMPLATE, 
+    FACT_CHECK_EXTRACT_PROMPT_TEMPLATE,
+    FACT_CHECK_VERIFY_PROMPT_TEMPLATE
+)
+from academic_search import search_all_apis as academic_search
+from ddgs import DDGS
+
+logger = logging.getLogger(__name__)
+
+# In-memory cache for Turnitin token (could be replaced with Redis for multi-worker setups)
+turnitin_token_cache = {
+    "token": None,
+    "expires_at": 0
+}
+
+# --- Plagiarism Service (Turnitin) ---
+
+async def get_turnitin_auth_token() -> str:
+    """Gets a JWT from Turnitin, using a simple in-memory cache."""
+    if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
+        return turnitin_token_cache["token"]
+
+    if not all([config.TURNITIN_API_URL, config.TURNITIN_API_KEY, config.TURNITIN_API_SECRET]):
+        raise ValueError("Turnitin API credentials are not configured on the server.")
+
+    url = f"{config.TURNITIN_API_URL}/oauth/token"
+    payload = {
+        'grant_type': 'client_credentials',
+        'client_id': config.TURNITIN_API_KEY,
+        'client_secret': config.TURNITIN_API_SECRET
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
+    response = requests.post(url, data=payload, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+
+    turnitin_token_cache["token"] = data['access_token']
+    turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60  # 60s buffer
+    return data['access_token']
+
+async def submit_to_turnitin(text: str, filename: str = "pasted_text.txt") -> str:
+    """Submits text to Turnitin and returns a submission ID."""
+    token = await get_turnitin_auth_token()
+    url = f"{config.TURNITIN_API_URL}/submissions"
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    payload = {
+        'owner': 'api-user@example.com', # A generic owner identifier
+        'title': f"Integrity Check - {filename}",
+        'file_content': text
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()['id']
+
+async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
+    """Polls for and returns the final Turnitin similarity report."""
+    token = await get_turnitin_auth_token()
+    report_url = f"{config.TURNITIN_API_URL}/submissions/{submission_id}/similarity_report"
+    headers = {'Authorization': f'Bearer {token}'}
+
+    for _ in range(12):  # Poll for up to 2 minutes (12 * 10s)
+        response = requests.get(report_url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 202: # Accepted, but not ready
+            time.sleep(10)
+        else:
+            response.raise_for_status()
+    raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
+
+# --- Bias & Inclusivity Service ---
+
+def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs a hybrid check for biased language."""
+    # This is a placeholder for a real wordlist
+    simple_bias_wordlist = { "mankind": "humanity", "forefathers": "founders", "man-made": "synthetic" }
+    
+    findings = []
+    # 1. Fast library check
+    for term, suggestion in simple_bias_wordlist.items():
+        if re.search(r'\b' + term + r'\b', text, re.IGNORECASE):
+            findings.append({
+                "text": term, "reason": "This term can be gender-exclusive.", "suggestion": suggestion
+            })
+
+    # 2. Deep LLM check
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    try:
+        response_text = llm_function(prompt)
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            llm_findings = json.loads(json_match.group(0)).get("findings", [])
+            findings.extend(llm_findings)
+    except Exception as e:
+        logger.error(f"LLM bias check failed: {e}")
+
+    # Deduplicate findings
+    unique_findings = {f['text'].lower(): f for f in findings}
+    return list(unique_findings.values())
+
+
+# --- Fact-Checking Service ---
+async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs an agentic workflow to fact-check claims."""
+    # 1. Extract Claims
+    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    try:
+        extract_response = llm_function(extract_prompt)
+        json_match = re.search(r'\{.*\}', extract_response, re.DOTALL)
+        if not json_match: return [{"claim": "Error", "status": "Failed", "evidence": "Could not extract claims from text."}]
+        claims = json.loads(json_match.group(0)).get("claims", [])
+    except Exception as e:
+        logger.error(f"Fact-check claim extraction failed: {e}")
+        return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
+
+    if not claims: return []
+
+    # 2. Verify each claim
+    verified_claims = []
+    for claim in claims:
+        # 2a. Gather Evidence
+        web_results = []
+        try:
+            with DDGS() as ddgs:
+                web_results = list(ddgs.text(claim, max_results=3))
+        except Exception as e:
+            logger.warning(f"DDGS web search failed for claim '{claim}': {e}")
+        
+        academic_results = await academic_search(claim, 2)
+        
+        search_results_text = "WEB RESULTS:\n"
+        search_results_text += "\n\n".join([f"[{i+1}] {r['title']}\n{r['body']}" for i, r in enumerate(web_results)])
+        search_results_text += "\n\nACADEMIC RESULTS:\n"
+        search_results_text += "\n\n".join([f"[A{i+1}] {r['title']}\n{r['summary']}" for i, r in enumerate(academic_results)])
+
+        # 2b. Synthesize & Verify
+        verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
+        try:
+            verify_response = llm_function(verify_prompt)
+            json_match = re.search(r'\{.*\}', verify_response, re.DOTALL)
+            if json_match:
+                synthesis = json.loads(json_match.group(0))
+                verified_claims.append({"claim": claim, **synthesis})
+        except Exception as e:
+            logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
+            verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
+
+    return verified_claims

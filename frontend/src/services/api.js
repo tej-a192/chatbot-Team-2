@@ -293,6 +293,16 @@ const api = {
     });
     return response.data; // Expects { improvedPrompt, explanation }
   },
+   // --- Academic Integrity Tools ---
+  submitIntegrityCheck: async ({ text }) => {
+    const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
+    return response.data; // Expects { reportId, initialReport }
+  },
+  
+  getIntegrityReport: async (reportId) => {
+    const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
+    return response.data; // Expects the full report object with status updates
+  },
 };
 
 export default api;

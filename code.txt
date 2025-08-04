@@ -7238,6 +7238,7 @@ import toast from 'react-hot-toast';
 import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
+import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -7515,7 +7516,9 @@ function App() {
                  <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
                     <QuizGeneratorPage /> : <Navigate to="/" />} 
                 />
-                
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+                    <AcademicIntegrityPage /> : <Navigate to="/" />}
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
@@ -13916,6 +13919,242 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
 export default ProfileSettingsModal;
 ```
 
+`frontend/src/components/tools/AcademicIntegrityPage.jsx`
+
+```javascript
+// frontend/src/components/tools/AcademicIntegrityPage.jsx
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Home, UploadCloud } from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import Editor from '@monaco-editor/react';
+import IntegrityReportPanel from './IntegrityReportPanel'; // We will create this next
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+import Button from '../core/Button';
+import { useTheme } from '../../hooks/useTheme';
+// For client-side text extraction
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import mammoth from 'mammoth';
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+const ANALYSIS_STEPS = [
+    { name: "Submitting for Analysis", progress: 10 },
+    { name: "Checking for Biased Language", progress: 30 },
+    { name: "Checking for Factual Inaccuracies", progress: 50 },
+    { name: "Submitting to Plagiarism Detector", progress: 70 },
+    { name: "Awaiting Plagiarism Report", progress: 90 },
+    { name: "Completed", progress: 100 }
+];
+
+const AcademicIntegrityPage = () => {
+    const { theme } = useTheme();
+    const [text, setText] = useState('');
+    const [report, setReport] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [currentStep, setCurrentStep] = useState(0);
+    const [error, setError] = useState('');
+    const [selectedFinding, setSelectedFinding] = useState(null);
+    
+    const editorRef = useRef(null);
+    const decorationsRef = useRef([]);
+    const pollingIntervalRef = useRef(null);
+
+    const handleEditorDidMount = (editor, monaco) => {
+        editorRef.current = editor;
+    };
+
+    const handleAnalyze = async () => {
+        if (text.trim().length < 50) {
+            toast.error("Please provide at least 50 characters of text for analysis.");
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        setReport(null);
+        setCurrentStep(0);
+
+        try {
+            const { reportId, initialReport } = await api.submitIntegrityCheck({ text });
+            setReport(initialReport);
+
+            // Update progress based on synchronous results
+            if(initialReport.bias) setCurrentStep(1);
+            if(initialReport.facts) setCurrentStep(2);
+            if(initialReport.plagiarism) setCurrentStep(3);
+            
+            // If plagiarism check is pending, start polling
+            if (initialReport.plagiarism?.status === 'pending') {
+                setCurrentStep(4);
+                startPolling(reportId);
+            } else {
+                setIsLoading(false); // All checks were sync (or failed sync)
+                setCurrentStep(5);
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || "Failed to start analysis.";
+            setError(errorMessage);
+            toast.error(errorMessage);
+            setIsLoading(false);
+        }
+    };
+
+    const startPolling = (reportId) => {
+        pollingIntervalRef.current = setInterval(async () => {
+            try {
+                const updatedReport = await api.getIntegrityReport(reportId);
+                setReport(updatedReport);
+
+                if (updatedReport.plagiarism?.status === 'completed' || updatedReport.plagiarism?.status === 'error') {
+                    stopPolling();
+                    setIsLoading(false);
+                    setCurrentStep(5);
+                    toast.success("Plagiarism check complete!");
+                }
+            } catch (pollErr) {
+                stopPolling();
+                setIsLoading(false);
+                setError("Failed to retrieve the final plagiarism report.");
+                toast.error("Failed to retrieve the final plagiarism report.");
+            }
+        }, 5000); // Poll every 5 seconds
+    };
+    
+    const stopPolling = () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+    };
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => stopPolling();
+    }, []);
+
+    // Handle text highlighting
+    useEffect(() => {
+        if (!editorRef.current || !selectedFinding) return;
+
+        const editor = editorRef.current;
+        const model = editor.getModel();
+        if (!model) return;
+
+        const matches = model.findMatches(selectedFinding.text, true, false, true, null, true);
+        if (matches.length > 0) {
+            const range = matches[0].range;
+            const newDecorations = [{
+                range: new monaco.Range(range.startLineNumber, range.startColumn, range.endLineNumber, range.endColumn),
+                options: { className: 'highlighted-finding', isWholeLine: false }
+            }];
+            decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+            editor.revealRangeInCenter(range);
+        }
+    }, [selectedFinding]);
+
+    // File upload handler
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const toastId = toast.loading(`Extracting text from ${file.name}...`);
+        try {
+            let extractedText = '';
+            const fileType = file.type;
+            if (fileType === 'application/pdf') {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const typedarray = new Uint8Array(event.target.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    let fullText = '';
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        fullText += textContent.items.map(item => item.str).join(' ');
+                    }
+                    setText(fullText);
+                };
+                reader.readAsArrayBuffer(file);
+            } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const { value } = await mammoth.extractRawText({ arrayBuffer: event.target.result });
+                    setText(value);
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                extractedText = await file.text();
+                setText(extractedText);
+            }
+            toast.success("Text extracted successfully!", { id: toastId });
+        } catch (err) {
+            toast.error("Failed to extract text from file.", { id: toastId });
+        }
+    };
+
+
+    return (
+        <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
+             <style>{`.highlighted-finding { background-color: #fef9c3; } .monaco-editor .margin { background-color: ${theme === 'dark' ? '#1E293B' : '#FFFFFF'}; }`}</style>
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
+                <h1 className="text-xl font-bold">Academic Integrity Checker</h1>
+                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
+                    <Home size={16}/> Back to Main App
+                </Link>
+            </header>
+
+            <div className="flex-1 overflow-hidden p-2 md:p-4">
+                <PanelGroup direction="horizontal" className="h-full">
+                    <Panel defaultSize={50} minSize={30}>
+                        <div className="p-2 h-full flex flex-col">
+                            <div className="flex-shrink-0 flex justify-between items-center mb-2">
+                                <h2 className="font-semibold">Your Document</h2>
+                                <div className="flex items-center gap-2">
+                                     <Button
+                                        onClick={() => document.getElementById('file-upload').click()}
+                                        size="sm" variant="outline" leftIcon={<UploadCloud size={14}/>}
+                                    >
+                                        Upload
+                                    </Button>
+                                    <input type="file" id="file-upload" className="hidden" onChange={handleFileUpload} accept=".pdf,.docx,.txt" />
+                                    <Button onClick={handleAnalyze} size="sm" isLoading={isLoading}>
+                                        Analyze Document
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="flex-grow border border-border-light dark:border-border-dark rounded-md overflow-hidden">
+                                <Editor
+                                    onMount={handleEditorDidMount}
+                                    value={text}
+                                    onChange={(value) => setText(value || '')}
+                                    theme={theme === 'dark' ? 'vs-dark' : 'light'}
+                                    options={{ wordWrap: 'on', minimap: { enabled: false } }}
+                                />
+                            </div>
+                        </div>
+                    </Panel>
+                    <PanelResizeHandle className="w-2 panel-resize-handle" />
+                    <Panel defaultSize={50} minSize={30}>
+                        <div className="p-2 h-full">
+                            <IntegrityReportPanel
+                                report={report}
+                                isLoading={isLoading}
+                                error={error}
+                                steps={ANALYSIS_STEPS}
+                                currentStep={currentStep}
+                                onFindingSelect={setSelectedFinding}
+                            />
+                        </div>
+                    </Panel>
+                </PanelGroup>
+            </div>
+        </div>
+    );
+};
+
+export default AcademicIntegrityPage;
+```
+
 `frontend/src/components/tools/AIAssistantBot.jsx`
 
 ```javascript
@@ -14391,6 +14630,126 @@ const CodeExecutorPage = () => {
 };
 
 export default CodeExecutorPage;
+```
+
+`frontend/src/components/tools/IntegrityReportPanel.jsx`
+
+```javascript
+// frontend/src/components/tools/IntegrityReportPanel.jsx
+import React from 'react';
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const Section = ({ title, icon: Icon, children }) => (
+    <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
+        <h3 className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 border-b border-border-light dark:border-border-dark font-semibold">
+            <Icon className="text-primary" size={18} /> {title}
+        </h3>
+        <div className="p-4 text-sm">{children}</div>
+    </div>
+);
+
+const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, onFindingSelect }) => {
+    
+    if (isLoading) {
+        const stepInfo = steps[currentStep];
+        return (
+            <div className="h-full flex flex-col justify-center items-center text-center p-4">
+                <Loader2 className="animate-spin text-primary" size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis in Progress...</h3>
+                <div className="w-full max-w-sm bg-gray-200 dark:bg-gray-700 rounded-full h-2 my-3">
+                    <div className="bg-primary h-2 rounded-full transition-all duration-500" style={{ width: `${stepInfo.progress}%` }}></div>
+                </div>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">{stepInfo.name}</p>
+            </div>
+        );
+    }
+    
+    if (error) {
+        return (
+             <div className="h-full flex flex-col justify-center items-center text-center p-4 text-red-500">
+                <AlertTriangle size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis Failed</h3>
+                <p className="text-sm">{error}</p>
+            </div>
+        );
+    }
+
+    if (!report) {
+        return (
+            <div className="h-full flex flex-col justify-center items-center text-center p-4">
+                <ShieldCheck className="text-gray-400" size={40} />
+                <h3 className="mt-4 text-lg font-semibold">Analysis Report</h3>
+                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                    Your academic integrity report will appear here once the analysis is complete.
+                </p>
+            </div>
+        );
+    }
+
+    const { plagiarism, bias, facts } = report;
+
+    return (
+        <div className="h-full flex flex-col bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
+            <header className="flex-shrink-0 p-4 border-b border-border-light dark:border-border-dark">
+                <h2 className="font-semibold">Analysis Report</h2>
+            </header>
+            <div className="flex-grow p-4 space-y-4 overflow-y-auto custom-scrollbar">
+                
+                {/* Plagiarism Section */}
+                <Section title="Plagiarism Check" icon={Percent}>
+                    {plagiarism?.status === 'pending' && <p className="text-text-muted-light dark:text-text-muted-dark">Awaiting report...</p>}
+                    {plagiarism?.status === 'error' && <p className="text-red-500">{plagiarism.message}</p>}
+                    {plagiarism?.status === 'completed' && plagiarism.report && (
+                        <div className="space-y-2">
+                             <p><strong>Overall Similarity Score:</strong> {plagiarism.report.overall_score}%</p>
+                             <a href={plagiarism.report.full_report_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View Full Turnitin Report</a>
+                        </div>
+                    )}
+                </Section>
+                
+                {/* Bias Section */}
+                <Section title="Bias & Inclusivity" icon={Scale}>
+                    {!bias || bias.length === 0 ? (
+                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
+                    ) : (
+                        <ul className="space-y-3">
+                            {bias.map((item, i) => (
+                                <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
+                                    <p><strong>Found:</strong> "{item.text}"</p>
+                                    <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
+                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Section>
+
+                {/* Fact-Checking Section */}
+                <Section title="Fact-Checking" icon={Lightbulb}>
+                     {!facts || facts.length === 0 ? (
+                        <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
+                    ) : (
+                         <ul className="space-y-3">
+                            {facts.map((item, i) => (
+                                <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
+                                    ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
+                                    onClick={() => onFindingSelect(item)}
+                                >
+                                    <p><strong>Claim:</strong> "{item.claim}"</p>
+                                    <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
+                                    <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Section>
+            </div>
+        </div>
+    );
+};
+
+export default IntegrityReportPanel;
 ```
 
 `frontend/src/components/tools/OutputDisplay.jsx`
@@ -15058,6 +15417,13 @@ const availableTools = [
         description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
         icon: FileQuestion,
         path: '/tools/quiz-generator',
+        status: 'active'
+    },
+    {
+        title: 'Academic Integrity & Analysis',
+        description: 'Check your text for potential plagiarism, biased language, and factual inaccuracies.',
+        icon: ShieldCheck,
+        path: '/tools/integrity-checker',
         status: 'active'
     },
 
@@ -16678,18 +17044,21 @@ const api = {
     return response.data; // Should be { quiz: [...] }
   },
   analyzePrompt: async (promptText) => {
-<<<<<<< HEAD
     const response = await apiClient.post("/chat/analyze-prompt", {
       prompt: promptText,
     });
     return response.data; // Expects { improvedPrompt, explanation }
   },
-=======
-    const response = await apiClient.post('/chat/analyze-prompt', { prompt: promptText });
-    return response.data; // Expects { improvedPrompt, explanation }
+   // --- Academic Integrity Tools ---
+  submitIntegrityCheck: async ({ text }) => {
+    const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
+    return response.data; // Expects { reportId, initialReport }
   },
-
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
+  
+  getIntegrityReport: async (reportId) => {
+    const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
+    return response.data; // Expects the full report object with status updates
+  },
 };
 
 export default api;
@@ -16927,20 +17296,30 @@ export default defineConfig({
 `server/.env`
 
 ```
+#server env
+
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+# ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
 GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
-PROMPT_COACH_GEMINI_MODEL=gemini-1.5-flash-latest
-PROMPT_COACH_OLLAMA_MODEL=phi3:mini-instruct
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
+# OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
 ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
 REDIS_URL="redis://localhost:6379"
+# --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
 
+# --- Turnitin Core API Credentials ---
+TURNITIN_API_URL="https://your-institution.turnitin.com/api/v1"
+TURNITIN_API_KEY="your_api_key"
+TURNITIN_API_SECRET="your_api_secret"
 ```
 
 `server/config/db.js`
@@ -20042,20 +20421,21 @@ def extract_document_metadata_info(
     file_type_from_parser = os.path.splitext(original_file_name)[1].lower() # Fallback if not in parser_meta
 
     doc_meta = {
+        'user_id': user_id,
+        'original_name': original_file_name,
         'file_name': original_file_name,
         'file_path_on_server': file_path,
         'original_file_type': parser_meta.get('file_type', file_type_from_parser),
-        'processing_user': user_id,
-        'title': parser_meta.get('title', original_file_name), # Prioritize parser title
-        'author': parser_meta.get('author', "Unknown"),       # Prioritize parser author
-        'creation_date': parser_meta.get('creation_date'),   # Expect ISO format from parser
-        'modification_date': parser_meta.get('modification_date'), # Expect ISO format
+        'title': parser_meta.get('title', original_file_name),
+        'author': parser_meta.get('author', "Unknown"),
+        'creation_date': parser_meta.get('creation_date'),
+        'modification_date': parser_meta.get('modification_date'),
         'page_count': parser_meta.get('page_count', 0),
         'char_count_processed_text': len(processed_text),
         'named_entities': {},
         'structural_elements': "Paragraphs" + (", Tables" if parsed_doc_elements.get('tables') else ""),
-        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False), # Initial guess
-        'ocr_applied': False # Will be set to True if OCR text was actually used
+        'is_scanned_document': parsed_doc_elements.get('is_scanned_heuristic', False),
+        'ocr_applied': False
     }
 
     # OS-level metadata (can augment or be overridden by parser_meta)
@@ -20358,13 +20738,16 @@ import re
 import knowledge_engine
 import media_processor
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
 import subprocess
 import tempfile
 import shutil
 import json
+
+import asyncio
+from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, check_facts_agentic
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21017,6 +21400,74 @@ def query_kg_route():
     except Exception as e:
         logger.error(f"Error during KG query: {e}", exc_info=True)
         return create_error_response(f"KG query failed: {str(e)}", 500)
+
+
+@app.route('/analyze_integrity', methods=['POST'])
+def analyze_integrity_route():
+    data = request.get_json()
+    text = data.get('text')
+    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "facts"]
+    api_key = data.get('api_key')
+
+    if not text or not checks:
+        return create_error_response("Missing 'text' or 'checks' list", 400)
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        results = {}
+        
+        # --- Plagiarism (Async Start) ---
+        if 'plagiarism' in checks:
+            try:
+                submission_id = loop.run_until_complete(submit_to_turnitin(text))
+                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+            except Exception as e:
+                logger.error(f"Turnitin submission failed: {e}")
+                results['plagiarism'] = {"status": "error", "message": str(e)}
+
+        # --- Bias & Fact-Checking (Sync) ---
+        llm_func = lambda p: llm_wrapper(p, api_key)
+        
+        if 'bias' in checks:
+            try:
+                results['bias'] = check_bias_hybrid(text, llm_func)
+            except Exception as e:
+                logger.error(f"Bias check failed: {e}")
+                results['bias'] = {"status": "error", "message": str(e)}
+
+        if 'facts' in checks:
+            try:
+                # Running async function in a sync context
+                results['facts'] = loop.run_until_complete(check_facts_agentic(text, llm_func))
+            except Exception as e:
+                logger.error(f"Fact check failed: {e}")
+                results['facts'] = {"status": "error", "message": str(e)}
+        
+        loop.close()
+        return jsonify(results), 200
+
+    except Exception as e:
+        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+
+@app.route('/get_turnitin_report', methods=['POST'])
+def get_turnitin_report_route():
+    data = request.get_json()
+    submission_id = data.get('submissionId')
+    if not submission_id:
+        return create_error_response("Missing 'submissionId'", 400)
+        
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        report = loop.run_until_complete(get_turnitin_report(submission_id))
+        loop.close()
+        return jsonify({"status": "completed", "report": report}), 200
+    except TimeoutError:
+        return jsonify({"status": "pending"}), 202
+    except Exception as e:
+        return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 
 if __name__ == '__main__':
@@ -21735,6 +22186,10 @@ def setup_logging():
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or your preferred Gemini model
 
+TURNITIN_API_URL = os.getenv('TURNITIN_API_URL')
+TURNITIN_API_KEY = os.getenv('TURNITIN_API_KEY')
+TURNITIN_API_SECRET = os.getenv('TURNITIN_API_SECRET')
+
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:8768")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
@@ -22305,6 +22760,171 @@ def chunk_text(text, file_name, user_id):
         logger.error(f"Error during text splitting for file {file_name}: {e}", exc_info=True)
         return [] # Return empty list on error
 
+```
+
+`server/rag_service/integrity_services.py`
+
+```python
+# server/rag_service/integrity_services.py
+import logging
+import requests
+import time
+import re
+import json
+from typing import Dict, Any, List
+
+import config
+from prompts import (
+    BIAS_CHECK_PROMPT_TEMPLATE, 
+    FACT_CHECK_EXTRACT_PROMPT_TEMPLATE,
+    FACT_CHECK_VERIFY_PROMPT_TEMPLATE
+)
+from academic_search import search_all_apis as academic_search
+from ddgs import DDGS
+
+logger = logging.getLogger(__name__)
+
+# In-memory cache for Turnitin token (could be replaced with Redis for multi-worker setups)
+turnitin_token_cache = {
+    "token": None,
+    "expires_at": 0
+}
+
+# --- Plagiarism Service (Turnitin) ---
+
+async def get_turnitin_auth_token() -> str:
+    """Gets a JWT from Turnitin, using a simple in-memory cache."""
+    if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
+        return turnitin_token_cache["token"]
+
+    if not all([config.TURNITIN_API_URL, config.TURNITIN_API_KEY, config.TURNITIN_API_SECRET]):
+        raise ValueError("Turnitin API credentials are not configured on the server.")
+
+    url = f"{config.TURNITIN_API_URL}/oauth/token"
+    payload = {
+        'grant_type': 'client_credentials',
+        'client_id': config.TURNITIN_API_KEY,
+        'client_secret': config.TURNITIN_API_SECRET
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
+    response = requests.post(url, data=payload, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+
+    turnitin_token_cache["token"] = data['access_token']
+    turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60  # 60s buffer
+    return data['access_token']
+
+async def submit_to_turnitin(text: str, filename: str = "pasted_text.txt") -> str:
+    """Submits text to Turnitin and returns a submission ID."""
+    token = await get_turnitin_auth_token()
+    url = f"{config.TURNITIN_API_URL}/submissions"
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    payload = {
+        'owner': 'api-user@example.com', # A generic owner identifier
+        'title': f"Integrity Check - {filename}",
+        'file_content': text
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()['id']
+
+async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
+    """Polls for and returns the final Turnitin similarity report."""
+    token = await get_turnitin_auth_token()
+    report_url = f"{config.TURNITIN_API_URL}/submissions/{submission_id}/similarity_report"
+    headers = {'Authorization': f'Bearer {token}'}
+
+    for _ in range(12):  # Poll for up to 2 minutes (12 * 10s)
+        response = requests.get(report_url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 202: # Accepted, but not ready
+            time.sleep(10)
+        else:
+            response.raise_for_status()
+    raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
+
+# --- Bias & Inclusivity Service ---
+
+def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs a hybrid check for biased language."""
+    # This is a placeholder for a real wordlist
+    simple_bias_wordlist = { "mankind": "humanity", "forefathers": "founders", "man-made": "synthetic" }
+    
+    findings = []
+    # 1. Fast library check
+    for term, suggestion in simple_bias_wordlist.items():
+        if re.search(r'\b' + term + r'\b', text, re.IGNORECASE):
+            findings.append({
+                "text": term, "reason": "This term can be gender-exclusive.", "suggestion": suggestion
+            })
+
+    # 2. Deep LLM check
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    try:
+        response_text = llm_function(prompt)
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            llm_findings = json.loads(json_match.group(0)).get("findings", [])
+            findings.extend(llm_findings)
+    except Exception as e:
+        logger.error(f"LLM bias check failed: {e}")
+
+    # Deduplicate findings
+    unique_findings = {f['text'].lower(): f for f in findings}
+    return list(unique_findings.values())
+
+
+# --- Fact-Checking Service ---
+async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
+    """Performs an agentic workflow to fact-check claims."""
+    # 1. Extract Claims
+    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text)
+    try:
+        extract_response = llm_function(extract_prompt)
+        json_match = re.search(r'\{.*\}', extract_response, re.DOTALL)
+        if not json_match: return [{"claim": "Error", "status": "Failed", "evidence": "Could not extract claims from text."}]
+        claims = json.loads(json_match.group(0)).get("claims", [])
+    except Exception as e:
+        logger.error(f"Fact-check claim extraction failed: {e}")
+        return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
+
+    if not claims: return []
+
+    # 2. Verify each claim
+    verified_claims = []
+    for claim in claims:
+        # 2a. Gather Evidence
+        web_results = []
+        try:
+            with DDGS() as ddgs:
+                web_results = list(ddgs.text(claim, max_results=3))
+        except Exception as e:
+            logger.warning(f"DDGS web search failed for claim '{claim}': {e}")
+        
+        academic_results = await academic_search(claim, 2)
+        
+        search_results_text = "WEB RESULTS:\n"
+        search_results_text += "\n\n".join([f"[{i+1}] {r['title']}\n{r['body']}" for i, r in enumerate(web_results)])
+        search_results_text += "\n\nACADEMIC RESULTS:\n"
+        search_results_text += "\n\n".join([f"[A{i+1}] {r['title']}\n{r['summary']}" for i, r in enumerate(academic_results)])
+
+        # 2b. Synthesize & Verify
+        verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
+        try:
+            verify_response = llm_function(verify_prompt)
+            json_match = re.search(r'\{.*\}', verify_response, re.DOTALL)
+            if json_match:
+                synthesis = json.loads(json_match.group(0))
+                verified_claims.append({"claim": claim, **synthesis})
+        except Exception as e:
+            logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
+            verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
+
+    return verified_claims
 ```
 
 `server/rag_service/knowledge_engine.py`
@@ -22992,6 +23612,96 @@ You are an expert educator and assessment creator. Your task is to generate a mu
 """
 
 
+
+# ==============================================================================
+# === ACADEMIC INTEGRITY PROMPTS ===
+# ==============================================================================
+
+BIAS_CHECK_PROMPT_TEMPLATE = """
+You are an expert in academic writing and ethical communication. Your task is to analyze the provided text for any language that could be considered biased, non-inclusive, or contentious.
+
+**INSTRUCTIONS:**
+1.  Read the text carefully to identify words or phrases related to gender, race, disability, age, or other sensitive areas.
+2.  Look for stereotypes, generalizations, or potentially alienating language.
+3.  Your entire output MUST be a single, valid JSON object with one key: "findings".
+4.  The "findings" key must hold an array of objects. If no issues are found, the array should be empty.
+5.  Each finding object MUST have these keys:
+    -   "text": The exact biased phrase found in the text.
+    -   "reason": A brief, neutral explanation of why this phrase might be problematic.
+    -   "suggestion": A more inclusive or objective alternative.
+
+**EXAMPLE OUTPUT:**
+{
+  "findings": [
+    {
+      "text": "The forefathers of the nation...",
+      "reason": "This term is gender-exclusive and overlooks the contributions of women.",
+      "suggestion": "The founders of the nation..."
+    },
+    {
+      "text": "A blind review process...",
+      "reason": "Using 'blind' in this context can be seen as ableist language.",
+      "suggestion": "An anonymized review process..."
+    }
+  ]
+}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{`):**
+"""
+
+FACT_CHECK_EXTRACT_PROMPT_TEMPLATE = """
+You are a meticulous research assistant. Your task is to read the provided text and extract all distinct, verifiable factual claims.
+
+**INSTRUCTIONS:**
+1.  Identify statements that present objective information, such as statistics, historical events, scientific statements, or specific data points.
+2.  Ignore subjective opinions, questions, or general statements that cannot be verified.
+3.  Your entire output MUST be a single, valid JSON object with one key: "claims".
+4.  The "claims" key must hold an array of strings. Each string is a direct quote of a factual claim from the text.
+5.  If no verifiable claims are found, the array should be empty.
+
+**EXAMPLE OUTPUT for a text containing "The Earth is the third planet from the Sun, and its population exceeds 8 billion people.":**
+{
+  "claims": [
+    "The Earth is the third planet from the Sun.",
+    "The Earth's population exceeds 8 billion people."
+  ]
+}
+
+---
+**TEXT TO ANALYZE:**
+{text_to_analyze}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{`):**
+"""
+
+FACT_CHECK_VERIFY_PROMPT_TEMPLATE = """
+You are an impartial fact-checker and synthesizer. You have been given a specific "CLAIM" and a set of "SEARCH RESULTS" from the web and academic sources. Your task is to determine the validity of the claim based ONLY on the provided search results.
+
+**INSTRUCTIONS:**
+1.  Carefully compare the "CLAIM" to the information in the "SEARCH RESULTS".
+2.  Your entire output MUST be a single, valid JSON object with two keys: "status" and "evidence".
+3.  The "status" key must be one of three strings: "Supported", "Refuted", or "Unverified".
+    -   "Supported": The search results contain clear evidence that validates the claim.
+    -   "Refuted": The search results contain clear evidence that contradicts the claim.
+    -   "Unverified": The search results do not contain enough information to either support or refute the claim.
+4.  The "evidence" key must be a string containing a brief, neutral summary of the findings from the search results that led to your status decision. This summary MUST cite the sources using bracket notation (e.g., [1], [2]).
+
+---
+**CLAIM TO VERIFY:**
+{claim}
+---
+**SEARCH RESULTS (Your ONLY source of information):**
+{search_results}
+---
+
+**FINAL JSON OUTPUT (start immediately with `{`):**
+"""
 ```
 
 `server/rag_service/quiz_utils.py`
@@ -23472,11 +24182,11 @@ class VectorDBService:
         qdrant_filter = models.Filter(
             must=[
                 models.FieldCondition(
-                    key="processing_user", # The metadata field storing the user ID
+                    key="user_id",
                     match=models.MatchValue(value=user_id)
                 ),
                 models.FieldCondition(
-                    key="file_name", # The metadata field storing the original document name
+                    key="file_name",
                     match=models.MatchValue(value=document_name)
                 )
             ]
@@ -24267,10 +24977,7 @@ const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
-<<<<<<< HEAD
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
-=======
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
 const router = express.Router();
 
 
@@ -24396,7 +25103,7 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues // Add cues for client
+                criticalThinkingCues: criticalThinkingCues
             };
 
             streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
@@ -24445,10 +25152,7 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
-<<<<<<< HEAD
             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
-=======
->>>>>>> 458645dd4bb632680f0b033a4ca7dc99642d1798
         }
 
     } catch (error) {
@@ -26244,6 +26948,9 @@ const FormData = require("form-data");
 const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
+const { v4: uuidv4 } = require('uuid'); 
+const integrityReportCache = new Map();
+
 
 // --- THIS IS THE FIX ---
 // We switch from a simple 'dest' to a 'storage' configuration
@@ -26459,6 +27166,84 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
       );
   }
 });
+
+
+// @desc    Initiates an academic integrity check.
+// @access  Private
+router.post('/analyze-integrity/submit', async (req, res) => {
+    const { text } = req.body;
+    if (!text || text.trim().length < 50) {
+        return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
+    }
+
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: 'Analysis service is not configured.' });
+    }
+
+    try {
+        const apiKey = await getApiKeyForRequest(req.user._id);
+        const checks = ['plagiarism', 'bias', 'facts'];
+
+        const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
+            text,
+            checks,
+            api_key: apiKey
+        }, { timeout: 120000 }); // 2 min timeout for sync parts
+
+        const initialReport = response.data;
+        const reportId = uuidv4();
+        
+        // Store the initial report (with pending plagiarism) in our cache
+        integrityReportCache.set(reportId, initialReport);
+        
+        res.status(202).json({ reportId, initialReport });
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message;
+        console.error(`[Node Integrity Submit] Error: ${errorMsg}`);
+        res.status(error.response?.status || 500).json({ message: errorMsg });
+    }
+});
+
+// @route   GET /api/tools/analyze-integrity/report/:reportId
+// @desc    Polls for the status and results of an integrity check.
+// @access  Private
+router.get('/analyze-integrity/report/:reportId', async (req, res) => {
+    const { reportId } = req.params;
+    const report = integrityReportCache.get(reportId);
+
+    if (!report) {
+        return res.status(404).json({ message: 'Report not found or has expired.' });
+    }
+
+    // If plagiarism check is still pending, poll the Python service
+    if (report.plagiarism && report.plagiarism.status === 'pending') {
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        try {
+            const pollResponse = await axios.post(`${pythonServiceUrl}/get_turnitin_report`, {
+                submissionId: report.plagiarism.submissionId
+            }, { timeout: 15000 });
+
+            // Update the plagiarism part of the cached report
+            report.plagiarism = pollResponse.data;
+            integrityReportCache.set(reportId, report);
+
+            // If it's now completed, we can remove it from cache after a delay
+            if(report.plagiarism.status === 'completed') {
+                setTimeout(() => integrityReportCache.delete(reportId), 5 * 60 * 1000); // Expire after 5 mins
+            }
+        } catch (error) {
+             // Don't fail the whole request, just report the polling error
+            report.plagiarism.status = 'error';
+            report.plagiarism.message = 'Failed to poll for report status.';
+            console.error(`[Node Integrity Poll] Error polling Turnitin status: ${error.message}`);
+        }
+    }
+    
+    res.status(200).json(report);
+});
+
 
 module.exports = router;
 
@@ -26879,25 +27664,37 @@ startServer();
 
 ```javascript
 // server/services/agentService.js
-const { CHAT_MAIN_SYSTEM_PROMPT, createSynthesizerPrompt, createAgenticSystemPrompt } = require('../config/promptTemplates.js');
-const { availableTools } = require('./toolRegistry.js');
-const { createModelContext, createAgenticContext } = require('../protocols/contextProtocols.js');
-const geminiService = require('./geminiService.js');
-const ollamaService = require('./ollamaService.js');
+const {
+  CHAT_MAIN_SYSTEM_PROMPT,
+  createSynthesizerPrompt,
+  createAgenticSystemPrompt,
+} = require("../config/promptTemplates.js");
+const { availableTools } = require("./toolRegistry.js");
+const {
+  createModelContext,
+  createAgenticContext,
+} = require("../protocols/contextProtocols.js");
+const geminiService = require("./geminiService.js");
+const ollamaService = require("./ollamaService.js");
 
 function parseToolCall(responseText) {
-    try {
-        const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
-        const jsonString = jsonMatch ? jsonMatch[2] : responseText;
-        const jsonResponse = JSON.parse(jsonString);
-        if (jsonResponse && typeof jsonResponse.tool_call !== 'undefined') {
-            return jsonResponse.tool_call;
-        }
-        return null;
-    } catch (e) {
-        console.warn(`[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(0, 200)}...`);
-        return null;
+  try {
+    const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
+    const jsonString = jsonMatch ? jsonMatch[2] : responseText;
+    const jsonResponse = JSON.parse(jsonString);
+    if (jsonResponse && typeof jsonResponse.tool_call !== "undefined") {
+      return jsonResponse.tool_call;
     }
+    return null;
+  } catch (e) {
+    console.warn(
+      `[AgentService] Failed to parse JSON tool_call from LLM. Response: ${responseText.substring(
+        0,
+        200
+      )}...`
+    );
+    return null;
+  }
 }
 
 async function processAgenticRequest(
@@ -27054,77 +27851,10 @@ async function processAgenticRequest(
   }
 }
 
-
 module.exports = {
-    processAgenticRequest,
+  processAgenticRequest,
 };
-```
 
-`server/services/criticalThinkingService.js`
-
-```javascript
-// server/services/criticalThinkingService.js
-const geminiService = require('./geminiService');
-const ollamaService = require('./ollamaService');
-const { CRITICAL_THINKING_CUE_TEMPLATE } = require('../config/promptTemplates');
-
-const CUE_GEMINI_MODEL = process.env.PROMPT_COACH_GEMINI_MODEL || 'gemini-1.5-flash-latest';
-const CUE_OLLAMA_MODEL = process.env.PROMPT_COACH_OLLAMA_MODEL || 'phi3:mini-instruct';
-
-/**
- * Analyzes an AI's final answer to generate critical thinking cue prompts.
- * @param {string} aiAnswerText - The final text of the AI's response.
- * @param {object} llmConfig - Configuration object containing the user's provider, key, URL, etc.
- * @returns {Promise<object|null>} An object with cue prompts, or null if none are generated or an error occurs.
- */
-async function generateCues(aiAnswerText, llmConfig) {
-    if (!aiAnswerText || aiAnswerText.trim().length < 50) {
-        // Don't generate cues for very short or empty answers
-        return null;
-    }
-
-    const { llmProvider, ollamaUrl, apiKey } = llmConfig;
-    const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
-
-    const promptForLlm = CRITICAL_THINKING_CUE_TEMPLATE.replace('{aiAnswer}', aiAnswerText.substring(0, 2000)); // Limit context size for speed
-
-    const llmOptions = {
-        model: llmProvider === 'ollama' ? CUE_OLLAMA_MODEL : CUE_GEMINI_MODEL,
-        apiKey: apiKey,
-        ollamaUrl: ollamaUrl,
-        temperature: 0.4 // Lower temperature for more deterministic, structured output
-    };
-
-    try {
-        console.log(`[CriticalThinkingService] Generating cues using ${llmProvider} with model ${llmOptions.model}.`);
-        const responseText = await llmService.generateContentWithHistory([], promptForLlm, null, llmOptions);
-
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            console.warn("[CriticalThinkingService] LLM response did not contain a valid JSON object.");
-            return null;
-        }
-        
-        const parsedResponse = JSON.parse(jsonMatch[0]);
-
-        // Validate that at least one valid key exists
-        if (parsedResponse.verificationPrompt || parsedResponse.alternativePrompt || parsedResponse.applicationPrompt) {
-            return parsedResponse;
-        }
-
-        // Return null if the object is empty ({})
-        return null;
-
-    } catch (error) {
-        console.error(`[CriticalThinkingService] Failed to generate cues: ${error.message}`);
-        // Return null on any error to ensure this feature doesn't block the main response
-        return null;
-    }
-}
-
-module.exports = {
-    generateCues
-};
 ```
 
 `server/services/criticalThinkingService.js`
@@ -27293,11 +28023,13 @@ async function generateContentWithHistory(
         options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
     };
 
+    // --- THIS IS THE CORRECTED LINE ---
     console.log(
       `Sending message to Gemini via generateContent. History length: ${
         contents.length - 1
       }. System Prompt: ${!!systemPromptText}.`
     );
+    // --- END OF CORRECTION ---
 
     // --- THIS IS THE FIX ---
     // Call the stateless `generateContent` with the fully structured payload.
@@ -27383,7 +28115,6 @@ module.exports = {
   generateContentWithHistory,
   DEFAULT_MAX_OUTPUT_TOKENS_KG,
 };
-
 ```
 
 `server/services/kgExtractionService.js`
@@ -28452,19 +29183,22 @@ const axios = require('axios');
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_RAG_SERVICE_URL;
 
-async function queryPythonRagService(query, documentContextName, clientFilter = null, k = 5) {
-    if (!PYTHON_SERVICE_URL) {
+async function queryPythonRagService(
+    query, documentContextNameToPass, userId, criticalThinkingEnabled, clientFilter = null, k = 5
+) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
         throw new Error("RAG service is not configured on the server.");
     }
-    const searchUrl = `${PYTHON_SERVICE_URL}/query`;
-    
+    const searchUrl = `${pythonServiceUrl}/query`;
+    console.log(`[ragQueryService] Querying Python RAG: User="${userId}", Query="${query.substring(0, 50)}...", DocContext=${documentContextNameToPass}`);
+
     const payload = {
         query: query,
         k: k,
-        user_id: "agent_user", // The user is validated in Node.js; agent uses a generic ID for Python
-        documentContextName: documentContextName || null,
-        // CRITICAL FIX: Ensure filter is always an object, even if empty.
-        // The Python service expects the key to exist.
+        user_id: userId, // <<< THIS IS THE KEY ADDITION
+        use_kg_critical_thinking: !!criticalThinkingEnabled,
+        documentContextName: documentContextNameToPass || null,
         filter: clientFilter || {} 
     };
 
@@ -28484,9 +29218,9 @@ async function queryPythonRagService(query, documentContextName, clientFilter = 
         
         const toolOutput = relevantDocs.length > 0
             ? response.data.formatted_context_snippet
-            : "No relevant documents were found for this topic."; // More specific message
+            : "No relevant documents were found for this topic.";
         
-        return { references, toolOutput, retrieved_documents_list: relevantDocs }; // Pass full list back
+        return { references, toolOutput, retrieved_documents_list: relevantDocs };
 
     } catch (error) {
         let errorMsg = error.message;
@@ -28587,7 +29321,13 @@ const availableTools = {
   rag_search: {
     description: "Searches the content of a specific, user-provided document to answer questions based on its text.",
     execute: async (params, context) => {
-        return await queryPythonRagService(params.query, context.documentContextName, context.filter);
+        return await queryPythonRagService(
+            params.query, 
+            context.documentContextName, 
+            context.userId, // <-- Pass the userId
+            context.criticalThinkingEnabled, // <-- Pass the flag
+            context.filter
+        );
     },
     requiredParams: ['query'],
   },

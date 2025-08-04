@@ -14,13 +14,16 @@ import re
 import knowledge_engine
 import media_processor
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
 import subprocess
 import tempfile
 import shutil
 import json
+
+import asyncio
+from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, check_facts_agentic
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -673,6 +676,74 @@ def query_kg_route():
     except Exception as e:
         logger.error(f"Error during KG query: {e}", exc_info=True)
         return create_error_response(f"KG query failed: {str(e)}", 500)
+
+
+@app.route('/analyze_integrity', methods=['POST'])
+def analyze_integrity_route():
+    data = request.get_json()
+    text = data.get('text')
+    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "facts"]
+    api_key = data.get('api_key')
+
+    if not text or not checks:
+        return create_error_response("Missing 'text' or 'checks' list", 400)
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        results = {}
+        
+        # --- Plagiarism (Async Start) ---
+        if 'plagiarism' in checks:
+            try:
+                submission_id = loop.run_until_complete(submit_to_turnitin(text))
+                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+            except Exception as e:
+                logger.error(f"Turnitin submission failed: {e}")
+                results['plagiarism'] = {"status": "error", "message": str(e)}
+
+        # --- Bias & Fact-Checking (Sync) ---
+        llm_func = lambda p: llm_wrapper(p, api_key)
+        
+        if 'bias' in checks:
+            try:
+                results['bias'] = check_bias_hybrid(text, llm_func)
+            except Exception as e:
+                logger.error(f"Bias check failed: {e}")
+                results['bias'] = {"status": "error", "message": str(e)}
+
+        if 'facts' in checks:
+            try:
+                # Running async function in a sync context
+                results['facts'] = loop.run_until_complete(check_facts_agentic(text, llm_func))
+            except Exception as e:
+                logger.error(f"Fact check failed: {e}")
+                results['facts'] = {"status": "error", "message": str(e)}
+        
+        loop.close()
+        return jsonify(results), 200
+
+    except Exception as e:
+        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+
+@app.route('/get_turnitin_report', methods=['POST'])
+def get_turnitin_report_route():
+    data = request.get_json()
+    submission_id = data.get('submissionId')
+    if not submission_id:
+        return create_error_response("Missing 'submissionId'", 400)
+        
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        report = loop.run_until_complete(get_turnitin_report(submission_id))
+        loop.close()
+        return jsonify({"status": "completed", "report": report}), 200
+    except TimeoutError:
+        return jsonify({"status": "pending"}), 202
+    except Exception as e:
+        return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 
 if __name__ == '__main__':

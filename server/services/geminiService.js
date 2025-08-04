@@ -94,11 +94,13 @@ async function generateContentWithHistory(
         options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
     };
 
+    // --- THIS IS THE CORRECTED LINE ---
     console.log(
       `Sending message to Gemini via generateContent. History length: ${
         contents.length - 1
       }. System Prompt: ${!!systemPromptText}.`
     );
+    // --- END OF CORRECTION ---
 
     // --- THIS IS THE FIX ---
     // Call the stateless `generateContent` with the fully structured payload.

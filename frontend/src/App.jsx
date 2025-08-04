@@ -21,6 +21,7 @@ import toast from 'react-hot-toast';
 import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
+import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -298,7 +299,9 @@ function App() {
                  <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
                     <QuizGeneratorPage /> : <Navigate to="/" />} 
                 />
-                
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+                    <AcademicIntegrityPage /> : <Navigate to="/" />}
+                />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
