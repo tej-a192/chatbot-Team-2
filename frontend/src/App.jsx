@@ -44,13 +44,23 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession, messages, setMessages }) {
+function MainAppLayout({ 
+    orchestratorStatus, 
+    handleNewChat, 
+    isSessionLoading, 
+    messages, 
+    setMessages 
+}) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
         isLeftPanelOpen,
         isRightPanelOpen,
         setSessionId: setGlobalSessionId,
+        initialPromptForNewSession,
+        setInitialPromptForNewSession,
+        initialActivityForNewSession,
+        setInitialActivityForNewSession
     } = useAppState();
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
@@ -81,7 +91,7 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages here
+            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -126,10 +136,6 @@ function App() {
         setSessionId: setGlobalSessionId, 
         currentSessionId, 
         isAdminSessionActive,
-        initialPromptForNewSession,      
-        setInitialPromptForNewSession, 
-        initialActivityForNewSession,    
-        setInitialActivityForNewSession
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
@@ -137,11 +143,10 @@ function App() {
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
-
-    // --- NEW LOGIC MOVED HERE FROM MainAppLayout ---
     const [appStateMessages, setAppStateMessages] = useState([]);
+    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-        const handleNewChat = useCallback(async (callbackOrMessages) => {
+    const handleNewChat = useCallback(async (callbackOrMessages) => {
         const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
         const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
 
@@ -149,7 +154,7 @@ function App() {
             toast('This is already a new chat!', { icon: '✨' });
             return;
         }
-
+        
         setIsSessionLoading(true);
         try {
             const data = await api.startNewSession(currentSessionId); 
@@ -167,37 +172,22 @@ function App() {
                             className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
                         >
                             <div className="flex items-start">
-                                <div className="flex-shrink-0 pt-0.5">
-                                    <GraduationCap className="h-6 w-6 text-primary" />
-                                </div>
+                                <div className="flex-shrink-0 pt-0.5"><GraduationCap className="h-6 w-6 text-primary" /></div>
                                 <div className="ml-3 flex-1">
                                     <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
                                     <div className="mt-4 flex gap-2">
-                                        <Button
-                                            size="sm"
-                                            onClick={() => {
-                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
-                                                toast.dismiss(t.id);
-                                            }}
-                                        >
+                                        <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
                                             Create Plan for "{topic}"
                                         </Button>
-                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
-                                            Dismiss
-                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
                                     </div>
                                 </div>
                             </div>
                         </motion.div>
-                    ), {
-                        id: `study-plan-toast-${topic}`,
-                        duration: Infinity,
-                    });
+                    ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                
                 if (callback) callback(data.newSessionId);
-
             } else {
                 toast.error(data.message || "Could not start new chat session.");
             }
@@ -217,13 +207,15 @@ function App() {
             const sessionData = await api.getChatHistory(sid);
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
-            toast.error(`History load failed: ${error.message}`);
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found. Starting a new session.");
-                handleNewChat();
+                console.warn("Stale session ID found in localStorage. It will be replaced.");
+                localStorage.removeItem('aiTutorSessionId');
+                setGlobalSessionId(null);
+            } else {
+                toast.error(`History load failed: ${error.message}`);
             }
         }
-    }, [regularUserToken, handleNewChat]);
+    }, [regularUserToken, setGlobalSessionId]);
 
     useEffect(() => {
         if (currentSessionId && regularUserToken) {
@@ -232,41 +224,50 @@ function App() {
             setAppStateMessages([]);
         }
     }, [currentSessionId, regularUserToken, fetchChatHistory]);
-    // --- END OF MOVED LOGIC ---
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
     
     useEffect(() => {
-        if (isAdminSessionActive) {
+        const handleAuthAndSession = async () => {
+            if (isAdminSessionActive) {
+                setAppInitializing(false); setShowAuthModal(false);
+                if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
+                return;
+            }
+            if (regularUserAuthLoading) {
+                setAppInitializing(true); return;
+            }
             setAppInitializing(false);
-            setShowAuthModal(false);
-            if (!location.pathname.startsWith('/admin')) {
-                navigate('/admin/dashboard', { replace: true });
+            
+            if (regularUserToken && regularUser) {
+                setShowAuthModal(false);
+                if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
+
+                const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+                if (shouldCreateSession && !isCreatingSession) {
+                    setIsCreatingSession(true);
+                    console.log("[App.jsx] Lock acquired. Creating initial session...");
+                    await handleNewChat();
+                    setIsCreatingSession(false);
+                    console.log("[App.jsx] Initial session created. Lock released.");
+                }
+            } else if (!location.pathname.startsWith('/admin')) {
+                setShowAuthModal(true);
             }
-            return;
-        }
-        if (regularUserAuthLoading) {
-            setAppInitializing(true);
-            return;
-        }
-        setAppInitializing(false);
-        if (regularUserToken && regularUser) {
-            setShowAuthModal(false);
-            if (location.pathname.startsWith('/admin')) {
-                navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
-                handleNewChat();
-            }
-        } else if (!location.pathname.startsWith('/admin')) {
-            setShowAuthModal(true);
-        }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
+        };
+        handleAuthAndSession();
+    }, [
+        regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+    ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            handleNewChat();
+            // After successful login, we ensure no session ID exists,
+            // which will trigger the useEffect above to create one cleanly.
+            setGlobalSessionId(null); 
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -287,32 +288,18 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
-                    <CodeExecutorPage /> : <Navigate to="/" />} 
-                />
-                <Route
-                    path="/study-plan"
-                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
-                />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
-                    <QuizGeneratorPage /> : <Navigate to="/" />} 
-                />
-                
-                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? <CodeExecutorPage /> : <Navigate to="/" />} />
+                 <Route path="/study-plan" element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />} />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? <QuizGeneratorPage /> : <Navigate to="/" />} />
+                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
-                    navigate={navigate} 
                     handleNewChat={handleNewChat} 
                     isSessionLoading={isSessionLoading}
-                    initialPromptForNewSession={initialPromptForNewSession}
-                    setInitialPromptForNewSession={setInitialPromptForNewSession}
-                    initialActivityForNewSession={initialActivityForNewSession}
-                    setInitialActivityForNewSession={setInitialActivityForNewSession}
                     messages={appStateMessages}
                     setMessages={setAppStateMessages}
-                /> : null} />
-                </Routes>
+                 /> : null} />
+            </Routes>
         </div>
     );
 }

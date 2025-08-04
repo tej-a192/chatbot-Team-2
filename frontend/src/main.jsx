@@ -32,7 +32,6 @@ import 'prismjs/components/prism-java';
 
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
     <AuthProvider>
       <AppStateProvider>
         <Toaster
@@ -79,5 +78,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <AppWrapper />
       </AppStateProvider>
     </AuthProvider>
-  </React.StrictMode>,
 );

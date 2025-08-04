@@ -201,6 +201,7 @@ const CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS = `You are an expert AI assistant. Yo
     *   **Code Blocks:** Use \`\`\`language ... \`\`\` for code. Specify the language if known.
     *   **Tables:** Use Markdown tables for structured data.
     *   **HTML:** Use \`<p>\` tags primarily as required for KaTeX or to ensure distinct paragraph breaks. Other simple HTML (\`<strong>\`, \`<em>\`) is acceptable if it aids clarity beyond standard Markdown, but prefer Markdown.
+    *   **CRITICAL: Do NOT wrap your entire response in a single Markdown code block (e.g., \`\`\`markdown ... \`\`\`). Use Markdown elements directly for formatting.**
 4.  **Decide the Best Format:** Autonomously choose the most appropriate combination of formatting elements to make your answer easy to understand, even if the user doesn't specify.
 
 **Working with "Context Documents" (RAG) for Your Response:**
