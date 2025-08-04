@@ -227,9 +227,6 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   }
 });
 
-
-// @desc    Initiates an academic integrity check.
-// @access  Private
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
     if (!text || text.trim().length < 50) {
@@ -303,6 +300,7 @@ router.get('/analyze-integrity/report/:reportId', async (req, res) => {
     
     res.status(200).json(report);
 });
+
 
 
 module.exports = router;

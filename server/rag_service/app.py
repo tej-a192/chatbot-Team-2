@@ -13,7 +13,7 @@ import json
 import re
 import knowledge_engine
 import media_processor
-
+import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
@@ -43,7 +43,8 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
+    # This is the corrected line
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
     import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -677,72 +678,67 @@ def query_kg_route():
         return create_error_response(f"KG query failed: {str(e)}", 500)
 
 
+
 @app.route('/analyze_integrity', methods=['POST'])
 def analyze_integrity_route():
     data = request.get_json()
-    text = data.get('text')
-    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
-    api_key = data.get('api_key')
-
+    text, checks, api_key = data.get('text'), data.get('checks', []), data.get('api_key')
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
+    results = {}
+    llm_func = lambda p: llm_wrapper(p, api_key)
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            if 'plagiarism' in checks:
+                try:
+                    submission_id = await submit_to_turnitin(session, text)
+                    results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+                except Exception as e:
+                    logger.error(f"Turnitin submission failed: {e}", exc_info=True)
+                    results['plagiarism'] = {"status": "error", "message": str(e)}
+    
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        results = {}
-        
-        # --- Plagiarism (Async Start) ---
-        if 'plagiarism' in checks:
-            try:
-                submission_id = loop.run_until_complete(submit_to_turnitin(text))
-                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-            except Exception as e:
-                logger.error(f"Turnitin submission failed: {e}")
-                results['plagiarism'] = {"status": "error", "message": str(e)}
-
-        # --- Bias & Fact-Checking (Sync) ---
-        llm_func = lambda p: llm_wrapper(p, api_key)
+        asyncio.run(main())
         
         if 'bias' in checks:
             try:
-                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+                results['bias'] = check_bias_hybrid(text, llm_func)
             except Exception as e:
-                logger.error(f"Bias check failed: {e}")
+                logger.error(f"Bias check failed: {e}", exc_info=True)
                 results['bias'] = {"status": "error", "message": str(e)}
-
-        # --- THIS IS THE REPLACEMENT ---
+        
         if 'readability' in checks:
             try:
-                results['readability'] = integrity_services.analyze_readability(text)
+                results['readability'] = calculate_readability(text)
             except Exception as e:
-                logger.error(f"Readability check failed: {e}")
+                logger.error(f"Readability check failed: {e}", exc_info=True)
                 results['readability'] = {"status": "error", "message": str(e)}
-        # --- END REPLACEMENT ---
-        
-        loop.close()
-        return jsonify(results), 200
 
+        return jsonify(results), 200
     except Exception as e:
         return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
-        
-             
+
+
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
-    data = request.get_json()
-    submission_id = data.get('submissionId')
+    submission_id = request.json.get('submissionId')
     if not submission_id:
         return create_error_response("Missing 'submissionId'", 400)
-        
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            return await integrity_services.get_turnitin_report(session, submission_id)
+
     try:
-        # Run the async report fetching function in a managed event loop
-        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
+        report = asyncio.run(main())
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
+
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])

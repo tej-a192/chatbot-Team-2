@@ -13941,7 +13941,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.j
 const ANALYSIS_STEPS = [
     { name: "Submitting for Analysis", progress: 10 },
     { name: "Checking for Biased Language", progress: 30 },
-    { name: "Checking for Factual Inaccuracies", progress: 50 },
+    // --- THIS IS THE FIX ---
+    { name: "Analyzing Readability", progress: 50 },
+    // --- END FIX ---
     { name: "Submitting to Plagiarism Detector", progress: 70 },
     { name: "Awaiting Plagiarism Report", progress: 90 },
     { name: "Completed", progress: 100 }
@@ -13980,7 +13982,9 @@ const AcademicIntegrityPage = () => {
 
             // Update progress based on synchronous results
             if(initialReport.bias) setCurrentStep(1);
-            if(initialReport.facts) setCurrentStep(2);
+            // --- THIS IS THE FIX ---
+            if(initialReport.readability) setCurrentStep(2);
+            // --- END FIX ---
             if(initialReport.plagiarism) setCurrentStep(3);
             
             // If plagiarism check is pending, start polling
@@ -14637,8 +14641,8 @@ export default CodeExecutorPage;
 ```javascript
 // frontend/src/components/tools/IntegrityReportPanel.jsx
 import React from 'react';
-import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale, BookOpen } from 'lucide-react';
+import ReadabilityMetrics from './ReadabilityMetrics'; // <-- NEW IMPORT
 
 const Section = ({ title, icon: Icon, children }) => (
     <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
@@ -14687,7 +14691,7 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
         );
     }
 
-    const { plagiarism, bias, facts } = report;
+    const { plagiarism, bias, readability } = report; // <-- ADDED readability
 
     return (
         <div className="h-full flex flex-col bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
@@ -14733,31 +14737,13 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                     {/* --- END OF FIX --- */}
                 </Section>
 
-                {/* Fact-Checking Section */}
-                <Section title="Fact-Checking" icon={Lightbulb}>
-                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
-                    {Array.isArray(facts) ? (
-                        facts.length === 0 ? (
-                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
-                        ) : (
-                            <ul className="space-y-3">
-                                {facts.map((item, i) => (
-                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
-                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
-                                        onClick={() => onFindingSelect(item)}
-                                    >
-                                        <p><strong>Claim:</strong> "{item.claim}"</p>
-                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
-                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
-                                    </li>
-                                ))}
-                            </ul>
-                        )
+                {/* --- NEW Readability Section --- */}
+                <Section title="Readability Analysis" icon={BookOpen}>
+                    {readability?.status === 'error' ? (
+                        <p className="text-red-500">{readability.message}</p>
                     ) : (
-                        // If facts is not an array, it's our error object.
-                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
+                        <ReadabilityMetrics metrics={readability} />
                     )}
-                     {/* --- END OF FIX --- */}
                 </Section>
             </div>
         </div>
@@ -15300,6 +15286,206 @@ const QuizSetup = ({ onGenerate }) => {
 export default QuizSetup;
 ```
 
+`frontend/src/components/tools/ReadabilityMetrics.css`
+
+```css
+/* frontend/src/components/tools/ReadabilityMetrics.css */
+
+.gauge-progress-circle {
+    transition: stroke-dashoffset 0.8s ease-out;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+}
+```
+
+`frontend/src/components/tools/ReadabilityMetrics.jsx`
+
+```javascript
+// frontend/src/components/tools/ReadabilityMetrics.jsx
+import React from 'react';
+import './ReadabilityMetrics.css';
+
+const Gauge = ({ value, maxValue, label, tooltip, higherIsBetter = true }) => {
+    const radius = 50;
+    const circumference = 2 * Math.PI * radius;
+    const arcLength = circumference * 0.75; // Use 3/4 of the circle
+    
+    let progress = Math.max(0, Math.min(value / maxValue, 1));
+    if (!higherIsBetter) {
+        progress = 1 - progress; // Invert progress for metrics where lower is better
+    }
+
+    const offset = arcLength - progress * arcLength;
+
+    let colorClass = 'stroke-green-500';
+    if (progress < 0.66) colorClass = 'stroke-yellow-500';
+    if (progress < 0.33) colorClass = 'stroke-red-500';
+
+    return (
+        <div className="flex flex-col items-center group relative" title={tooltip}>
+            <svg width="120" height="120" viewBox="0 0 120 120">
+                {/* Background arc */}
+                <circle
+                    className="text-gray-200 dark:text-gray-700"
+                    strokeWidth="10" stroke="currentColor" fill="transparent"
+                    r={radius} cx="60" cy="60"
+                    strokeDasharray={arcLength} strokeDashoffset="0"
+                    strokeLinecap="round" transform="rotate(135, 60, 60)"
+                />
+                {/* Progress arc */}
+                <circle
+                    className={`gauge-progress-circle ${colorClass}`}
+                    strokeWidth="10" stroke="currentColor" fill="transparent"
+                    r={radius} cx="60" cy="60"
+                    strokeDasharray={arcLength} strokeDashoffset={offset}
+                    strokeLinecap="round" transform="rotate(135, 60, 60)"
+                />
+                <text x="50%" y="50%" textAnchor="middle" dy=".3em" className="text-2xl font-bold fill-current text-text-light dark:text-text-dark">
+                    {value.toFixed(1)}
+                </text>
+            </svg>
+            <span className="text-xs font-semibold mt-1 text-center">{label}</span>
+        </div>
+    );
+};
+
+const ReadabilityMetrics = ({ metrics }) => {
+    if (!metrics || Object.keys(metrics).length === 0) {
+        return <p className="text-text-muted-light dark:text-text-muted-dark">No readability data available.</p>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Simple Stat Cards */}
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Word Count</p>
+                    <p className="text-2xl font-bold">{metrics.wordCount}</p>
+                </div>
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Sentence Count</p>
+                    <p className="text-2xl font-bold">{metrics.sentenceCount}</p>
+                </div>
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Avg. Sentence</p>
+                    <p className="text-2xl font-bold">{metrics.avgSentenceLength} words</p>
+                </div>
+                 <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Dale-Chall Score</p>
+                    <p className="text-2xl font-bold" title="Scores 9.0-9.9 are understandable by an average 11th/12th grader. Lower is easier.">{metrics.daleChall.toFixed(1)}</p>
+                </div>
+            </div>
+            {/* Gauge Visualizations */}
+             <div className="flex justify-around items-center flex-wrap gap-4 pt-4 border-t border-dashed border-border-light dark:border-border-dark">
+                <Gauge value={metrics.fleschReadingEase} maxValue={100} label="Reading Ease" tooltip="Higher scores are easier to read. 60-70 is standard for most documents." higherIsBetter={true} />
+                <Gauge value={metrics.fleschKincaidGrade} maxValue={20} label="Grade Level" tooltip="Indicates the US school-grade level needed to understand the text. Lower is easier." higherIsBetter={false} />
+                <Gauge value={metrics.gunningFog} maxValue={20} label="Gunning Fog Index" tooltip="Estimates the years of formal education needed. A score around 12 is widely readable." higherIsBetter={false} />
+            </div>
+        </div>
+    );
+};
+
+export default ReadabilityMetrics;
+```
+
+`frontend/src/components/tools/ReferenceFormatter.jsx`
+
+```javascript
+// frontend/src/components/tools/ReferenceFormatter.jsx
+import React, { useState } from 'react';
+import { Clipboard, Check, Sparkles, Loader2 } from 'lucide-react';
+import Button from '../core/Button';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+
+const ReferenceFormatter = () => {
+    const [rawText, setRawText] = useState('');
+    const [formattedText, setFormattedText] = useState('');
+    const [style, setStyle] = useState('APA');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isCopied, setIsCopied] = useState(false);
+
+    const handleFormat = async () => {
+        if (!rawText.trim()) {
+            toast.error("Please paste your references to format.");
+            return;
+        }
+        setIsLoading(true);
+        setFormattedText('');
+        try {
+            const response = await api.formatReferences({ text: rawText, style });
+            const formattedResult = response.formatted_references.join('\n\n');
+            setFormattedText(formattedResult);
+        } catch (error) {
+            toast.error(error.message || "Failed to format references.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(formattedText).then(() => {
+            setIsCopied(true);
+            toast.success("Formatted references copied!");
+            setTimeout(() => setIsCopied(false), 2000);
+        });
+    };
+
+    return (
+        <div className="p-4 md:p-6 h-full flex flex-col">
+            <div className="flex-shrink-0 mb-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <div>
+                    <h2 className="text-lg font-bold">AI-Powered Reference Formatter</h2>
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Paste your bibliography and let AI format it into a consistent style.</p>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <select value={style} onChange={(e) => setStyle(e.target.value)} className="input-field w-full sm:w-auto">
+                        <option>APA</option>
+                        <option>MLA</option>
+                        <option>Chicago</option>
+                        <option>IEEE</option>
+                    </select>
+                    <Button onClick={handleFormat} isLoading={isLoading} leftIcon={<Sparkles size={16}/>}>
+                        Format
+                    </Button>
+                </div>
+            </div>
+            <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden">
+                <div className="flex flex-col">
+                    <label className="font-semibold mb-1">Paste Raw References Here</label>
+                    <textarea
+                        value={rawText}
+                        onChange={(e) => setRawText(e.target.value)}
+                        placeholder="Paste your messy references, bibliography, or works cited here..."
+                        className="input-field flex-grow resize-none custom-scrollbar"
+                    />
+                </div>
+                <div className="flex flex-col">
+                    <div className="flex justify-between items-center mb-1">
+                        <label className="font-semibold">Formatted Result</label>
+                        {formattedText && (
+                            <Button onClick={handleCopy} variant="ghost" size="sm" leftIcon={isCopied ? <Check size={14}/> : <Clipboard size={14}/>}>
+                                {isCopied ? 'Copied' : 'Copy'}
+                            </Button>
+                        )}
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-md p-3 flex-grow overflow-auto custom-scrollbar relative">
+                        {isLoading && (
+                             <div className="absolute inset-0 flex items-center justify-center bg-surface-light/50 dark:bg-surface-dark/50">
+                                <Loader2 size={24} className="animate-spin text-primary"/>
+                            </div>
+                        )}
+                        <pre className="whitespace-pre-wrap text-sm">{formattedText}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ReferenceFormatter;
+```
+
 `frontend/src/components/tools/TestCaseManager.jsx`
 
 ```javascript
@@ -15438,7 +15624,7 @@ const availableTools = [
     },
     {
         title: 'Academic Integrity & Analysis',
-        description: 'Check your text for potential plagiarism, biased language, and factual inaccuracies.',
+        description: 'Check your text for potential plagiarism, biased language, and readability metrics..',
         icon: ShieldCheck, // This line will now work correctly
         path: '/tools/integrity-checker',
         status: 'active'
@@ -19761,76 +19947,80 @@ module.exports = {
 
 ```python
 # server/rag_service/academic_search.py
-import requests
+import asyncio
+import aiohttp
 import xml.etree.ElementTree as ET
 import logging
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def search_arxiv(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-    """Searches the ArXiv API for papers."""
+async def search_arxiv(session: aiohttp.ClientSession, query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches the ArXiv API for papers."""
     base_url = 'http://export.arxiv.org/api/query?'
     search_query = f'search_query=all:{query}&start=0&max_results={max_results}&sortBy=relevance'
     
     logger.info(f"Querying ArXiv with: {query}")
-    response = requests.get(base_url + search_query, timeout=10)
-    response.raise_for_status()
-    
-    root = ET.fromstring(response.content)
-    papers = []
-    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
-        paper = {
-            'source': 'ArXiv',
-            'title': entry.find('{http://www.w3.org/2005/Atom}title').text.strip(),
-            'url': entry.find('{http://www.w3.org/2005/Atom}id').text.strip(),
-            'summary': entry.find('{http://www.w3.org/2005/Atom}summary').text.strip(),
-            'authors': [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
-        }
-        papers.append(paper)
-    return papers
+    async with session.get(base_url + search_query) as response:
+        response.raise_for_status()
+        content = await response.text()
+        
+        root = ET.fromstring(content)
+        papers = []
+        for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+            paper = {
+                'source': 'ArXiv',
+                'title': entry.find('{http://www.w3.org/2005/Atom}title').text.strip(),
+                'url': entry.find('{http://www.w3.org/2005/Atom}id').text.strip(),
+                'summary': entry.find('{http://www.w3.org/2005/Atom}summary').text.strip(),
+                'authors': [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
+            }
+            papers.append(paper)
+        return papers
 
-def search_semantic_scholar(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-    """Searches the Semantic Scholar API."""
+async def search_semantic_scholar(session: aiohttp.ClientSession, query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches the Semantic Scholar API."""
     base_url = 'https://api.semanticscholar.org/graph/v1/paper/search'
     params = {'query': query, 'limit': max_results, 'fields': 'title,url,abstract,authors'}
     
     logger.info(f"Querying Semantic Scholar with: {query}")
-    response = requests.get(base_url, params=params, timeout=10)
-    response.raise_for_status()
-    
-    data = response.json()
-    papers = []
-    if 'data' in data:
-        for item in data['data']:
-            paper = {
-                'source': 'Semantic Scholar',
-                'title': item.get('title'),
-                'url': item.get('url'),
-                'summary': item.get('abstract'),
-                'authors': [author['name'] for author in item.get('authors', []) if 'name' in author]
-            }
-            papers.append(paper)
-    return papers
+    async with session.get(base_url, params=params) as response:
+        response.raise_for_status()
+        
+        data = await response.json()
+        papers = []
+        if 'data' in data:
+            for item in data['data']:
+                paper = {
+                    'source': 'Semantic Scholar',
+                    'title': item.get('title'),
+                    'url': item.get('url'),
+                    'summary': item.get('abstract'),
+                    'authors': [author['name'] for author in item.get('authors', []) if 'name' in author]
+                }
+                papers.append(paper)
+        return papers
 
-def search_all_apis(query: str, max_results_per_api: int = 3) -> List[Dict[str, Any]]:
-    """Searches all configured academic APIs and aggregates results."""
-    all_results = []
-    
-    api_functions = {
-        'ArXiv': search_arxiv,
-        'Semantic Scholar': search_semantic_scholar
-    }
-    
-    for api_name, search_func in api_functions.items():
-        try:
-            results = search_func(query, max_results=max_results_per_api)
-            all_results.extend(results)
-            logger.info(f"Found {len(results)} results from {api_name}.")
-        except Exception as e:
-            logger.warning(f"Could not retrieve results from {api_name}: {e}")
-            
-    # Simple de-duplication based on title to avoid showing the same paper from two sources
+async def search_all_apis(query: str, max_results_per_api: int = 3) -> List[Dict[str, Any]]:
+    """Asynchronously searches all configured academic APIs and aggregates results."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        tasks = [
+            search_arxiv(session, query, max_results=max_results_per_api),
+            search_semantic_scholar(session, query, max_results=max_results_per_api)
+        ]
+        
+        results_from_tasks = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        all_results = []
+        api_names = ['ArXiv', 'Semantic Scholar']
+        for i, result in enumerate(results_from_tasks):
+            if isinstance(result, Exception):
+                logger.warning(f"Could not retrieve results from {api_names[i]}: {result}")
+            else:
+                all_results.extend(result)
+                logger.info(f"Found {len(result)} results from {api_names[i]}.")
+
+    # Simple de-duplication based on title
     unique_results = {paper['title'].lower(): paper for paper in all_results if paper.get('title')}.values()
     
     return list(unique_results)
@@ -20754,7 +20944,7 @@ import json
 import re
 import knowledge_engine
 import media_processor
-
+import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
 
@@ -20784,7 +20974,8 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    import integrity_services 
+    # This is the corrected line
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
     import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -21418,66 +21609,67 @@ def query_kg_route():
         return create_error_response(f"KG query failed: {str(e)}", 500)
 
 
+
 @app.route('/analyze_integrity', methods=['POST'])
 def analyze_integrity_route():
     data = request.get_json()
-    text = data.get('text')
-    checks = data.get('checks', [])
-    api_key = data.get('api_key')
-
+    text, checks, api_key = data.get('text'), data.get('checks', []), data.get('api_key')
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
     results = {}
     llm_func = lambda p: llm_wrapper(p, api_key)
-
-    # We will run the checks sequentially for stability.
-    # The Turnitin check will still be asynchronous on their end.
     
-    # 1. Plagiarism Check (Start)
-    if 'plagiarism' in checks:
-        try:
-            # We must run the async function in a managed event loop
-            submission_id = asyncio.run(integrity_services.submit_to_turnitin(text))
-            results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-        except Exception as e:
-            logger.error(f"Turnitin submission failed: {e}", exc_info=True)
-            results['plagiarism'] = {"status": "error", "message": str(e)}
-
-    # 2. Bias Check
-    if 'bias' in checks:
-        try:
-            results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
-        except Exception as e:
-            logger.error(f"Bias check failed: {e}", exc_info=True)
-            results['bias'] = {"status": "error", "message": str(e)}
-
-    # 3. Fact Check
-    if 'facts' in checks:
-        try:
-            # Run the async fact-checking agent in a managed event loop
-            results['facts'] = asyncio.run(integrity_services.check_facts_agentic(text, llm_func))
-        except Exception as e:
-            logger.error(f"Fact check failed: {e}", exc_info=True)
-            results['facts'] = {"status": "error", "message": str(e)}
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            if 'plagiarism' in checks:
+                try:
+                    submission_id = await submit_to_turnitin(session, text)
+                    results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+                except Exception as e:
+                    logger.error(f"Turnitin submission failed: {e}", exc_info=True)
+                    results['plagiarism'] = {"status": "error", "message": str(e)}
     
-    return jsonify(results), 200
+    try:
+        asyncio.run(main())
+        
+        if 'bias' in checks:
+            try:
+                results['bias'] = check_bias_hybrid(text, llm_func)
+            except Exception as e:
+                logger.error(f"Bias check failed: {e}", exc_info=True)
+                results['bias'] = {"status": "error", "message": str(e)}
+        
+        if 'readability' in checks:
+            try:
+                results['readability'] = calculate_readability(text)
+            except Exception as e:
+                logger.error(f"Readability check failed: {e}", exc_info=True)
+                results['readability'] = {"status": "error", "message": str(e)}
+
+        return jsonify(results), 200
+    except Exception as e:
+        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+
 
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
-    data = request.get_json()
-    submission_id = data.get('submissionId')
+    submission_id = request.json.get('submissionId')
     if not submission_id:
         return create_error_response("Missing 'submissionId'", 400)
-        
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            return await integrity_services.get_turnitin_report(session, submission_id)
+
     try:
-        # Run the async report fetching function in a managed event loop
-        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
+        report = asyncio.run(main())
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
+
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -22817,52 +23009,38 @@ def chunk_text(text, file_name, user_id):
 ```python
 # server/rag_service/integrity_services.py
 import logging
-import requests
 import time
 import re
 import json
 from typing import Dict, Any, List
+import asyncio
+import aiohttp
 
 import config
-from prompts import (
-    BIAS_CHECK_PROMPT_TEMPLATE, 
-    FACT_CHECK_EXTRACT_PROMPT_TEMPLATE,
-    FACT_CHECK_VERIFY_PROMPT_TEMPLATE
-)
-from academic_search import search_all_apis as academic_search
-from ddgs import DDGS
+from prompts import BIAS_CHECK_PROMPT_TEMPLATE
+import textstat
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache for Turnitin token
 turnitin_token_cache = { "token": None, "expires_at": 0 }
 
-# --- NEW: Robust JSON Extraction Helper ---
 def _extract_json_from_llm_response(text: str) -> Dict[str, Any]:
-    """
-    Finds and parses a JSON object from a string that might contain other text,
-    including markdown code fences.
-    """
-    # Pattern to find JSON within ```json ... ``` or just ``` ... ```
     json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
     if json_match:
         json_string = json_match.group(1)
     else:
-        # Fallback to finding the first '{' and the last '}'
         start_index = text.find('{')
         end_index = text.rfind('}')
         if start_index != -1 and end_index != -1 and end_index > start_index:
             json_string = text[start_index:end_index+1]
         else:
             raise ValueError("No valid JSON object found in the LLM response.")
-            
     return json.loads(json_string)
-# --- END NEW HELPER ---
-
 
 # --- Plagiarism Service (Turnitin) ---
-# ... (get_turnitin_auth_token, submit_to_turnitin, get_turnitin_report functions remain exactly the same) ...
-async def get_turnitin_auth_token() -> str:
+
+async def get_turnitin_auth_token(session: aiohttp.ClientSession) -> str:
     """Gets a JWT from Turnitin, using a simple in-memory cache."""
     if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
         return turnitin_token_cache["token"]
@@ -22878,54 +23056,51 @@ async def get_turnitin_auth_token() -> str:
     }
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     
-    response = requests.post(url, data=payload, headers=headers)
-    response.raise_for_status()
-    data = response.json()
+    async with session.post(url, data=payload, headers=headers) as response:
+        response.raise_for_status()
+        data = await response.json()
 
-    turnitin_token_cache["token"] = data['access_token']
-    turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60  # 60s buffer
-    return data['access_token']
+        turnitin_token_cache["token"] = data['access_token']
+        turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60
+        return data['access_token']
 
-async def submit_to_turnitin(text: str, filename: str = "pasted_text.txt") -> str:
+async def submit_to_turnitin(session: aiohttp.ClientSession, text: str, filename: str = "pasted_text.txt") -> str:
     """Submits text to Turnitin and returns a submission ID."""
-    token = await get_turnitin_auth_token()
+    token = await get_turnitin_auth_token(session)
     url = f"{config.TURNITIN_API_URL}/submissions"
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     payload = {
-        'owner': 'api-user@example.com', # A generic owner identifier
+        'owner': 'api-user@example.com',
         'title': f"Integrity Check - {filename}",
         'file_content': text
     }
+    
+    async with session.post(url, json=payload, headers=headers) as response:
+        response.raise_for_status()
+        data = await response.json()
+        return data['id']
 
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    return response.json()['id']
-
-async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
+async def get_turnitin_report(session: aiohttp.ClientSession, submission_id: str) -> Dict[str, Any]:
     """Polls for and returns the final Turnitin similarity report."""
-    token = await get_turnitin_auth_token()
+    token = await get_turnitin_auth_token(session)
     report_url = f"{config.TURNITIN_API_URL}/submissions/{submission_id}/similarity_report"
     headers = {'Authorization': f'Bearer {token}'}
 
-    for _ in range(12):  # Poll for up to 2 minutes (12 * 10s)
-        response = requests.get(report_url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 202: # Accepted, but not ready
-            time.sleep(10)
-        else:
-            response.raise_for_status()
+    for _ in range(12):
+        async with session.get(report_url, headers=headers) as response:
+            if response.status == 200:
+                return await response.json()
+            elif response.status == 202:
+                await asyncio.sleep(10)
+            else:
+                response.raise_for_status()
     raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
 
 
 # --- Bias & Inclusivity Service ---
-
 def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
-    """Performs a hybrid check for biased language."""
     from bias_wordlists import INCLUSIVE_LANGUAGE_REPLACEMENTS
-    
     findings = []
-    # 1. Fast library check
     for term, suggestion in INCLUSIVE_LANGUAGE_REPLACEMENTS.items():
         if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
             findings.append({
@@ -22933,72 +23108,34 @@ def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
                 "reason": "This term may have a more inclusive or objective alternative.", 
                 "suggestion": suggestion
             })
-
-    # 2. Deep LLM check
-    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000])
     try:
         response_text = llm_function(prompt)
-        # --- THIS IS THE FIX ---
         llm_findings = _extract_json_from_llm_response(response_text).get("findings", [])
         findings.extend(llm_findings)
     except Exception as e:
         logger.error(f"LLM bias check failed: {e}")
-        # Optionally, re-raise or handle the error, but don't let it crash
-        # For now, we log it and proceed with only the wordlist findings.
-
-    # Deduplicate findings
     unique_findings = {f['text'].lower(): f for f in findings}
     return list(unique_findings.values())
 
 
-# --- Fact-Checking Service ---
-async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
-    """Performs an agentic workflow to fact-check claims."""
-    # 1. Extract Claims
-    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+# --- Readability Service ---
+def calculate_readability(text: str) -> Dict[str, Any]:
+    """Calculates various readability metrics for the given text."""
+    logger.info(f"Calculating readability for text of length {len(text)}")
     try:
-        # --- THIS IS THE FIX ---
-        extract_response = llm_function(extract_prompt)
-        claims = _extract_json_from_llm_response(extract_response).get("claims", [])
+        return {
+            "fleschReadingEase": textstat.flesch_reading_ease(text),
+            "fleschKincaidGrade": textstat.flesch_kincaid_grade(text),
+            "gunningFog": textstat.gunning_fog(text),
+            "daleChall": textstat.dale_chall_readability_score(text),
+            "wordCount": textstat.lexicon_count(text, removepunct=True),
+            "sentenceCount": textstat.sentence_count(text),
+            "avgSentenceLength": textstat.avg_sentence_length(text),
+        }
     except Exception as e:
-        logger.error(f"Fact-check claim extraction failed: {e}")
-        return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
-
-    if not claims: return []
-
-    # 2. Verify each claim
-    verified_claims = []
-    for claim in claims:
-        # 2a. Gather Evidence
-        web_results = []
-        try:
-            with DDGS() as ddgs:
-                web_results = list(ddgs.text(claim, max_results=3))
-        except Exception as e:
-            logger.warning(f"DDGS web search failed for claim '{claim}': {e}")
-        
-        academic_results = await academic_search(claim, 2)
-        
-        search_results_text = "WEB RESULTS:\n"
-        search_results_text += "\n\n".join([f"[{i+1}] {r['title']}\n{r['body']}" for i, r in enumerate(web_results)])
-        search_results_text += "\n\nACADEMIC RESULTS:\n"
-        search_results_text += "\n\n".join([f"[A{i+1}] {r['title']}\n{r['summary']}" for i, r in enumerate(academic_results)])
-
-        # 2b. Synthesize & Verify
-        verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
-        try:
-            # --- THIS IS THE FIX ---
-            verify_response = llm_function(verify_prompt)
-            synthesis = _extract_json_from_llm_response(verify_response)
-            verified_claims.append({"claim": claim, **synthesis})
-
-            # time.sleep(4)
-
-        except Exception as e:
-            logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
-            verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
-
-    return verified_claims
+        logger.error(f"Readability calculation failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to calculate metrics: {str(e)}"}
 ```
 
 `server/rag_service/knowledge_engine.py`
@@ -23889,6 +24026,8 @@ playwright
 moviepy
 Werkzeug
 aiohttp
+video/quicktime
+textstat
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -27242,9 +27381,6 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   }
 });
 
-
-// @desc    Initiates an academic integrity check.
-// @access  Private
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
     if (!text || text.trim().length < 50) {
@@ -27258,18 +27394,18 @@ router.post('/analyze-integrity/submit', async (req, res) => {
 
     try {
         const apiKey = await getApiKeyForRequest(req.user._id);
-        const checks = ['plagiarism', 'bias', 'facts'];
+        // --- THIS IS THE FIX: Changed 'facts' to 'readability' ---
+        const checks = ['plagiarism', 'bias', 'readability'];
 
         const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
             text,
             checks,
             api_key: apiKey
-        }, { timeout: 120000 }); // 2 min timeout for sync parts
+        }, { timeout: 120000 });
 
         const initialReport = response.data;
         const reportId = uuidv4();
         
-        // Store the initial report (with pending plagiarism) in our cache
         integrityReportCache.set(reportId, initialReport);
         
         res.status(202).json({ reportId, initialReport });
@@ -27318,6 +27454,7 @@ router.get('/analyze-integrity/report/:reportId', async (req, res) => {
     
     res.status(200).json(report);
 });
+
 
 
 module.exports = router;
@@ -29628,7 +29765,7 @@ async function performWebSearch(query) {
 
     try {
         console.log(`[WebSearch Service] Calling Python endpoint for search: ${searchUrl}`);
-        const response = await axios.post(searchUrl, { query: query }, { timeout: 15000 });
+        const response = await axios.post(searchUrl, { query: query }, { timeout: 45000 });
 
         if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             const topResults = response.data;
