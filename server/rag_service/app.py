@@ -43,7 +43,7 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    import integrity_services 
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
     import asyncio 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -681,47 +681,53 @@ def query_kg_route():
 def analyze_integrity_route():
     data = request.get_json()
     text = data.get('text')
-    checks = data.get('checks', [])
+    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
     api_key = data.get('api_key')
 
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
-    results = {}
-    llm_func = lambda p: llm_wrapper(p, api_key)
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        results = {}
+        
+        # --- Plagiarism (Async Start) ---
+        if 'plagiarism' in checks:
+            try:
+                submission_id = loop.run_until_complete(submit_to_turnitin(text))
+                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+            except Exception as e:
+                logger.error(f"Turnitin submission failed: {e}")
+                results['plagiarism'] = {"status": "error", "message": str(e)}
 
-    # We will run the checks sequentially for stability.
-    # The Turnitin check will still be asynchronous on their end.
-    
-    # 1. Plagiarism Check (Start)
-    if 'plagiarism' in checks:
-        try:
-            # We must run the async function in a managed event loop
-            submission_id = asyncio.run(integrity_services.submit_to_turnitin(text))
-            results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-        except Exception as e:
-            logger.error(f"Turnitin submission failed: {e}", exc_info=True)
-            results['plagiarism'] = {"status": "error", "message": str(e)}
+        # --- Bias & Fact-Checking (Sync) ---
+        llm_func = lambda p: llm_wrapper(p, api_key)
+        
+        if 'bias' in checks:
+            try:
+                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+            except Exception as e:
+                logger.error(f"Bias check failed: {e}")
+                results['bias'] = {"status": "error", "message": str(e)}
 
-    # 2. Bias Check
-    if 'bias' in checks:
-        try:
-            results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
-        except Exception as e:
-            logger.error(f"Bias check failed: {e}", exc_info=True)
-            results['bias'] = {"status": "error", "message": str(e)}
+        # --- THIS IS THE REPLACEMENT ---
+        if 'readability' in checks:
+            try:
+                results['readability'] = integrity_services.analyze_readability(text)
+            except Exception as e:
+                logger.error(f"Readability check failed: {e}")
+                results['readability'] = {"status": "error", "message": str(e)}
+        # --- END REPLACEMENT ---
+        
+        loop.close()
+        return jsonify(results), 200
 
-    # 3. Fact Check
-    if 'facts' in checks:
-        try:
-            # Run the async fact-checking agent in a managed event loop
-            results['facts'] = asyncio.run(integrity_services.check_facts_agentic(text, llm_func))
-        except Exception as e:
-            logger.error(f"Fact check failed: {e}", exc_info=True)
-            results['facts'] = {"status": "error", "message": str(e)}
-    
-    return jsonify(results), 200
-
+    except Exception as e:
+        return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
+        
+             
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
     data = request.get_json()

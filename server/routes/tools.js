@@ -243,18 +243,18 @@ router.post('/analyze-integrity/submit', async (req, res) => {
 
     try {
         const apiKey = await getApiKeyForRequest(req.user._id);
-        const checks = ['plagiarism', 'bias', 'facts'];
+        // --- THIS IS THE FIX: Changed 'facts' to 'readability' ---
+        const checks = ['plagiarism', 'bias', 'readability'];
 
         const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
             text,
             checks,
             api_key: apiKey
-        }, { timeout: 120000 }); // 2 min timeout for sync parts
+        }, { timeout: 120000 });
 
         const initialReport = response.data;
         const reportId = uuidv4();
         
-        // Store the initial report (with pending plagiarism) in our cache
         integrityReportCache.set(reportId, initialReport);
         
         res.status(202).json({ reportId, initialReport });

@@ -17,7 +17,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.j
 const ANALYSIS_STEPS = [
     { name: "Submitting for Analysis", progress: 10 },
     { name: "Checking for Biased Language", progress: 30 },
-    { name: "Checking for Factual Inaccuracies", progress: 50 },
+    // --- THIS IS THE FIX ---
+    { name: "Analyzing Readability", progress: 50 },
+    // --- END FIX ---
     { name: "Submitting to Plagiarism Detector", progress: 70 },
     { name: "Awaiting Plagiarism Report", progress: 90 },
     { name: "Completed", progress: 100 }
@@ -56,7 +58,7 @@ const AcademicIntegrityPage = () => {
 
             // Update progress based on synchronous results
             if(initialReport.bias) setCurrentStep(1);
-            if(initialReport.facts) setCurrentStep(2);
+            if(initialReport.readability``) setCurrentStep(2);
             if(initialReport.plagiarism) setCurrentStep(3);
             
             // If plagiarism check is pending, start polling

@@ -5,7 +5,7 @@ import time
 import re
 import json
 from typing import Dict, Any, List
-
+import textstat
 import config
 from prompts import (
     BIAS_CHECK_PROMPT_TEMPLATE, 
@@ -182,3 +182,48 @@ async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
             verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
 
     return verified_claims
+
+
+def analyze_readability(text: str) -> Dict[str, Any]:
+    """
+    Analyzes the text for readability using the textstat library.
+    Returns a dictionary of key metrics.
+    """
+    if not text or not text.strip():
+        return {}
+        
+    logger.info("Performing readability analysis...")
+    try:
+        # Flesch Reading Ease: Score from 0-100. Higher is easier. 60-70 is standard.
+        flesch_ease = textstat.flesch_reading_ease(text)
+        
+        # Flesch-Kincaid Grade Level: US school grade level equivalent.
+        flesch_grade = textstat.flesch_kincaid_grade(text)
+        
+        # Gunning Fog Index: Grade level, higher is harder.
+        gunning_fog = textstat.gunning_fog(text)
+        
+        # Dale-Chall Readability Score: Best for general audiences.
+        dale_chall = textstat.dale_chall_readability_score(text)
+        
+        # Word Count
+        word_count = textstat.lexicon_count(text, removepunct=True)
+        
+        # Sentence Count
+        sentence_count = textstat.sentence_count(text)
+
+        # Average sentence length
+        avg_sentence_length = round(word_count / sentence_count, 2) if sentence_count > 0 else 0
+
+        return {
+            "fleschReadingEase": flesch_ease,
+            "fleschKincaidGrade": flesch_grade,
+            "gunningFog": gunning_fog,
+            "daleChall": dale_chall,
+            "wordCount": word_count,
+            "sentenceCount": sentence_count,
+            "avgSentenceLength": avg_sentence_length
+        }
+    except Exception as e:
+        logger.error(f"Textstat readability analysis failed: {e}")
+        raise ValueError(f"Could not compute readability scores: {e}")
