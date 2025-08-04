@@ -87,4 +87,30 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
 });
 
 
+// @route   DELETE /api/learning/paths/:pathId
+// @desc    Delete a learning path for the authenticated user.
+// @access  Private
+router.delete('/:pathId', async (req, res) => {
+    const { pathId } = req.params;
+    const userId = req.user._id;
+
+    try {
+        // Find and delete the learning path, ensuring it belongs to the current user
+        const result = await LearningPath.deleteOne({ _id: pathId, userId: userId });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Learning path not found or you do not have permission to delete it.' });
+        }
+
+        // Also remove the reference from the User's learningPaths array (optional but good cleanup)
+        await User.updateOne({ _id: userId }, { $pull: { learningPaths: pathId } });
+
+        res.status(200).json({ message: 'Learning path deleted successfully.' });
+    } catch (error) {
+        console.error(`[API Error] Failed to delete learning path ${pathId} for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while deleting learning path.' });
+    }
+});
+
+
 module.exports = router;

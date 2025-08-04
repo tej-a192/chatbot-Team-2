@@ -203,7 +203,7 @@ router.post('/message', async (req, res) => {
 });
 
 router.post('/history', async (req, res) => {
-    const { previousSessionId } = req.body;
+    const { previousSessionId, skipAnalysis } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
     
@@ -215,7 +215,7 @@ router.post('/history', async (req, res) => {
     };
 
     try {
-        if (previousSessionId) {
+        if (previousSessionId && !skipAnalysis) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
             
             if (previousSession && previousSession.messages?.length > 1) {

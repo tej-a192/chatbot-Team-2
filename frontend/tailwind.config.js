@@ -39,6 +39,10 @@ export default {
         shimmerSweep: {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
+        },
+        'spin-border': {
+          '0%': { '--angle': '0deg' },
+          '100%': { '--angle': '360deg' },
         }
       },
       animation: {
@@ -48,6 +52,7 @@ export default {
         pulseDot2: 'pulseDots 1.4s infinite 0.2s ease-in-out',
         pulseDot3: 'pulseDots 1.4s infinite 0.4s ease-in-out',
         shimmerSweep: 'shimmerSweep 1.5s linear infinite',
+        'spin-border': 'spin-border 4s linear infinite',
       }
     },
   },
