@@ -37,6 +37,7 @@ try:
     import ai_core
     import neo4j_handler 
     from neo4j import exceptions as neo4j_exceptions
+    from tts_service import initialize_tts
     import document_generator
     import podcast_generator
     import google.generativeai as genai
@@ -46,6 +47,7 @@ try:
     # This is the corrected line
     from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
     import asyncio 
+    
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -118,6 +120,11 @@ try:
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
 atexit.register(neo4j_handler.close_driver)
+
+
+initialize_tts()
+
+
 
 def create_error_response(message, status_code=500, details=None):
     log_message = f"API Error ({status_code}): {message}"
@@ -546,26 +553,20 @@ def export_podcast_route():
         return create_error_response("Missing 'sourceDocumentText', 'analysisContent', or 'api_key'", 400)
 
     try:
+        # 1. Generate the script using the LLM (no change here)
         script = podcast_generator.generate_podcast_script(
             source_document_text, 
             analysis_content,
             podcast_options,
             lambda p: llm_wrapper(p, api_key)
         )
-        
-        temp_gtts_filename = f"podcast_gtts_{uuid.uuid4()}.mp3"
-        temp_gtts_path = os.path.join(app.config['GENERATED_DOCS_DIR'], temp_gtts_filename)
-        podcast_generator.synthesize_audio_with_gtts(script, temp_gtts_path)
 
-        sound = AudioSegment.from_mp3(temp_gtts_path)
-        sped_up_sound = sound.speedup(playback_speed=1.20)
-        
+        # 2. Synthesize the script into a high-quality, dual-speaker MP3
         final_mp3_filename = f"podcast_final_{uuid.uuid4()}.mp3"
         final_mp3_path = os.path.join(app.config['GENERATED_DOCS_DIR'], final_mp3_filename)
-        
-        sped_up_sound.export(final_mp3_path, format="mp3")
-        os.remove(temp_gtts_path)
+        podcast_generator.create_podcast_from_script(script, final_mp3_path)
 
+        # 3. Send the file to the user and clean up afterwards
         @after_this_request
         def cleanup(response):
             try: os.remove(final_mp3_path)

@@ -40,3 +40,5 @@ Werkzeug
 aiohttp
 video/quicktime
 textstat
+TTS
+pydub
