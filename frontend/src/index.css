@@ -459,4 +459,11 @@ html.light .code-block-copy-button:hover {
   .fire-tag-animation {
     animation: fire-flicker 2.5s ease-in-out infinite;
   }
+
+
+  .processing-overlay {
+    pointer-events: none; /* Disables all click/hover events */
+    opacity: 0.6;         /* Reduces opacity for visual feedback */
+    transition: opacity 0.3s ease-in-out; /* Smooth transition */
+  }
 }

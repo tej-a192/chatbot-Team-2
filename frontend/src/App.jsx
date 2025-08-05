@@ -101,9 +101,9 @@ function MainAppLayout({
             <AnimatePresence mode="wait">
                 {isLeftPanelOpen ? (
                     <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <LeftPanel />
+                        <LeftPanel isChatProcessing={isChatProcessing} />
                     </motion.aside>
-                ) : ( <LeftCollapsedNav /> )}
+                ) : ( <LeftCollapsedNav isChatProcessing={isChatProcessing} /> )}
             </AnimatePresence>
             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
                 <CenterPanel 
@@ -120,9 +120,9 @@ function MainAppLayout({
             <AnimatePresence mode="wait">
                 {isRightPanelOpen ? (
                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <RightPanel />
+                        <RightPanel isChatProcessing={isChatProcessing} /> {/* Pass the prop */}
                     </motion.aside>
-                ) : ( <RightCollapsedNav /> )}
+                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )} {/* Pass the prop */}
             </AnimatePresence>
         </div>
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />

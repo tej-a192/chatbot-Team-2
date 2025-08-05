@@ -109,7 +109,7 @@ function TopNav({ user: authUser, onLogout, onNewChat, onHistoryClick, orchestra
                     <div className="w-8 h-8 flex items-center justify-center">
                         {getStatusIndicator()}
                     </div>
-                    <ThemeToggle />
+                    <ThemeToggle disabled={isChatProcessing}/>
                     <div className="relative" ref={profileDropdownRef}>
                         <button 
                             onClick={() => setIsProfileDropdownOpen(prev => !prev)}
