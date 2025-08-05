@@ -7375,22 +7375,20 @@ function App() {
     const [appStateMessages, setAppStateMessages] = useState([]);
     const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-    const handleNewChat = useCallback(async (callbackOrMessages) => {
-        const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
-        const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+        const messages = appStateMessages;
 
-        if (messages.length === 0 && currentSessionId) {
+        if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
+            if (callback) callback(currentSessionId);
             return;
         }
         
         setIsSessionLoading(true);
         try {
-            const data = await api.startNewSession(currentSessionId); 
+            const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
             if (data && data.newSessionId) {
                 setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-
                 if (data.studyPlanSuggestion) {
                     const { topic, reason } = data.studyPlanSuggestion;
                     toast.custom((t) => (
@@ -7416,16 +7414,24 @@ function App() {
                         </motion.div>
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                if (callback) callback(data.newSessionId);
+                if (callback) {
+                    // Only show "New chat started!" toast if not explicitly skipping analysis
+                    if (!skipSessionAnalysis) {
+                         toast.success("New chat started!"); 
+                    }
+                    callback(data.newSessionId);
+                }
             } else {
                 toast.error(data.message || "Could not start new chat session.");
+                if (callback) callback(null);
             }
         } catch (error) {
             toast.error(`Failed to start new chat: ${error.message}`);
+            if (callback) callback(null);
         } finally {
             setIsSessionLoading(false);
         }
-    }, [currentSessionId, setGlobalSessionId, navigate]);
+    }, [currentSessionId, setGlobalSessionId, navigate, appStateMessages]);
     
     const fetchChatHistory = useCallback(async (sid) => {
         if (!sid || !regularUserToken) {
@@ -10148,17 +10154,19 @@ function ChatHistory({ messages, onCueClick }) {
                         transition={{ duration: 0.3, ease: "easeOut" }}
                     >
                         <MessageBubble
-                            id={msg.id}
-                            sender={msg.sender}
-                            text={msg.text}
-                            thinking={msg.thinking}
-                            references={msg.references}
-                            timestamp={msg.timestamp}
-                            sourcePipeline={msg.source_pipeline}
-                            isStreaming={msg.isStreaming}
-                            criticalThinkingCues={msg.criticalThinkingCues}
-                            onCueClick={onCueClick}
-                        />
+                        id={msg.id}
+                        sender={msg.sender}
+                        text={msg.text}
+                        thinking={msg.thinking}
+                        references={msg.references}
+                        timestamp={msg.timestamp}
+                        sourcePipeline={msg.source_pipeline}
+                        isStreaming={msg.isStreaming}
+                        criticalThinkingCues={msg.criticalThinkingCues}
+                        onCueClick={onCueClick}
+                        messageId={msg.id}
+                    />
+
                     </motion.div>
                 ))}
             </AnimatePresence>
@@ -10572,7 +10580,7 @@ function ChatInput({
                <IconButton
                     icon={icon}
                     onClick={() => setCriticalThinkingEnabled(!criticalThinkingEnabled)}
-                    title={criticalThinkingEnabled ? "Disable Critical Thinking (KG)" : "Enable Critical Thinking (KG)"}
+                    title={criticalThinkingEnabled ? "Disable Critical Thinking" : "Enable Critical Thinking"}
                     variant="ghost"
                     size="md"
                     className={`p-2 ${criticalThinkingEnabled ? 'text-purple-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
@@ -10627,6 +10635,7 @@ export default ChatInput;
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
+import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
@@ -10685,35 +10694,92 @@ const AnimatedThinking = ({ content }) => {
     );
 };
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const contentRef = useRef(null);
-    const [isCopied, setIsCopied] = useState(false);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
 
+    const [isCopied, setIsCopied] = useState(false);
     const mainContent = text || '';
     const thinkingContent = thinking;
     const showThinkingDropdown = !isUser && thinkingContent !== null;
 
     useEffect(() => {
-        if (!isStreaming && mainContent) {
-            const timer = setTimeout(() => {
-                if (contentRef.current) Prism.highlightAllUnder(contentRef.current);
-            }, 50);
-            return () => clearTimeout(timer);
-        }
-    }, [isStreaming, mainContent]);
-    
+        // This function encapsulates the logic for Prism highlighting and button attachment.
+        const processContent = () => {
+            // Ensure contentRef is available, content is not empty, and streaming has finished.
+            if (!contentRef.current || !mainContent || isStreaming) {
+                return;
+            }
+
+            // --- Existing Prism Highlighting Logic ---
+            // Ensure Prism highlights the code blocks once content is stable
+            Prism.highlightAllUnder(contentRef.current);
+            // --- End Existing Logic ---
+
+            // --- REFINED: CODE BLOCK COPY BUTTON LOGIC ---
+            const codeBlocks = contentRef.current.querySelectorAll('pre');
+            codeBlocks.forEach((preElement, index) => {
+                // Prevent adding multiple buttons if effect runs more than once without cleanup
+                if (preElement.querySelector('.code-block-copy-button')) {
+                    return; 
+                }
+
+                const copyButton = document.createElement('button');
+                copyButton.className = 'code-block-copy-button';
+                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`;
+                copyButton.title = 'Copy code';
+
+                copyButton.onclick = () => {
+                    const codeContent = preElement.querySelector('code')?.textContent || '';
+                    if (codeContent) {
+                        navigator.clipboard.writeText(codeContent).then(() => {
+                            copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check text-green-500"><path d="M20 6 9 17l-5-5"/></svg>`; // Check icon
+                            // Ensure a unique ID for the toast to avoid conflicts if multiple buttons are clicked fast
+                            toast.success('Code copied!', { id: `copy-toast-${messageId}-${index}` }); 
+                            setTimeout(() => {
+                                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`; // Reset to copy icon
+                            }, 1500);
+                        }).catch(err => {
+                            toast.error('Failed to copy code.', { id: `copy-toast-error-${messageId}-${index}` });
+                            console.error('Failed to copy code:', err);
+                        });
+                    }
+                };
+                preElement.appendChild(copyButton);
+            });
+            // --- END REFINED LOGIC ---
+        };
+
+        // Use a small timeout to ensure React has fully rendered the HTML content
+        // from dangerouslySetInnerHTML before we query the DOM.
+        const delayProcessing = setTimeout(processContent, 150); // Increased delay slightly for robustness
+
+        // Cleanup function: This runs when the component unmounts or before the effect re-runs
+        return () => {
+            clearTimeout(delayProcessing); // Clear any pending timeouts
+            // Remove any dynamically added buttons to prevent duplicates
+            if (contentRef.current) {
+                const existingButtons = contentRef.current.querySelectorAll('.code-block-copy-button');
+                existingButtons.forEach(button => button.remove());
+            }
+        };
+    }, [isStreaming, mainContent, messageId]);
+
     const handleCopy = () => {
         if (isCopied) return;
         const plainTextToCopy = getPlainTextFromMarkdown(mainContent);
         navigator.clipboard.writeText(plainTextToCopy).then(() => {
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 1000);
+            toast.success('Message copied!'); // Add toast notification for overall message copy
+        }).catch(err => {
+            toast.error('Failed to copy message.');
+            console.error('Failed to copy message:', err);
         });
     };
-    
+
     const formatTimestamp = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const getPipelineIcon = () => {
         if (!sourcePipeline) return null;
@@ -10751,7 +10817,11 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                         ? 'bg-surface-light text-text-light border border-border-light dark:bg-primary-dark dark:text-white dark:border-transparent rounded-br-lg' 
                         : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
                     }`}>
-                        <div ref={contentRef} className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" dangerouslySetInnerHTML={createMarkup(mainContent)} />
+                        <div 
+                            ref={contentRef} 
+                            className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" 
+                            dangerouslySetInnerHTML={createMarkup(mainContent)} 
+                        />
                         <div className="flex items-center justify-end mt-1.5 text-xs gap-1">
                             <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
                                 <AnimatePresence mode="wait" initial={false}>
@@ -10831,6 +10901,7 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
         </div>
     );
 }
+
 
 export default MessageBubble;
 ```
@@ -12184,7 +12255,7 @@ import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame } from 'lucide-react';
+import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame, FileQuestion } from 'lucide-react';
 
 const features = [
     {
@@ -12209,11 +12280,12 @@ const features = [
         glowColor: 'orange'
     },
     {
-        icon: TestTubeDiagonal,
-        title: "API Endpoint Tester",
-        description: "A tool for testing and validating API endpoints will be available soon.",
-        status: 'soon',
-        glowColor: 'gray'
+        icon: FileQuestion,
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.', // Changed description
+        path: '/tools/quiz-generator',
+        status: 'active',
+        glowColor: 'yellow'
     }
 ];
 
@@ -12221,6 +12293,7 @@ const glowStyles = {
     blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
+    yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
     gray: "" // No glow for disabled/soon cards
 };
 
@@ -12419,8 +12492,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             case 'Secure Code Executor':
                 navigate('/tools/code-executor');
                 break;
-            case 'API Endpoint Tester':
-                toast.info("The API Endpoint Tester is coming soon!");
+            case 'AI Quiz Generator':
+                navigate('/tools/quiz-generator');
                 break;
             default:
                 break;
@@ -13388,13 +13461,15 @@ export default TopNav;
 
 ```javascript
 // frontend/src/components/learning/StudyPlanPage.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppState } from '../../contexts/AppStateContext.jsx';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked } from 'lucide-react';
+import { Home, Plus, Loader2, AlertTriangle, CheckCircle, Lock, Circle, GraduationCap, FileText, Globe, Code, BookMarked, ChevronLeft, Sparkles, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import Button from '../core/Button';
+import Modal from '../core/Modal.jsx';
+import IconButton from '../core/IconButton.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const iconMap = {
@@ -13405,7 +13480,6 @@ const iconMap = {
     code_executor: Code,
 };
 
-// --- Module Checklist Item Component ---
 const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat }) => {
     const navigate = useNavigate();
     const [isUpdating, setIsUpdating] = useState(false);
@@ -13427,27 +13501,31 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat })
 
     const handleStartModule = () => {
         const { activity } = module;
-
+        
         if (activity.type === 'code_executor') {
             navigate('/tools/code-executor');
             return;
         }
         
-        // 1. Set the context state BEFORE starting the new chat and navigating
         console.log("[StudyPlanPage] Setting initial prompt and activity in context.", activity);
         setInitialPromptForNewSession(activity.suggestedPrompt);
         setInitialActivityForNewSession(activity);
 
-        // 2. Call handleNewChat. The callback now only needs to navigate.
-        handleNewChat((newSessionId) => {
-            console.log(`New session ${newSessionId} created. Navigating to chat.`);
-            navigate('/');
-        });
+        handleNewChat(
+            (newSessionId) => {
+                console.log(`New session ${newSessionId} created. Navigating to chat.`);
+                if (activity.type === 'direct_answer' || activity.type === 'web_search' || activity.type === 'academic_search' || activity.type === 'document_review') {
+                    navigate('/');
+                }
+            },
+            true, // forceNewChat = true
+            true // skipSessionAnalysis = true
+        );
     };
 
     const ActivityIcon = iconMap[module.activity.type] || GraduationCap;
     const isLocked = module.status === 'locked';
-    const isCompleted = module.status === 'completed';
+    const isCompleted = module.status === 'completed'; // This is the state we need to ensure updates
 
     return (
         <div className={`flex items-start gap-4 p-4 border-l-4 ${isCompleted ? 'border-green-500 bg-green-500/5' : isNextUp ? 'border-primary' : 'border-transparent'}`}>
@@ -13455,6 +13533,7 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat })
                 {isUpdating ? (
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 ) : (
+                    // The icon logic relies directly on module.status and isCompleted
                     <button onClick={handleStatusToggle} disabled={isLocked} className="disabled:opacity-50 disabled:cursor-not-allowed">
                         {isLocked ? <Lock className="w-6 h-6 text-text-muted-light dark:text-text-muted-dark" /> :
                          isCompleted ? <CheckCircle className="w-6 h-6 text-green-500" /> :
@@ -13481,7 +13560,6 @@ const ModuleItem = ({ module, pathId, onModuleUpdate, isNextUp, handleNewChat })
     );
 };
 
-// --- Create New Plan Component (with Questionnaire and Prefill Logic) ---
 const CreatePlan = ({ onPlanCreated }) => {
     const [goal, setGoal] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -13558,6 +13636,7 @@ const CreatePlan = ({ onPlanCreated }) => {
             onPlanCreated();
         } catch (error) {
             toast.error(`Failed to create personalized plan: ${error.message}`);
+            resetForm();
         } finally {
             setIsLoading(false);
         }
@@ -13570,65 +13649,93 @@ const CreatePlan = ({ onPlanCreated }) => {
         setAnswers([]);
     };
 
-    if (questionnaire) {
-        const question = questionnaire[currentStep];
-        return (
-            <div className="card-base p-6 mb-8">
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={currentStep}
-                        initial={{ opacity: 0, x: 50 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -50 }}
-                        transition={{ duration: 0.3 }}
-                    >
-                        <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Step {currentStep + 1} of {questionnaire.length}</p>
-                        <h3 className="text-lg font-semibold my-2">{question.questionText}</h3>
-                        {question.type === 'multiple_choice' ? (
-                            <div className="space-y-2 mt-4">
-                                {question.options.map(option => (
-                                    <label key={option} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${answers[currentStep] === option ? 'border-primary bg-primary/10' : 'border-border-light dark:border-border-dark'}`}>
-                                        <input type="radio" name={`q-${currentStep}`} value={option} checked={answers[currentStep] === option} onChange={() => handleAnswerChange(currentStep, option)} className="form-radio" />
-                                        <span className="ml-3">{option}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        ) : (
-                            <input type="text" value={answers[currentStep]} onChange={(e) => handleAnswerChange(currentStep, e.target.value)} className="input-field mt-4" />
-                        )}
-                        <div className="flex justify-between items-center mt-6">
-                            <Button variant="secondary" onClick={() => currentStep > 0 ? setCurrentStep(s => s - 1) : resetForm()}>
-                                {currentStep > 0 ? 'Back' : 'Cancel'}
-                            </Button>
-                            {currentStep < questionnaire.length - 1 ? (
-                                <Button onClick={() => setCurrentStep(s => s + 1)} disabled={!answers[currentStep]}>Next</Button>
-                            ) : (
-                                <Button onClick={handleFinalSubmit} isLoading={isLoading} disabled={!answers[currentStep]}>Generate My Plan</Button>
-                            )}
-                        </div>
-                    </motion.div>
-                </AnimatePresence>
-            </div>
-        );
-    }
+    const renderContent = () => {
+        if (isLoading) {
+            return (
+                <motion.div 
+                    key="loading-spinner"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex flex-col items-center justify-center py-12 text-center"
+                >
+                    <Loader2 className="w-12 h-12 animate-spin text-primary" />
+                    <p className="mt-4 text-lg font-semibold text-text-light dark:text-text-dark">We're doing magic, please wait...</p>
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Generating your personalized study plan.</p>
+                </motion.div>
+            );
+        }
 
-    return (
-        <div className="card-base p-6 mb-8">
-            <h2 className="text-lg font-semibold text-center mb-4">Create a New Study Plan</h2>
-            <form id="create-plan-form" onSubmit={handleInitialGenerate} className="flex flex-col sm:flex-row items-center gap-3">
-                <input
-                    type="text"
+        if (questionnaire) {
+            const question = questionnaire[currentStep];
+            return (
+                <motion.div
+                    key={`question-step-${currentStep}`}
+                    initial={{ opacity: 0, x: 50 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -50 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-4"
+                >
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Step {currentStep + 1} of {questionnaire.length}</p>
+                    <h3 className="text-lg font-semibold my-2 text-text-light dark:text-text-dark">{question.questionText}</h3>
+                    {question.type === 'multiple_choice' ? (
+                        <div className="space-y-2 mt-4">
+                            {question.options.map(option => (
+                                <label key={option} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${answers[currentStep] === option ? 'border-primary bg-primary/10' : 'border-border-light dark:border-border-dark'}`}>
+                                    <input type="radio" name={`q-${currentStep}`} value={option} checked={answers[currentStep] === option} onChange={() => handleAnswerChange(currentStep, option)} className="form-radio" />
+                                    <span className="ml-3">{option}</span>
+                                </label>
+                            ))}
+                        </div>
+                    ) : (
+                        <input type="text" value={answers[currentStep]} onChange={(e) => handleAnswerChange(currentStep, e.target.value)} className="input-field mt-4" placeholder="Type your answer here..." />
+                    )}
+                    <div className="flex justify-between items-center mt-6">
+                        <Button variant="secondary" onClick={() => currentStep > 0 ? setCurrentStep(s => s - 1) : resetForm()} disabled={isLoading}>
+                            {currentStep > 0 ? 'Back' : 'Cancel'}
+                        </Button>
+                        {currentStep < questionnaire.length - 1 ? (
+                            <Button onClick={() => setCurrentStep(s => s + 1)} disabled={!answers[currentStep] || isLoading}>Next</Button>
+                        ) : (
+                            <Button onClick={handleFinalSubmit} isLoading={isLoading} disabled={!answers[currentStep] || isLoading}>Generate My Plan</Button>
+                        )}
+                    </div>
+                </motion.div>
+            );
+        }
+
+        // Initial goal input view
+        return (
+            <motion.div 
+                key="initial-goal-input"
+                initial={{ opacity: 0, x: 50 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -50 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-6" // Add some vertical spacing
+            >
+                <h2 className="text-lg font-semibold text-center mb-4 text-text-light dark:text-text-dark">What is your learning goal?</h2>
+                <textarea
                     value={goal}
                     onChange={(e) => setGoal(e.target.value)}
-                    placeholder="What is your learning goal? e.g., 'Master Python for data science'"
-                    className="input-field flex-grow !py-2.5"
+                    placeholder="e.g., 'Master Python for data science', 'Understand thermodynamics basics'"
+                    className="input-field w-full min-h-[80px] custom-scrollbar resize-y" // Make it a textarea
                     disabled={isLoading}
                 />
-                <Button type="submit" isLoading={isLoading} leftIcon={<Plus size={16} />} className="w-full sm:w-auto">
+                <Button type="submit" isLoading={isLoading} leftIcon={<Sparkles size={16} />} className="w-full">
                     Generate Plan
                 </Button>
-            </form>
-        </div>
+            </motion.div>
+        );
+    };
+
+    return (
+        <form onSubmit={handleInitialGenerate} className="p-4 sm:p-6">
+            <AnimatePresence mode="wait">
+                {renderContent()}
+            </AnimatePresence>
+        </form>
     );
 };
 
@@ -13637,7 +13744,35 @@ const StudyPlanPage = ({ handleNewChat }) => {
     const [learningPaths, setLearningPaths] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
-    const [activePathId, setActivePathId] = useState(null);
+    
+    // --- MODIFICATION START ---
+    const [selectedStudyPlan, setSelectedStudyPlan] = useState(null); // New state to hold the selected plan object for detail view
+    // --- MODIFICATION END ---
+    
+    const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
+    const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+    const [planToDelete, setPlanToDelete] = useState(null);
+
+
+    const handleDeletePlan = async () => {
+        if (!planToDelete) return;
+
+        const toastId = toast.loading(`Deleting plan "${planToDelete.title}"...`);
+        try {
+            await api.deleteLearningPath(planToDelete._id);
+            toast.success(`Plan "${planToDelete.title}" deleted!`, { id: toastId });
+            setShowDeleteConfirmModal(false);
+            setPlanToDelete(null);
+            fetchPaths(); // Refresh the list of paths
+            // --- MODIFICATION START: If the deleted plan was selected, clear selection ---
+            if (selectedStudyPlan && selectedStudyPlan._id === planToDelete._id) {
+                setSelectedStudyPlan(null); // Go back to list view
+            }
+            // --- MODIFICATION END ---
+        } catch (error) {
+            toast.error(`Failed to delete plan: ${error.message}`, { id: toastId });
+        }
+    };
 
     const fetchPaths = useCallback(async () => {
         setIsLoading(true);
@@ -13645,35 +13780,90 @@ const StudyPlanPage = ({ handleNewChat }) => {
         try {
             const paths = await api.getLearningPaths();
             setLearningPaths(paths);
-            if (paths.length > 0 && (!activePathId || !paths.some(p => p._id === activePathId))) {
-                setActivePathId(paths[0]._id);
-            }
+            // --- MODIFICATION START: Remove activePathId logic from here ---
+            // The activePathId state is no longer needed here; selectedStudyPlan replaces its purpose
+            // Keep comments to indicate removed logic
+            // if (paths.length > 0 && (!activePathId || !paths.some(p => p._id === activePathId))) {
+            //     setActivePathId(paths[0]._id);
+            // }
+            // --- MODIFICATION END ---
         } catch (err) {
             setError(err.message || 'Failed to fetch learning paths.');
             toast.error(err.message);
         } finally {
             setIsLoading(false);
         }
-    }, [activePathId]);
+    }, [/* No activePathId dependency needed now */]);
 
     useEffect(() => {
         fetchPaths();
     }, [fetchPaths]);
 
+    // --- NEW: Function to display a single plan's details ---
+    const renderStudyPlanDetails = (plan) => {
+        const nextUpModule = plan.modules.find(m => m.status === 'not_started' || m.status === 'in_progress');
+        return (
+            <motion.div
+                key={plan._id} // Use plan ID as key for motion
+                initial={{ opacity: 0, x: 50 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -50 }}
+                transition={{ duration: 0.3 }}
+                className="card-base p-6" // Apply card styling here for the detail view
+            >
+                <h2 className="text-xl font-bold mb-4 text-text-light dark:text-text-dark">{plan.title}</h2>
+                <div className="divide-y divide-border-light dark:divide-border-dark">
+                    {plan.modules.map(module => (
+                        <ModuleItem
+                            key={module.moduleId}
+                            module={module}
+                            pathId={plan._id} // Pass the path ID
+                            onModuleUpdate={fetchPaths} // Trigger refetch of all paths on module update
+                            isNextUp={nextUpModule?.moduleId === module.moduleId}
+                            handleNewChat={handleNewChat}
+                        />
+                    ))}
+                </div>
+            </motion.div>
+        );
+    };
+    // --- END NEW FUNCTION ---
+
+
     return (
         <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
-            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-between px-6 z-10">
-                <h1 className="text-xl font-bold">My Study Plans</h1>
-                <Link to="/" className="flex items-center gap-2 text-sm btn btn-ghost">
-                    <Home size={16}/>
-                    Back to Main App
-                </Link>
+            <header className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark h-16 flex items-center justify-center px-6 z-10">
+                <h1 className="text-3xl font-extrabold text-primary dark:text-primary-light">My Study Plans</h1>
             </header>
+
+            {/* --- MODIFIED: Second Navbar / Controls Section --- */}
+            <div className="flex-shrink-0 bg-surface-light dark:bg-surface-dark border-b border-border-light dark:border-border-dark px-4 sm:px-6 py-3 flex items-center justify-between">
+                {/* Back button for detail view */}
+                {selectedStudyPlan ? (
+                    <button 
+                        onClick={() => setSelectedStudyPlan(null)} 
+                        className="text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light flex items-center gap-1.5 font-medium text-sm"
+                    >
+                        <ChevronLeft size={18} />
+                        Back to All Plans
+                    </button>
+                ) : (
+                    <Link to="/" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light flex items-center gap-1.5 font-medium text-sm">
+                        <ChevronLeft size={18} />
+                        Back to Main App
+                    </Link>
+                )}
+                <button
+                    onClick={() => setShowCreatePlanModal(true)}
+                    className="animated-border-button" 
+                >
+                    <span>Generate New Plan ✨</span>
+                </button>
+            </div>
+            {/* --- END MODIFIED SECTION --- */}
 
             <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 custom-scrollbar">
                 <div className="max-w-4xl mx-auto">
-                    <CreatePlan onPlanCreated={fetchPaths} />
-
                     {isLoading && (
                         <div className="text-center p-8">
                             <Loader2 className="w-8 h-8 mx-auto animate-spin text-primary" />
@@ -13687,59 +13877,127 @@ const StudyPlanPage = ({ handleNewChat }) => {
                             <Button onClick={fetchPaths} size="sm" variant="outline" className="mt-4">Retry</Button>
                         </div>
                     )}
-                    {!isLoading && !error && learningPaths.length === 0 && (
-                        <div className="text-center py-12 text-text-muted-light dark:text-text-muted-dark">
-                            <GraduationCap size={48} className="mx-auto opacity-50 mb-4" />
-                            <h3 className="font-semibold text-lg">No Study Plans Found</h3>
-                            <p>Create your first plan above to get started on a personalized learning journey!</p>
-                        </div>
-                    )}
+                    
+                    {/* --- MODIFIED: Conditional Rendering of List vs. Detail --- */}
+                    <AnimatePresence mode="wait">
+                    {selectedStudyPlan ? (
+                        // Render single plan detail view
+                        <motion.div 
+                            key="study-plan-details-view"
+                            initial={{ opacity: 0, x: 50 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -50 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            {renderStudyPlanDetails(selectedStudyPlan)}
+                        </motion.div>
+                    ) : (
+                        // Render list of plans (if not loading, no error, and plans exist)
+                        <motion.div 
+                            key="study-plan-list-view"
+                            initial={{ opacity: 0, x: -50 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 50 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            {!isLoading && !error && learningPaths.length === 0 && (
+                                <div className="text-center py-12 text-text-muted-light dark:text-text-muted-dark">
+                                    <GraduationCap size={48} className="mx-auto opacity-50 mb-4" />
+                                    <h3 className="font-semibold text-lg">No Study Plans Found</h3>
+                                    <p>Create your first plan above to get started on a personalized learning journey!</p>
+                                </div>
+                            )}
 
-                    {!isLoading && !error && learningPaths.length > 0 && (
-                        <div className="space-y-4">
-                            {learningPaths.map(path => {
-                                const isExpanded = activePathId === path._id;
-                                const nextUpModule = path.modules.find(m => m.status === 'not_started' || m.status === 'in_progress');
-                                return (
-                                    <div key={path._id} className="card-base overflow-hidden">
-                                        <h2 onClick={() => setActivePathId(isExpanded ? null : path._id)} className="px-6 py-4 text-lg font-semibold cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                                            {path.title}
-                                        </h2>
-                                        <AnimatePresence>
-                                            {isExpanded && (
-                                                <motion.div
-                                                    initial={{ height: 0, opacity: 0 }}
-                                                    animate={{ height: 'auto', opacity: 1 }}
-                                                    exit={{ height: 0, opacity: 0 }}
-                                                    transition={{ duration: 0.3, ease: 'easeInOut' }}
-                                                    className="border-t border-border-light dark:border-border-dark"
+                            {!isLoading && !error && learningPaths.length > 0 && (
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    {learningPaths.map(path => {
+                                        const hasStarted = path.modules.some(m => m.status === 'in_progress' || m.status === 'completed');
+                                        const isCompleted = path.modules.every(m => m.status === 'completed');
+                                        
+                                        let statusText = 'Not Yet Started';
+                                        let statusColor = 'text-gray-500 dark:text-gray-400';
+                                        if (isCompleted) {
+                                            statusText = 'Completed';
+                                            statusColor = 'text-green-600 dark:text-green-400';
+                                        } else if (hasStarted) {
+                                            statusText = 'Ongoing';
+                                            statusColor = 'text-blue-600 dark:text-blue-400';
+                                        }
+
+                                        return (
+                                            <motion.div 
+                                                key={path._id} 
+                                                className="card-base overflow-hidden p-0 relative"
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, y: -20 }}
+                                                transition={{ duration: 0.3, ease: "easeOut" }}
+                                            >
+                                                <div 
+                                                    onClick={() => setSelectedStudyPlan(path)} // <<< MODIFIED: Click to select plan
+                                                    className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-b border-border-light dark:border-border-dark cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                                                 >
-                                                    <div className="divide-y divide-border-light dark:divide-border-dark">
-                                                        {path.modules.map(module => (
-                                                            <ModuleItem
-                                                                key={module.moduleId}
-                                                                module={module}
-                                                                pathId={path._id}
-                                                                onModuleUpdate={fetchPaths}
-                                                                isNextUp={nextUpModule?.moduleId === module.moduleId}
-                                                                handleNewChat={handleNewChat}
-                                                            />
-                                                        ))}
+                                                    <h2 
+                                                        className="flex-grow text-lg font-semibold text-text-light dark:text-text-dark truncate"
+                                                        title={path.title}
+                                                    >
+                                                        {path.title}
+                                                    </h2>
+                                                    <div className="flex-shrink-0 ml-4 flex items-center gap-2">
+                                                        <span className={`text-xs font-medium ${statusColor}`}>
+                                                            {statusText}
+                                                        </span>
+                                                        <IconButton
+                                                            icon={Trash2}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation(); // Prevent card selection
+                                                                setPlanToDelete(path);
+                                                                setShowDeleteConfirmModal(true);
+                                                            }}
+                                                            title="Delete Study Plan"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                                        />
                                                     </div>
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                                </div>
+                                                {/* <<< MODIFIED: Removed the AnimatePresence and module display from here */}
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </motion.div>
                     )}
+                    </AnimatePresence>
                 </div>
             </main>
+            
+            {/* Modals remain at the root level */}
+            <Modal isOpen={showCreatePlanModal} onClose={() => setShowCreatePlanModal(false)} title="Generate New Study Plan" size="lg">
+                <CreatePlan onPlanCreated={() => { fetchPaths(); setShowCreatePlanModal(false); }} />
+            </Modal>
+
+            <Modal
+                isOpen={showDeleteConfirmModal}
+                onClose={() => setShowDeleteConfirmModal(false)}
+                title="Confirm Deletion"
+                size="sm"
+                footerContent={
+                    <>
+                        <Button variant="secondary" onClick={() => setShowDeleteConfirmModal(false)}>Cancel</Button>
+                        <Button variant="danger" onClick={handleDeletePlan}>Delete</Button>
+                    </>
+                }
+            >
+                <p className="text-center text-text-light dark:text-text-dark text-lg py-4">
+                    Are you sure you want to delete the study plan "{planToDelete?.title}"?
+                    This action cannot be undone.
+                </p>
+            </Modal>
         </div>
     );
 };
-
 export default StudyPlanPage;
 ```
 
@@ -16490,12 +16748,57 @@ export const useWebSpeech = () => {
       transparent 80%
     );
   }
+
+
+.code-block-copy-button {
+  @apply absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200;
+  @apply opacity-0 group-hover:opacity-100; /* Will be triggered by parent .prose pre:hover */
 }
 
+.code-block-copy-button:hover {
+  @apply bg-gray-600/90 text-white;
+}
+
+html.light .code-block-copy-button {
+  @apply bg-gray-200/80 text-text-muted-light;
+}
+
+html.light .code-block-copy-button:hover {
+  @apply bg-gray-300/90 text-text-light;
+}
+
+.prose pre {
+  @apply relative;
+}
+
+@property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.animated-border-button {
+  @apply relative z-0 inline-flex items-center justify-center overflow-hidden rounded-full;
+  background: conic-gradient(from var(--angle), #FFA000, #FF4500, #FFA000);
+  animation: spin-border 4s linear infinite; 
+  padding: 2px; 
+}
+
+.animated-border-button > span {
+  @apply block rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold px-5 py-2.5; /* Match padding to button content */
+  background: none;
+}
+
+.animated-border-button:hover > span {
+  @apply from-orange-600 to-red-600; 
+}
+}
+
+
+
+
+
 @layer utilities {
-  /* This is now a single, clean utilities layer */
-  
-  /* Keyframes for the border rotation */
   @keyframes spin-border {
     0% { --angle: 0deg; }
     100% { --angle: 360deg; }
@@ -16819,9 +17122,10 @@ const api = {
     const response = await apiClient.get("/chat/sessions");
     return response.data;
   },
-  startNewSession: async (previousSessionId) => {
+  startNewSession: async (previousSessionId, skipAnalysis = false) => {
     const response = await apiClient.post("/chat/history", {
       previousSessionId,
+      skipAnalysis
     });
     return response.data;
   },
@@ -16911,7 +17215,7 @@ const api = {
         });
         return {
           content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-          thinking: "No analysis data found in the database for this type.",
+          thinking: "No analysis data found in  the database for this type.",
         };
       }
       const { content, thinking } = parseAnalysisOutput(rawOutput);
@@ -16975,37 +17279,37 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+    return response.data;
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
-    return response.data; // Should be { analysis: "..." }
+    return response.data;
   },
   generateTestCases: async (payload) => {
     const response = await apiClient.post(
       "/tools/generate-test-cases",
       payload
     );
-    return response.data; // Should be { testCases: [...] }
+    return response.data;
   },
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
-    return response.data; // Should be { explanation: "..." }
+    return response.data;
   },
   getRecommendations: async (sessionId) => {
     const response = await apiClient.get(
       `/learning/recommendations/${sessionId}`
     );
-    return response.data; // Should be { recommendations: [...] }
+    return response.data;
   },
 
   findDocumentForTopic: async (topic) => {
     const response = await apiClient.post("/learning/find-document", { topic });
-    return response.data; // Should be { documentName: "..." }
+    return response.data;
   },
   getLearningPaths: async () => {
     const response = await apiClient.get("/learning/paths");
-    return response.data; // Should be an array of learning path objects
+    return response.data;
   },
 
   generateLearningPath: async (goal, context = null) => {
@@ -17013,7 +17317,7 @@ const api = {
       goal,
       context,
     });
-    return response.data; // Should be the newly created learning path object
+    return response.data;
   },
 
   updateModuleStatus: async (pathId, moduleId, status) => {
@@ -17021,7 +17325,7 @@ const api = {
       `/learning/paths/${pathId}/modules/${moduleId}`,
       { status }
     );
-    return response.data; // Should be the entire updated learning path object
+    return response.data;
   },
 
   generateQuiz: async (file, quizOption) => {
@@ -17052,6 +17356,10 @@ const api = {
   getIntegrityReport: async (reportId) => {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
     return response.data; // Expects the full report object with status updates
+  },
+  deleteLearningPath: async (pathId) => {
+    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+    return response.data;
   },
 };
 
@@ -17252,6 +17560,10 @@ export default {
         shimmerSweep: {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
+        },
+        'spin-border': {
+          '0%': { '--angle': '0deg' },
+          '100%': { '--angle': '360deg' },
         }
       },
       animation: {
@@ -17261,6 +17573,7 @@ export default {
         pulseDot2: 'pulseDots 1.4s infinite 0.2s ease-in-out',
         pulseDot3: 'pulseDots 1.4s infinite 0.4s ease-in-out',
         shimmerSweep: 'shimmerSweep 1.5s linear infinite',
+        'spin-border': 'spin-border 4s linear infinite',
       }
     },
   },
@@ -17741,14 +18054,23 @@ const CHAT_USER_PROMPT_TEMPLATES = {
 // === ToT Orchestrator  ===
 // ==============================================================================
 const PLANNER_PROMPT_TEMPLATE = `
-You are a meticulous AI planning agent. Your task is to analyze the user's query and generate 2-3 distinct, logical, step-by-step plans to answer it.
+You are a meticulous AI planning agent. Your task is to analyze the user's query and generate 4-5 distinct, logical, step-by-step plans to answer it.
 
 **User Query:** "{userQuery}"
 
+**AVAILABLE TOOLS (for your reference when selecting tool_call):**
+{available_tools_json}
+
+**CURRENT_MODE_INSTRUCTIONS (CRITICAL: Adhere to these strictly for your tool_call decisions):**
+{current_mode_tool_instruction}
+
 **Instructions:**
-1.  Create 2-3 unique plans. Each plan should have a descriptive "name".
-2.  Each plan must contain a list of "steps". Each step should be a clear, single-sentence instruction for a research agent (e.g., "Search the web for recent reviews of product X," "Analyze the provided document for mentions of 'cost analysis'").
-3.  Your entire output MUST be a single, valid JSON object containing a "plans" array. Do not provide any other text or explanation.
+1.  Create 4-5 unique plans. Each plan should have a descriptive "name".
+2.  Each plan must contain a list of "steps". Each step should be a clear, concise instruction for an executor.
+3.  For EACH step, you MUST include a "tool_call" field.
+    *   If the step requires using one of the "AVAILABLE TOOLS", set \`tool_call\` to an object: \`{"tool_name": "the_tool_name_you_chose", "parameters": {"query": "The exact parameter string for the tool"}}\`.
+    *   If the step can be answered directly using general knowledge (no specific tool needed), set \`tool_call\` to \`null\`.
+4.  Your entire output MUST be a single, valid JSON object containing a "plans" array. Do not provide any other text or explanation outside the JSON.
 
 **Example JSON Output Format:**
 \`\`\`json
@@ -17757,20 +18079,31 @@ You are a meticulous AI planning agent. Your task is to analyze the user's query
     {
       "name": "Comprehensive Research Plan",
       "steps": [
-        "First, search internal documents for foundational concepts related to the query.",
-        "Second, perform a web search for the latest real-world applications.",
-        "Finally, synthesize the findings from both internal and external sources."
+        {
+          "description": "First, search internal documents for foundational concepts related to the query.",
+          "tool_call": {"tool_name": "rag_search", "parameters": {"query": "foundational concepts of {userQuery}"}}
+        },
+        {
+          "description": "Second, perform a web search for the latest real-world applications.",
+          "tool_call": {"tool_name": "web_search", "parameters": {"query": "latest real-world applications of {userQuery}"}}
+        },
+        {
+          "description": "Finally, synthesize the findings from all sources.",
+          "tool_call": null
+        }
       ]
     },
     {
-      "name": "Quick Answer Plan",
+      "name": "Quick Direct Answer Plan",
       "steps": [
-        "Perform a direct web search for the user's query to find an immediate answer."
+        {
+          "description": "Provide a concise direct answer based on general knowledge.",
+          "tool_call": null
+        }
       ]
     }
   ]
 }
-\`\`\`
 
 Provide your JSON response now.
 `;
@@ -17985,17 +18318,26 @@ ${toolOutput}
 **YOUR COMPLETE, STRUCTURED RESPONSE:**
 `;
     }
-    else { // For RAG, KG, Academic, and other tools
+    else { // For RAG, KG, Tree of Thought, and other tools
         synthesizerUserMessage = `
+You are an expert AI Tutor and Synthesizer. You have just completed a multi-step research plan to answer the user's query. The key findings from your research are provided below.
+
+**YOUR FINAL TASK:**
+Your task is to now write a new, comprehensive, and well-structured final answer that directly addresses the **USER'S ORIGINAL QUERY**.
+- **USE THE GATHERED INFORMATION:** Use the "INFORMATION GATHERED" as your primary source of facts and context.
+- **EXPAND AND ELABORATE:** Do NOT simply copy the gathered information. You must synthesize it, connect the concepts, add clarifying details, and present it in a flowing, narrative style as if you are teaching the topic from scratch.
+- **ADHERE TO FORMATTING:** Follow all formatting rules (Markdown, KaTeX, etc.) from your core instructions.
+
+---
 **USER'S ORIGINAL QUERY:**
 "${originalQuery}"
 
 ---
-**INFORMATION GATHERED BY TOOL ('${toolName}'):**
+**INFORMATION GATHERED (Your research findings):**
 ${toolOutput}
 ---
 
-Based **only** on the information gathered by the tool above, please provide a comprehensive, well-formatted final answer to my original query. Adhere to all formatting rules from your core instructions. Do not mention that a tool was used and do not include citation markers like [1], [2].
+Provide your final, comprehensive, and well-formatted answer now.
 `;
     }
     return synthesizerUserMessage;
@@ -25106,7 +25448,6 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
-
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -25215,10 +25556,11 @@ router.post('/message', async (req, res) => {
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: false, new: true }
+                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
             );
-            if (finalBotMessageObject) {
-                extractAndStoreKgFromText(finalBotMessageObject.text, sessionId, userId, llmConfig);
+
+            if (totResult.finalAnswer) {
+                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
             }
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
             res.end();
@@ -25239,11 +25581,11 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues // Add cues for client
+                criticalThinkingCues: criticalThinkingCues
             };
             
             const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+            delete aiMessageForDb.criticalThinkingCues;
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
@@ -25270,7 +25612,7 @@ router.post('/message', async (req, res) => {
 });
 
 router.post('/history', async (req, res) => {
-    const { previousSessionId } = req.body;
+    const { previousSessionId, skipAnalysis } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
     
@@ -25282,7 +25624,7 @@ router.post('/history', async (req, res) => {
     };
 
     try {
-        if (previousSessionId) {
+        if (previousSessionId && !skipAnalysis) {
             const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
             
             if (previousSession && previousSession.messages?.length > 1) {
@@ -26740,6 +27082,32 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
 });
 
 
+// @route   DELETE /api/learning/paths/:pathId
+// @desc    Delete a learning path for the authenticated user.
+// @access  Private
+router.delete('/:pathId', async (req, res) => {
+    const { pathId } = req.params;
+    const userId = req.user._id;
+
+    try {
+        // Find and delete the learning path, ensuring it belongs to the current user
+        const result = await LearningPath.deleteOne({ _id: pathId, userId: userId });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Learning path not found or you do not have permission to delete it.' });
+        }
+
+        // Also remove the reference from the User's learningPaths array (optional but good cleanup)
+        await User.updateOne({ _id: userId }, { $pull: { learningPaths: pathId } });
+
+        res.status(200).json({ message: 'Learning path deleted successfully.' });
+    } catch (error) {
+        console.error(`[API Error] Failed to delete learning path ${pathId} for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error while deleting learning path.' });
+    }
+});
+
+
 module.exports = router;
 ```
 
@@ -28032,7 +28400,7 @@ module.exports = {
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-2.5-pro";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
 const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
@@ -28875,13 +29243,13 @@ async function generateContentWithHistory(
     }
     // --- END OF FIX ---
 
-    console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}.`);
+    // console.log(`Ollama Service: Sending request to ${endpoint} for model ${modelToUse}.`);
 
-    console.log("\n==================== START OLLAMA FINAL INPUT ====================");
-    console.log(`--- Endpoint: ${endpoint} ---`);
-    console.log("--- Request Payload Sent to Model ---");
-    console.log(JSON.stringify(requestPayload, null, 2));
-    console.log("==================== END OLLAMA FINAL INPUT ====================\n");
+    // console.log("\n==================== START OLLAMA FINAL INPUT ====================");
+    // console.log(`--- Endpoint: ${endpoint} ---`);
+    // console.log("--- Request Payload Sent to Model ---");
+    // console.log(JSON.stringify(requestPayload, null, 2));
+    // console.log("==================== END OLLAMA FINAL INPUT ====================\n");
 
     
     try {
@@ -29415,7 +29783,8 @@ module.exports = { availableTools };
 const { processAgenticRequest } = require('./agentService');
 const geminiService = require('./geminiService');
 const ollamaService = require('./ollamaService');
-const { PLANNER_PROMPT_TEMPLATE, EVALUATOR_PROMPT_TEMPLATE, createSynthesizerPrompt } = require('../config/promptTemplates');
+const { availableTools } = require('./toolRegistry');
+const { PLANNER_PROMPT_TEMPLATE, EVALUATOR_PROMPT_TEMPLATE, createSynthesizerPrompt, CHAT_MAIN_SYSTEM_PROMPT } = require('../config/promptTemplates');
 
 async function isQueryComplex(query) {
     const isComplex = (query.match(/\?/g) || []).length > 1 || query.split(' ').length > 20;
@@ -29425,14 +29794,42 @@ async function isQueryComplex(query) {
 
 async function generatePlans(query, requestContext) {
     console.log('[ToT] Step 2: Planner. Generating plans via LLM...');
-    const { llmProvider, ...llmOptions } = requestContext;
+    const { llmProvider, isWebSearchEnabled, isAcademicSearchEnabled, documentContextName, ...llmOptions } = requestContext;
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
 
-    const plannerPrompt = PLANNER_PROMPT_TEMPLATE.replace("{userQuery}", query);
+    const modelContext = require('../protocols/contextProtocols').createModelContext({ availableTools });
+    
+    let currentModeInstruction = "";
+    let enforcedTool = null;
+
+    if (isWebSearchEnabled) {
+        enforcedTool = "web_search";
+        currentModeInstruction = `The user has explicitly enabled Web Search. Therefore, ALL steps in ALL plans MUST use the 'web_search' tool. Do NOT use 'rag_search', 'academic_search', or 'direct_answer' tools. For every step, your tool_call MUST be 'web_search' with the appropriate parameters.`;
+    } else if (isAcademicSearchEnabled) {
+        enforcedTool = "academic_search";
+        currentModeInstruction = `The user has explicitly enabled Academic Search. Therefore, ALL steps in ALL plans MUST use the 'academic_search' tool. Do NOT use 'rag_search', 'web_search', or 'direct_answer' tools. For every step, your tool_call MUST be 'academic_search' with the appropriate parameters.`;
+    } else if (documentContextName) {
+        enforcedTool = "rag_search";
+        currentModeInstruction = `The user has selected a document for RAG search: "${documentContextName}". Therefore, ALL steps in ALL plans MUST use the 'rag_search' tool. Do NOT use 'web_search', 'academic_search', or 'direct_answer' tools. For every step, your tool_call MUST be 'rag_search' with the appropriate parameters, specifying the document context if applicable.`;
+    } else {
+        currentModeInstruction = `No specific tool mode is enforced by the user. For each step, analyze its description and decide the BEST tool to use ('web_search', 'academic_search') or if a 'direct_answer' (tool_call: null) is most appropriate for that specific sub-task.
+
+        **CRITICAL RULES FOR TOOL SELECTION IN DEFAULT MODE (Adhere to these strictly):**
+        1.  **Prioritize Direct Answer:** Unless a step explicitly requires *real-time external information* (for 'web_search') or *scholarly papers* (for 'academic_search'), your default choice for tool_call should be \`null\` (for a direct answer using the LLM's internal knowledge). Do not use 'web_search' or 'academic_search' for general definitions, common knowledge, or concepts that the AI should inherently know.
+        2.  **Limit External Searches (Maximum One of Each):** In any single plan, you should generate a maximum of **one** 'web_search' tool call and a maximum of **one** 'academic_search' tool call. If a plan requires multiple external searches, use only the most critical one of each type. This constraint applies UNLESS the user's original query explicitly asks for multiple, distinct web or academic searches (e.g., "Find 3 different websites about X"). If the user's original query directly states multiple unique search needs, you may exceed this limit for those specific, explicit requirements.
+        3.  **Tool-Specific Queries:** When using 'web_search' or 'academic_search', ensure the 'parameters.query' is very specific and optimized for that search.
+        4.  **No RAG Search:** Do NOT use 'rag_search' as a tool when no document is selected by the user.
+        `;
+    }
+
+    const plannerPrompt = PLANNER_PROMPT_TEMPLATE
+        .replace("{userQuery}", query)
+        .replace("{available_tools_json}", JSON.stringify(modelContext.available_tools, null, 2))
+        .replace("{current_mode_tool_instruction}", currentModeInstruction);
 
     try {
         const responseText = await llmService.generateContentWithHistory(
-            [], plannerPrompt, "You are a planning agent.", llmOptions
+            [], plannerPrompt, "You are a meticulous AI planning agent.", llmOptions
         );
         const jsonMatch = responseText.match(/```(json)?\s*([\s\S]+?)\s*```/);
         const jsonString = jsonMatch ? jsonMatch[2] : responseText;
@@ -29441,7 +29838,29 @@ async function generatePlans(query, requestContext) {
         if (parsedResponse.plans && Array.isArray(parsedResponse.plans) && parsedResponse.plans.length > 0) {
             parsedResponse.plans.forEach(plan => {
                 if (plan.steps && Array.isArray(plan.steps)) {
-                    plan.steps = plan.steps.map(step => (typeof step === 'object') ? JSON.stringify(step) : String(step));
+                    plan.steps = plan.steps.map(step => {
+                        if (typeof step === 'string') {
+                            step = { description: step, tool_call: null };
+                        }
+                        
+                        if (enforcedTool) {
+                            return {
+                                description: step.description,
+                                tool_call: {
+                                    tool_name: enforcedTool,
+                                    parameters: { query: step.description } 
+                                }
+                            };
+                        }
+
+                        if (step.tool_call) {
+                            if (typeof step.tool_call !== 'object' || !step.tool_call.tool_name || !step.tool_call.parameters) {
+                                console.warn(`[ToT Planner] Invalid tool_call structure for step:`, step);
+                                step.tool_call = null; // Invalidate if malformed
+                            }
+                        }
+                        return step;
+                    });
                 }
             });
             console.log(`[ToT] Planner: Successfully generated and validated ${parsedResponse.plans.length} plans.`);
@@ -29449,12 +29868,14 @@ async function generatePlans(query, requestContext) {
         }
     } catch (error) {
         console.error(`[ToT] Planner: LLM call failed or returned invalid JSON. Error: ${error.message}. Falling back to default plan.`);
+        // Ensure fallback plan also matches the new step object format, applying enforcement if needed
+        const defaultToolCall = enforcedTool ? 
+            { tool_name: enforcedTool, parameters: { query: query } } : null; // Apply enforcement to fallback too
+        return [{
+            name: "Default Direct Answer Plan",
+            steps: [{ description: `Directly address the user's query: "${query}"`, tool_call: defaultToolCall }]
+        }];
     }
-
-    return [{
-        name: "Default Direct Search Plan",
-        steps: [`Directly address the user's query: "${query}"`]
-    }];
 }
 
 async function evaluatePlans(plans, query, requestContext) {
@@ -29495,33 +29916,92 @@ async function evaluatePlans(plans, query, requestContext) {
 }
 
 
+
 async function executePlan(winningPlan, originalQuery, requestContext, streamCallback) {
     console.log('[ToT] Step 4: Executor. Starting execution of plan...');
     let collectedContexts = [];
-    let collectedReferences = [];
     let cumulativeContext = ""; 
+    const uniqueReferences = new Map();
 
     for (let i = 0; i < winningPlan.steps.length; i++) {
-        const stepDescription = winningPlan.steps[i];
-        
-        const systemPromptForStep = `You are one step in a multi-step reasoning plan.
-Original User Query: "${originalQuery}"
+        const step = winningPlan.steps[i]; // 'step' is now an object { description, tool_call }
+        const stepDescription = step.description;
+        const stepToolCall = step.tool_call; // This will be null for direct answers or an object for tools
 
---- PREVIOUS CONTEXT (Memory from prior steps) ---
-${cumulativeContext || "This is the first step, so there is no previous context."}
---- END PREVIOUS CONTEXT ---
+        let agentResponse; // This will hold the result of the tool execution or direct answer
 
-Your Specific Sub-Task for THIS step is: "${stepDescription}"
+        // --- MODIFICATION START: Direct Tool Execution Logic ---
+        if (stepToolCall && stepToolCall.tool_name) {
+            // This step requires a specific tool as decided by the Planner
+            const toolName = stepToolCall.tool_name;
+            const toolParams = stepToolCall.parameters;
 
-Use the PREVIOUS CONTEXT if it's relevant to complete your sub-task.
-`;
+            const tool = availableTools[toolName]; // Access from the availableTools import
+            if (!tool) {
+                console.error(`[ToT Executor] Planner specified unknown tool: ${toolName}. Falling back to direct answer.`);
+                // Fallback if Planner hallucinated a tool
+                agentResponse = {
+                    finalAnswer: `I attempted to use a tool called '${toolName}' but it doesn't exist. Please try again or refine your query.`,
+                    thinking: null,
+                    references: [],
+                    sourcePipeline: `tot-error-unknown-tool`
+                };
+            } else {
+                try {
+                    console.log(`[ToT Executor] Executing Planner-selected tool: ${toolName} with params:`, toolParams);
+                    // Dynamically execute the tool, passing necessary context
+                    const toolResult = await tool.execute(toolParams, requestContext); 
+                    
+                    // Format tool output for 'finalAnswer' and 'thinking' fields in agentResponse structure
+                    agentResponse = {
+                        finalAnswer: toolResult.toolOutput || `No specific output from ${toolName}.`,
+                        thinking: `Successfully executed tool: ${toolName}.`,
+                        references: toolResult.references || [],
+                        sourcePipeline: `tot-planner-${toolName}`
+                    };
 
-        const agentResponse = await processAgenticRequest(
-            stepDescription,     
-            [],                
-            systemPromptForStep,
-            requestContext
-        );
+                } catch (toolError) {
+                    console.error(`[ToT Executor] Error executing Planner-selected tool '${toolName}':`, toolError);
+                    agentResponse = {
+                        finalAnswer: `I attempted to use the '${toolName}' tool as planned, but it failed. Error: ${toolError.message}.`,
+                        thinking: null,
+                        references: [],
+                        sourcePipeline: `tot-error-tool-failed`
+                    };
+                }
+            }
+        } else {
+            // This step is a 'direct_answer' as decided by the Planner (tool_call is null)
+            console.log(`[ToT Executor] Performing direct answer for step: "${stepDescription}"`);
+            
+            // Use a simplified direct answer approach, as agentService does for 'forceSimple'
+            // Need the LLM Service and options from requestContext
+            const llmService = requestContext.llmProvider === 'ollama' ? ollamaService : geminiService;
+            const llmOptions = { 
+                model: requestContext.ollamaModel, 
+                apiKey: requestContext.apiKey, 
+                ollamaUrl: requestContext.ollamaUrl 
+            };
+
+            const directAnswerText = await llmService.generateContentWithHistory(
+                [], // No history here, each step is self-contained for execution
+                stepDescription, // The prompt for this step
+                CHAT_MAIN_SYSTEM_PROMPT(), // Use the main system prompt for direct answers
+                llmOptions
+            );
+            
+            const thinkingMatch = directAnswerText.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+            const thinking = thinkingMatch ? thinkingMatch[1].trim() : null;
+            const mainContent = thinking ? directAnswerText.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, "").trim() : directAnswerText;
+
+            agentResponse = {
+                finalAnswer: mainContent,
+                thinking: thinking,
+                references: [],
+                sourcePipeline: `tot-planner-direct-answer`
+            };
+        }
+        // --- MODIFICATION END ---
 
         const monologue = agentResponse.thinking || `The step was executed, but no detailed thinking was provided.`;
         const thoughtContent = `**Step ${i + 1}/${winningPlan.steps.length}: ${stepDescription}**\n*Thinking:* ${monologue}\n\n`;
@@ -29534,15 +30014,29 @@ Use the PREVIOUS CONTEXT if it's relevant to complete your sub-task.
 
         cumulativeContext += stepResult + "\n\n";
 
+        // Add new, unique references to our map. Using URL as the key for de-duplication.
         if (agentResponse.references && agentResponse.references.length > 0) {
-            collectedReferences.push(...agentResponse.references);
+            agentResponse.references.forEach(ref => {
+                if (ref.url && !uniqueReferences.has(ref.url)) {
+                    uniqueReferences.set(ref.url, ref);
+                } else if (!ref.url && ref.source && !uniqueReferences.has(ref.source)) {
+                    // Fallback to source text for de-duplication if URL is missing
+                    uniqueReferences.set(ref.source, ref);
+                }
+            });
         }
     }
-
-    console.log(`[ToT] Step 4: Executor. All steps executed. Collected ${collectedReferences.length} references.`);
+    
+    const allReferences = Array.from(uniqueReferences.values()).map((ref, index) => ({
+        ...ref,
+        number: index + 1
+    }));
+    
+    console.log(`[ToT] Step 4: Executor. All steps executed. Collected ${allReferences.length} de-duplicated references.`);
+    
     return {
         finalContext: collectedContexts.join('\n\n'),
-        allReferences: collectedReferences
+        allReferences: allReferences
     };
 }
 
@@ -29555,8 +30049,10 @@ async function synthesizeFinalAnswer(originalQuery, finalContext, chatHistory, r
         originalQuery, finalContext, 'tree_of_thought_synthesis'
     );
 
+    const finalSystemPrompt = CHAT_MAIN_SYSTEM_PROMPT();
+
     const finalAnswer = await llmService.generateContentWithHistory(
-        chatHistory, synthesizerUserQuery, requestContext.systemPrompt, llmOptions
+        chatHistory, synthesizerUserQuery, finalSystemPrompt, llmOptions
     );
     return finalAnswer;
 }

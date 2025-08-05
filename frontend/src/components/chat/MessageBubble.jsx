@@ -1,5 +1,4 @@
-// src/components/chat/MessageBubble.jsx
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
 import toast from 'react-hot-toast';
@@ -22,6 +21,11 @@ const createMarkup = (markdownText) => {
     rawHtml = renderMathInHtml(rawHtml);
     const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true, mathMl: true, svg: true } });
     return { __html: cleanHtml };
+};
+
+const escapeHtml = (unsafe) => {
+    if (typeof unsafe !== 'string') return '';
+    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, `"`).replace(/'/g, "'");
 };
 
 const AnimatedThinking = ({ content }) => {
@@ -56,83 +60,131 @@ const AnimatedThinking = ({ content }) => {
     );
 };
 
-const escapeHtml = (unsafe) => {
-    if (typeof unsafe !== 'string') return '';
-    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, `"`).replace(/'/g, "'");
+const CodeBlockWithCopyButton = ({ children, codeText, key }) => {
+    const [copied, setCopied] = useState(false);
+    const codeRef = useRef(null);
+
+    useEffect(() => {
+        if (codeRef.current) {
+            Prism.highlightAllUnder(codeRef.current);
+        }
+    }, [children]);
+
+    const handleCopyCode = () => {
+        navigator.clipboard.writeText(codeText).then(() => {
+            setCopied(true);
+            toast.success('Code copied!');
+            setTimeout(() => setCopied(false), 1500);
+        }).catch(err => {
+            toast.error('Failed to copy code.');
+            console.error('Failed to copy code:', err);
+        });
+    };
+
+    return (
+        <div className="relative group/code" ref={codeRef} key={key}>
+            <div dangerouslySetInnerHTML={{ __html: children }} /> 
+            <button
+                onClick={handleCopyCode}
+                title={copied ? 'Copied!' : 'Copy code'}
+                disabled={copied}
+                className="absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200 opacity-0 group-hover/code:opacity-100"
+            >
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                        key={copied ? 'check' : 'copy'}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={{ duration: 0.15 }}
+                    >
+                        {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                    </motion.span>
+                </AnimatePresence>
+            </button>
+        </div>
+    );
+};
+
+const parseAndRenderMarkdown = (markdownText, messageId) => {
+    if (!markdownText) return [];
+
+    let htmlString = createMarkup(markdownText).__html;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlString, 'text/html');
+
+    const resultNodes = [];
+    let currentHtmlBuffer = '';
+
+    const flushHtmlBuffer = () => {
+        if (currentHtmlBuffer) {
+            resultNodes.push(
+                <div key={`html-${messageId}-${resultNodes.length}-${Math.random().toString(36).substring(2,9)}`} 
+                     dangerouslySetInnerHTML={{ __html: currentHtmlBuffer }} />
+            );
+            currentHtmlBuffer = '';
+        }
+    };
+
+    const traverse = (node) => {
+        if (!node) return;
+
+        if (node.nodeName === 'PRE') {
+            flushHtmlBuffer();
+
+            const codeElement = node.querySelector('code');
+            const codeText = codeElement ? codeElement.textContent : '';
+            const preOuterHtml = node.outerHTML;
+
+            resultNodes.push(
+                <CodeBlockWithCopyButton 
+                    key={`code-${messageId}-${resultNodes.length}-${Math.random().toString(36).substring(2,9)}`}
+                    codeText={codeText}
+                >
+                    {preOuterHtml}
+                </CodeBlockWithCopyButton>
+            );
+            return; 
+        } 
+        
+        if (node.nodeType === Node.TEXT_NODE) {
+            currentHtmlBuffer += node.nodeValue;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            currentHtmlBuffer += node.outerHTML; 
+            return; 
+        }
+
+        Array.from(node.childNodes).forEach(traverse);
+    };
+
+    Array.from(doc.body.children).forEach(traverse);
+    
+    flushHtmlBuffer();
+
+    return resultNodes;
 };
 
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, id: messageId }) {    
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const contentRef = useRef(null);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
-
+    
     const [isCopied, setIsCopied] = useState(false);
     const mainContent = text || '';
     const thinkingContent = thinking;
     const showThinkingDropdown = !isUser && thinkingContent !== null;
 
     useEffect(() => {
-        // This function encapsulates the logic for Prism highlighting and button attachment.
-        const processContent = () => {
-            // Ensure contentRef is available, content is not empty, and streaming has finished.
-            if (!contentRef.current || !mainContent || isStreaming) {
-                return;
-            }
-
-            // --- Existing Prism Highlighting Logic ---
-            // Ensure Prism highlights the code blocks once content is stable
-            Prism.highlightAllUnder(contentRef.current);
-            // --- End Existing Logic ---
-
-            // --- REFINED: CODE BLOCK COPY BUTTON LOGIC ---
-            const codeBlocks = contentRef.current.querySelectorAll('pre');
-            codeBlocks.forEach((preElement, index) => {
-                // Prevent adding multiple buttons if effect runs more than once without cleanup
-                if (preElement.querySelector('.code-block-copy-button')) {
-                    return;
-                }
-
-                const copyButton = document.createElement('button');
-                copyButton.className = 'code-block-copy-button';
-                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`;
-                copyButton.title = 'Copy code';
-
-                copyButton.onclick = () => {
-                    const codeContent = preElement.querySelector('code')?.textContent || '';
-                    if (codeContent) {
-                        navigator.clipboard.writeText(codeContent).then(() => {
-                            copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check text-green-500"><path d="M20 6 9 17l-5-5"/></svg>`; // Check icon
-                            toast.success('Code copied!', { id: `copy-toast-${messageId}-${index}` });
-                            setTimeout(() => {
-                                copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v2"/></svg>`; // Reset to copy icon
-                            }, 1500);
-                        }).catch(err => {
-                            toast.error('Failed to copy code.', { id: `copy-toast-error-${messageId}-${index}` });
-                            console.error('Failed to copy code:', err);
-                        });
-                    }
-                };
-                preElement.appendChild(copyButton);
-            });
-            // --- END REFINED LOGIC ---
-        };
-
-        // Use a small timeout to ensure React has fully rendered the HTML content
-        // from dangerouslySetInnerHTML before we query the DOM.
-        const delayProcessing = setTimeout(processContent, 150); // Increased delay slightly for robustness
-
-        // Cleanup function: This runs when the component unmounts or before the effect re-runs
-        return () => {
-            clearTimeout(delayProcessing); // Clear any pending timeouts
-            // Remove any dynamically added buttons to prevent duplicates
-            if (contentRef.current) {
-                const existingButtons = contentRef.current.querySelectorAll('.code-block-copy-button');
-                existingButtons.forEach(button => button.remove());
-            }
-        };
-    }, [isStreaming, mainContent, messageId]);
+        if (contentRef.current && !isStreaming) {
+            const timer = setTimeout(() => {
+                Prism.highlightAllUnder(contentRef.current);
+            }, 50);
+            return () => clearTimeout(timer);
+        }
+    }, [isStreaming, mainContent]);
 
     const handleCopy = () => {
         if (isCopied) return;
@@ -140,7 +192,7 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
         navigator.clipboard.writeText(plainTextToCopy).then(() => {
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 1000);
-            toast.success('Message copied!'); // Add toast notification for overall message copy
+            toast.success('Message copied!');
         }).catch(err => {
             toast.error('Failed to copy message.');
             console.error('Failed to copy message:', err);
@@ -181,14 +233,13 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                 ) : (
                     <div className={`message-bubble relative p-3 rounded-2xl shadow-md break-words ${
                         isUser 
-                        ? 'bg-primary dark:bg-primary-dark text-white rounded-br-lg' 
+                        ? 'bg-surface-light text-text-light border border-border-light dark:bg-primary-dark dark:text-white dark:border-transparent rounded-br-lg' 
                         : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
                     }`}>
-                        <div 
-                            ref={contentRef} 
-                            className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" 
-                            dangerouslySetInnerHTML={createMarkup(mainContent)} 
-                        />
+                        <div ref={contentRef} className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed">
+                            {parseAndRenderMarkdown(mainContent, messageId)}
+                        </div>
+
                         <div className="flex items-center justify-end mt-1.5 text-xs gap-1">
                             <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
                                 <AnimatePresence mode="wait" initial={false}>
@@ -211,7 +262,7 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
 
             {!isStreaming && !isUser && references && references.length > 0 && (
                 <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     <details className="group/details text-xs">
+                    <details className="group/details text-xs">
                         <summary className="flex items-center justify-between gap-1 cursor-pointer text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
                             <span className="flex items-center gap-1">
                                 <LinkIcon size={14} /> References
@@ -220,7 +271,11 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                         </summary>
                         <ul className="mt-1 pl-1 space-y-0.5 text-[0.7rem]">
                             {references.map((ref, index) => (
-                                <li key={index} className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate" title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source)}`}>
+                                <li 
+                                    key={index} 
+                                    className="text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-text-dark transition-colors truncate"
+                                    title={`Preview: ${escapeHtml(ref.content_preview || '')}\nSource: ${escapeHtml(ref.source || '')}`}
+                                >
                                     <span className="font-semibold text-accent">[{ref.number}]</span> {escapeHtml(ref.source)}
                                 </li>
                             ))}
@@ -251,23 +306,22 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                                     className="text-xs bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-1 rounded-full hover:bg-amber-500/20 dark:hover:bg-amber-500/30 transition-colors"
                                 >
                                     {criticalThinkingCues.alternativePrompt}
-                                </button>
-                            )}
-                            {criticalThinkingCues.applicationPrompt && (
-                                <button
-                                    onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
-                                    className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.applicationPrompt}
-                                </button>
-                            )}
+                                    </button>
+                                )}
+                                {criticalThinkingCues.applicationPrompt && (
+                                    <button
+                                        onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
+                                        className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
+                                    >
+                                        {criticalThinkingCues.applicationPrompt}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
-    );
-}
+                )}
+            </div>
+        );
+    }
 
-
-export default MessageBubble;
+export default memo(MessageBubble);
