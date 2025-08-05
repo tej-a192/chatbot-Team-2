@@ -4,7 +4,6 @@ import MessageBubble from './MessageBubble';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function ChatHistory({ messages, onCueClick }) {
-    
     const chatHistoryRef = useRef(null);
     useEffect(() => {
         if (chatHistoryRef.current) {
@@ -22,20 +21,15 @@ function ChatHistory({ messages, onCueClick }) {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10, transition: { duration: 0.15 } }}
-                        transition={{ duration: 0.3, ease: "easeOut" }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
                     >
+                        {/* --- THIS IS THE FIX --- */}
+                        {/* We now pass the entire `msg` object down to MessageBubble */}
                         <MessageBubble
-                            id={msg.id}
-                            sender={msg.sender}
-                            text={msg.text}
-                            thinking={msg.thinking}
-                            references={msg.references}
-                            timestamp={msg.timestamp}
-                            sourcePipeline={msg.source_pipeline}
-                            isStreaming={msg.isStreaming}
-                            criticalThinkingCues={msg.criticalThinkingCues}
+                            msg={msg}
                             onCueClick={onCueClick}
                         />
+                        {/* --- END OF FIX --- */}
                     </motion.div>
                 ))}
             </AnimatePresence>

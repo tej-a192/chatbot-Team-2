@@ -20,6 +20,7 @@ const {
 const { connectRedis } = require("./config/redisClient");
 
 // --- Route Imports ---
+
 const networkRoutes = require("./routes/network");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
@@ -37,7 +38,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
-
+const downloadRoutes = require('./routes/download'); 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
 const mongoUri = process.env.MONGO_URI;
@@ -85,6 +86,7 @@ app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
+app.use('/api/download', downloadRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);

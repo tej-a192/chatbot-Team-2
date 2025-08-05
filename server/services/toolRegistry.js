@@ -2,8 +2,10 @@
 const { performWebSearch } = require('./webSearchService.js');
 const { queryPythonRagService, queryKgService } = require('./toolExecutionService.js');
 const axios = require('axios');
+const documentGenerationService = require('./documentGenerationService.js'); // <-- ADD THIS IMPORT
 
 async function queryAcademicService(query) {
+    // ... (existing function is unchanged)
     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
     if (!pythonServiceUrl) {
         throw new Error("Academic search service is not configured on the server.");
@@ -74,6 +76,35 @@ const availableTools = {
         return await queryAcademicService(params.query);
     },
     requiredParams: ['query'],
+  },
+  // --- NEW TOOL DEFINITION ---
+  generate_document: {
+    description: "Use this tool ONLY when the user explicitly asks to 'create', 'generate', 'make', or 'download' a document, presentation, summary, DOCX, or PPTX. The tool requires a topic, a document type (either 'docx' or 'pptx'), and the source of information to use.",
+    execute: async (params, context) => {
+      const { topic, doc_type, context_source } = params;
+      const { userId, chatHistory, documentContextName } = context;
+
+      const generationResult = await documentGenerationService.generateAndProxyDocument(
+        userId,
+        topic,
+        doc_type,
+        context_source,
+        chatHistory,
+        documentContextName
+      );
+      
+      // The tool's output is a special object, not plain text.
+      return { 
+        toolOutput: { type: 'document_generated', payload: generationResult },
+        references: [] // No references for this tool
+      };
+    },
+    // The LLM must determine these parameters from the user's request.
+    requiredParams: [
+        { name: 'topic', description: 'The main subject or title of the document to be created.' },
+        { name: 'doc_type', description: "The file format. Must be either 'docx' for a text document or 'pptx' for a presentation." },
+        { name: 'context_source', description: "The source of information for the document. Must be one of: 'selected_document' if a document is currently selected in the UI, 'chat_history' if the user refers to the current conversation, or 'none' if the user asks for a general document on a topic without specifying a context."}
+    ],
   }
 };
 

@@ -29,40 +29,21 @@ function ChatInput({
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
-
-    // --- SIMPLIFIED COACH LOGIC ---
     const [isCoaching, setIsCoaching] = useState(false);
 
     const handleRequestPromptCoaching = async () => {
         const trimmedInput = inputValue.trim();
-
-        // --- NEW: Frontend Validation ---
-        if (!trimmedInput) return; // General check to prevent action on empty input
-        
+        if (!trimmedInput) return;
         if (trimmedInput.length < 3) {
-            toast("Prompt is too short for coaching. Please provide a bit more detail.", {
-                icon: '❤️',
-                style: {
-                    background: '#FBBF24',
-                    color: '#ffffff',
-                },
-            });
-            return; // Stop the function here
+            toast("Prompt is too short for coaching. Please provide a bit more detail.", { icon: '❤️', style: { background: '#FBBF24', color: '#ffffff' } });
+            return;
         }
-        // --- END: Frontend Validation ---
-        
         if (isCoaching) return;
-
         setIsCoaching(true);
         const toastId = toast.loading('Asking the coach for advice...');
         try {
             const response = await api.analyzePrompt(trimmedInput);
-            // Tell the parent to open the modal with the new data
-            openCoachModalWithData({
-                original: trimmedInput,
-                improved: response.improvedPrompt,
-                explanation: response.explanation
-            });
+            openCoachModalWithData({ original: trimmedInput, improved: response.improvedPrompt, explanation: response.explanation });
             setCoachModalOpen(true);
             toast.success('Suggestion received!', { id: toastId });
         } catch (error) {
@@ -73,11 +54,10 @@ function ChatInput({
     };
 
     useEffect(() => {
-    if (initialPrompt) {
-        console.log("[ChatInput] Received initial prompt via props:", initialPrompt);
-        setInputValue(initialPrompt); // Set the text in the input box
-        setInitialPromptForNewSession(null); // Clear the global state immediately
-    }
+        if (initialPrompt) {
+            setInputValue(initialPrompt);
+            setInitialPromptForNewSession(null);
+        }
     }, [initialPrompt, setInitialPromptForNewSession]);
 
     useEffect(() => {
@@ -104,13 +84,18 @@ function ChatInput({
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [menuRef]);
 
+    // --- THIS IS THE FIX ---
+    // The input value is now captured in a variable, the state is cleared immediately,
+    // and then the message is dispatched. This prevents race conditions from rapid re-submission.
     const handleSubmit = (e) => {
         e.preventDefault();
-        if (inputValue.trim() && !isLoading) {
-            onSendMessage(inputValue.trim());
-            setInputValue('');
+        const trimmedInput = inputValue.trim();
+        if (trimmedInput && !isLoading) {
+            setInputValue(''); // Clear the input field immediately.
+            onSendMessage(trimmedInput); // Send the captured value.
         }
     };
+    // --- END OF FIX ---
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
@@ -212,7 +197,6 @@ function ChatInput({
                     />
                 )}
                 
-                {/* --- NEW BUTTON --- */}
                 <IconButton
                     icon={Sparkles}
                     onClick={handleRequestPromptCoaching}

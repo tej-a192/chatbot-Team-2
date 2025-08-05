@@ -1,8 +1,8 @@
-// src/components/chat/MessageBubble.jsx
+// frontend/src/components/chat/MessageBubble.jsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import Prism from 'prismjs';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
@@ -11,7 +11,8 @@ import IconButton from '../core/IconButton.jsx';
 import { renderMathInHtml } from '../../utils/markdownUtils';
 import { getPlainTextFromMarkdown } from '../../utils/helpers.js';
 import DOMPurify from 'dompurify';
-import { useTypingEffect } from '../../hooks/useTypingEffect.js';
+// DocumentDownloadBubble is no longer needed here as it's rendered by the parent
+// import DocumentDownloadBubble from './DocumentDownloadBubble.jsx';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -23,97 +24,58 @@ const createMarkup = (markdownText) => {
     return { __html: cleanHtml };
 };
 
-const escapeHtml = (unsafe) => {
-    if (typeof unsafe !== 'string') return '';
-    return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, `"`).replace(/'/g, "'");
-};
-
-const AnimatedThinking = ({ content }) => {
-    const [completedTyping, setCompletedTyping] = useState('');
-    const [currentTyping, setCurrentTyping] = useState('');
-    const [isWaiting, setIsWaiting] = useState(true);
-    const lastContentRef = useRef('');
-
-    useEffect(() => {
-        if (content && content.length > lastContentRef.current.length) {
-            const newChunk = content.substring(lastContentRef.current.length);
-            setCurrentTyping(newChunk);
-            setIsWaiting(false);
-            lastContentRef.current = content;
-        }
-    }, [content]);
-
-    const onTypingComplete = useCallback(() => {
-        setCompletedTyping(prev => prev + currentTyping);
-        setCurrentTyping('');
-        setIsWaiting(true);
-    }, [currentTyping]);
-
-    const animatedChunk = useTypingEffect(currentTyping, 4, onTypingComplete);
-    const combinedText = completedTyping + animatedChunk;
-
-    return (
-        <div className="prose prose-xs dark:prose-invert max-w-none text-text-muted-light dark:text-text-muted-dark">
-            <div dangerouslySetInnerHTML={createMarkup(combinedText)} />
-            {isWaiting && <span className="animate-pulse"> Thinking...</span>}
-        </div>
-    );
-};
-
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick }) {
-    const isUser = sender === 'user';
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-    const contentRef = useRef(null);
+function MessageBubble({ msg, onCueClick }) {
+    // Hooks are now safe because this component is ONLY ever rendered for text-based messages.
     const [isCopied, setIsCopied] = useState(false);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
+    const contentRef = useRef(null);
+
+    const { 
+        sender, text, thinking, references, timestamp, 
+        sourcePipeline, isStreaming, criticalThinkingCues, 
+    } = msg;
 
     const mainContent = text || '';
-    const thinkingContent = thinking;
-    const showThinkingDropdown = !isUser && thinkingContent !== null;
+    const isUser = sender === 'user';
+    const showThinkingDropdown = !isUser && thinking && !isStreaming;
 
     useEffect(() => {
-        if (!isStreaming && mainContent) {
-            const timer = setTimeout(() => {
-                if (contentRef.current) Prism.highlightAllUnder(contentRef.current);
-            }, 50);
+        if (!isStreaming && mainContent && contentRef.current) {
+            const timer = setTimeout(() => Prism.highlightAllUnder(contentRef.current), 50);
             return () => clearTimeout(timer);
         }
     }, [isStreaming, mainContent]);
     
-    const handleCopy = () => {
-        if (isCopied) return;
-        const plainTextToCopy = getPlainTextFromMarkdown(mainContent);
-        navigator.clipboard.writeText(plainTextToCopy).then(() => {
+    const handleCopy = useCallback(() => {
+        const plainText = getPlainTextFromMarkdown(text);
+        navigator.clipboard.writeText(plainText).then(() => {
             setIsCopied(true);
-            setTimeout(() => setIsCopied(false), 1000);
+            setTimeout(() => setIsCopied(false), 2000);
         });
+    }, [text]);
+
+    const formatTimestamp = (ts) => {
+        if (!ts) return '';
+        return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
-    
-    const formatTimestamp = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     const getPipelineIcon = () => {
         if (!sourcePipeline) return null;
-        const lower = sourcePipeline.toLowerCase();
-        if (lower.includes('ollama')) return <Zap size={12} className="text-green-400" title="Ollama" />;
-        if (lower.includes('gemini')) return <Server size={12} className="text-blue-400" title="Gemini" />;
-        if (lower.includes('rag')) return <Zap size={12} className="text-purple-400" title="RAG" />;
-        if (lower.includes('error')) return <ServerCrash size={12} className="text-red-400" title="Error" />;
-        return null;
+        const IconMap = { 'agent': Zap, 'rag': Server, 'kg': Server, 'error': ServerCrash, 'generate_document': Server };
+        const baseTool = sourcePipeline.split('-')[1] || sourcePipeline;
+        const Icon = IconMap[baseTool] || Zap;
+        return <Icon size={12} className="text-text-muted-light dark:text-text-muted-dark" />;
     };
     
     return (
         <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} w-full group`}>
-            <div className={`message-bubble-wrapper max-w-[85%] md:max-w-[75%] ${isStreaming ? 'w-full' : ''}`}>
+            <div className={`message-bubble-wrapper max-w-[85%] md:max-w-[75%]`}>
                 {showThinkingDropdown && (
-                    <div className="mb-1.5">
-                        <ThinkingDropdown
-                            isOpen={isDropdownOpen}
-                            setIsOpen={setIsDropdownOpen}
-                            isStreaming={isStreaming}
-                        >
-                            {isStreaming 
-                                ? <AnimatedThinking content={thinkingContent} /> 
-                                : <div className="prose prose-xs dark:prose-invert max-w-none text-text-muted-light dark:text-text-muted-dark" dangerouslySetInnerHTML={createMarkup(thinkingContent)} />
-                            }
+                    <div className="mb-1.5 ml-2">
+                         <ThinkingDropdown isOpen={false} setIsOpen={()=>{}} isStreaming={isStreaming}>
+                            <pre className="text-xs text-text-muted-light dark:text-text-muted-dark whitespace-pre-wrap font-sans leading-relaxed">
+                                {thinking}
+                            </pre>
                         </ThinkingDropdown>
                     </div>
                 )}
@@ -121,71 +83,59 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                 {isStreaming ? (
                     <TypingIndicator />
                 ) : (
-                    <div className={`message-bubble relative p-3 rounded-2xl shadow-md break-words ${
+                    <div className={`message-bubble relative p-4 rounded-2xl shadow-md break-words ${
                         isUser 
                         ? 'bg-surface-light text-text-light border border-border-light dark:bg-primary-dark dark:text-white dark:border-transparent rounded-br-lg' 
                         : 'bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark rounded-bl-lg border border-border-light dark:border-border-dark'
                     }`}>
                         <div ref={contentRef} className="prose prose-sm dark:prose-invert max-w-none message-content leading-relaxed" dangerouslySetInnerHTML={createMarkup(mainContent)} />
-                        <div className="flex items-center justify-end mt-1.5 text-xs gap-1">
-                            <button onClick={handleCopy} title={isCopied ? 'Copied!' : 'Copy content'} disabled={isCopied} className="p-1 rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-all duration-200 focus:outline-none">
-                                <AnimatePresence mode="wait" initial={false}>
-                                    <motion.div key={isCopied ? 'check' : 'copy'} initial={{ scale: 0.6, opacity: 0, rotate: -30 }} animate={{ scale: 1, opacity: 1, rotate: 0 }} exit={{ scale: 0.6, opacity: 0, rotate: 30 }} transition={{ duration: 0.15 }}>
+                        <div className="flex items-center justify-end mt-2 text-xs gap-2 text-text-muted-light dark:text-text-muted-dark">
+                            {getPipelineIcon()}
+                            <span>{formatTimestamp(timestamp)}</span>
+                            {!isUser && !isStreaming && (
+                                <>
+                                    <IconButton onClick={isSpeaking ? cancel : () => speak({ text })} title={isSpeaking ? "Stop Speaking" : "Read Aloud"}>
+                                        {isSpeaking ? <StopCircle size={16} /> : <Volume2 size={16} />}
+                                    </IconButton>
+                                    <IconButton onClick={handleCopy} title="Copy Text">
                                         {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
-                                    </motion.div>
-                                </AnimatePresence>
-                            </button>
-                            <div className="flex items-center gap-2 pl-1 opacity-70">
-                                {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
-                                <span>{formatTimestamp(timestamp)}</span>
-                                {!isUser && (
-                                    <IconButton icon={isSpeaking ? StopCircle : Volume2} onClick={() => isSpeaking ? cancel() : speak({ text: mainContent })} title={isSpeaking ? "Stop reading" : "Read aloud"} size="sm" variant="ghost" className={`p-0.5 ${isSpeaking ? 'text-red-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`} />
-                                )}
-                            </div>
+                                    </IconButton>
+                                </>
+                            )}
                         </div>
                     </div>
                 )}
             </div>
 
-            {!isStreaming && !isUser && references && references.length > 0 && (
-                <div className="message-metadata-container max-w-[85%] md:max-w-[75%] mt-1.5 pl-2">
-                     {/* ... details block for references ... */}
+            {!isUser && references && references.length > 0 && !isStreaming && (
+                <div className="flex flex-col items-start w-full max-w-[85%] md:max-w-[75%] mt-2 pl-3">
+                    <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark mb-1">References</h4>
+                    <ul className="space-y-1">
+                        {references.map((ref, index) => (
+                            <li key={index} className="flex items-center gap-2 text-xs text-text-light dark:text-text-dark">
+                                <LinkIcon size={12} className="text-primary flex-shrink-0" />
+                                <a href={ref.url} target="_blank" rel="noopener noreferrer" className="truncate hover:underline" title={ref.source}>
+                                    {`[${ref.number}] ${ref.source}`}
+                                </a>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
             )}
-            
-            {!isStreaming && !isUser && criticalThinkingCues && (
-                <div className="max-w-[85%] md:max-w-[75%] w-full mt-2 pl-2 animate-fadeIn">
-                    <div className="border-t border-dashed border-border-light dark:border-border-dark pt-2">
-                        <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark flex items-center gap-1.5 mb-2">
-                            <Lightbulb size={14} />
-                            Critical Thinking Prompts
-                        </h4>
-                        <div className="flex flex-wrap gap-2">
-                            {criticalThinkingCues.verificationPrompt && (
-                                <button
-                                    onClick={() => onCueClick(criticalThinkingCues.verificationPrompt)}
-                                    className="text-xs bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 px-2.5 py-1 rounded-full hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.verificationPrompt}
-                                </button>
-                            )}
-                            {criticalThinkingCues.alternativePrompt && (
-                                <button
-                                    onClick={() => onCueClick(criticalThinkingCues.alternativePrompt)}
-                                    className="text-xs bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-1 rounded-full hover:bg-amber-500/20 dark:hover:bg-amber-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.alternativePrompt}
-                                </button>
-                            )}
-                            {criticalThinkingCues.applicationPrompt && (
-                                <button
-                                    onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
-                                    className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.applicationPrompt}
-                                </button>
-                            )}
-                        </div>
+
+            {!isUser && criticalThinkingCues && criticalThinkingCues.length > 0 && !isStreaming && (
+                <div className="flex flex-col items-start w-full max-w-[85%] md:max-w-[75%] mt-3 pl-3">
+                    <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark mb-1 flex items-center gap-1.5">
+                        <Lightbulb size={14} className="text-secondary"/>
+                        Consider These Next...
+                    </h4>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                        {criticalThinkingCues.map((cue, index) => (
+                             <button key={index} onClick={() => onCueClick(cue)}
+                                className="text-xs bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-full px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200">
+                                {cue}
+                            </button>
+                        ))}
                     </div>
                 </div>
             )}

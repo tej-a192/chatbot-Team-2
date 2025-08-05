@@ -303,6 +303,27 @@ const api = {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
     return response.data; // Expects the full report object with status updates
   },
+  downloadGeneratedDocument: async (filename) => {
+    // This calls the Node.js proxy endpoint we created, not the Python service directly.
+    const response = await apiClient.get(
+      `/download/generated-document/${filename}`,
+      { responseType: 'blob' } // This is crucial: it tells axios to expect binary data.
+    );
+    
+    // Extract the real filename from the 'Content-Disposition' header sent by the server.
+    // This handles cases where the server might sanitize or change the filename.
+    const contentDisposition = response.headers['content-disposition'];
+    let resolvedFilename = filename; // Fallback to the requested filename
+    if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch && filenameMatch.length > 1) {
+            resolvedFilename = filenameMatch[1];
+        }
+    }
+    
+    // Return both the binary data (blob) and the resolved filename.
+    return { fileBlob: response.data, resolvedFilename };
+  },
 };
 
 export default api;

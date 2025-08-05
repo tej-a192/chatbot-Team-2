@@ -592,19 +592,71 @@ def generate_document_route():
         return jsonify({"success": True, "filename": filename}), 201
     except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
+# --- NEW ROUTE ---
+@app.route('/generate_document_from_context', methods=['POST'])
+def generate_document_from_context_route():
+    data = request.get_json()
+    topic = data.get('topic')
+    doc_type = data.get('doc_type')
+    context_text = data.get('context_text')
+    api_key = data.get('api_key')
+
+    if not all([topic, doc_type, context_text, api_key]):
+        return create_error_response("Missing topic, doc_type, context_text, or api_key", 400)
+    
+    try:
+        # We reuse the same core logic, just with different inputs.
+        # 'outline_content' is repurposed to be the 'topic'
+        # 'source_document_text' is the new 'context_text'
+        expanded_content = document_generator.expand_content_with_llm(
+            outline_content=topic, 
+            source_document_text=context_text, 
+            doc_type=doc_type, 
+            llm_function=lambda p: llm_wrapper(p, api_key)
+        )
+        
+        # This part remains the same as your existing generate_document route
+        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
+        
+        # Sanitize topic for a safe filename
+        safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
+        filename = f"gen_{safe_topic}_{uuid.uuid4().hex[:8]}.{doc_type}"
+        path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+        
+        if doc_type == 'pptx':
+            document_generator.create_ppt(slides, path)
+        else:
+            document_generator.create_doc(slides, path, "text_content")
+            
+        return jsonify({"success": True, "filename": filename}), 201
+        
+    except Exception as e:
+        logger.error(f"Failed to generate document from context: {e}", exc_info=True)
+        return create_error_response(f"Failed to generate document from context: {str(e)}", 500)
+
+
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
-    if '..' in filename: return create_error_response("Invalid filename.", 400)
+    if '..' in filename or filename.startswith('/'): 
+        return create_error_response("Invalid filename.", 400)
     try:
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
-        if not os.path.exists(file_path): return create_error_response("File not found.", 404)
+        if not os.path.exists(file_path): 
+            return create_error_response("File not found.", 404)
+        
+        # Cleanup the file after the request is sent
         @after_this_request
         def cleanup(response):
-            try: os.remove(file_path)
-            except OSError as e: logger.error(f"Error deleting temp file {file_path}: {e}")
+            try: 
+                os.remove(file_path)
+                logger.info(f"Cleaned up temporary file: {filename}")
+            except OSError as e: 
+                logger.error(f"Error deleting temp file {file_path}: {e}")
             return response
+            
         return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
     except Exception as e:
+        logger.error(f"Error during file download for '{filename}': {e}", exc_info=True)
         return create_error_response("Could not process download request.", 500)
 
 # KG & DB Management Routes

@@ -12,22 +12,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 # --- PROMPT FOR INTELLIGENT PPTX GENERATION (JSON-based) ---
+# MODIFIED PROMPT: Now explicitly commands the LLM to use the provided context.
 PPTX_EXPANSION_PROMPT_TEMPLATE = """
 You are a professional presentation designer and subject matter expert.
-Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, 6-8 slide presentation.
-You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge.
+Your task is to expand a given OUTLINE into a full, detailed, 6-8 slide presentation.
+**You MUST use the provided "SOURCE DOCUMENT TEXT" as your ONLY source of truth. Do not use outside knowledge.**
 Your output MUST be a single, valid JSON array, where each object represents a slide.
 
 **JSON Object Schema for each slide:**
 {{
   "slide_title": "A concise and engaging title for the slide.",
   "slide_content": "Detailed, professional paragraph(s) and/or bullet points elaborating on the outline point. This text will be displayed on the slide. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
-  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E or Midjourney) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition. Example: 'A photorealistic image of a futuristic server room with glowing blue data streams flowing between racks, symbolizing data processing. Cinematic lighting.'"
+  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition. Example: 'A photorealistic image of a futuristic server room with glowing blue data streams flowing between racks, symbolizing data processing. Cinematic lighting.'"
 }}
 
 **INSTRUCTIONS:**
 1.  **Analyze Outline & Source:** For each point in the OUTLINE, create at least one slide object in the JSON array.
-2.  **Expand Content:** Elaborate on each outline point using only information from the SOURCE DOCUMENT TEXT.
+2.  **Expand Content:** Elaborate on each outline point using ONLY information from the SOURCE DOCUMENT TEXT.
 3.  **Create Image Prompts:** For each slide, generate a unique and descriptive `image_prompt` that visually represents the slide's content.
 4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
 
@@ -43,10 +44,11 @@ Your output MUST be a single, valid JSON array, where each object represents a s
 """
 
 # --- PROMPT FOR INTELLIGENT DOCX GENERATION (Markdown-based) ---
+# MODIFIED PROMPT: Now explicitly commands the LLM to use the provided context.
 DOCX_EXPANSION_PROMPT_TEMPLATE = """
 You are a professional content creator and subject matter expert.
-Your task is to expand a given OUTLINE (which could be a list of key topics or FAQs) into a full, detailed, multi-page document in Markdown format.
-You must use the provided SOURCE DOCUMENT TEXT as your only source of truth. Do not use outside knowledge.
+Your task is to expand a given OUTLINE into a full, detailed, multi-page document in Markdown format.
+**You MUST use the provided "SOURCE DOCUMENT TEXT" as your ONLY source of truth. Do not use outside knowledge.**
 The final output must be a single block of well-structured Markdown text.
 
 **INSTRUCTIONS:**

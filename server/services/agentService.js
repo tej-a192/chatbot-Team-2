@@ -130,6 +130,27 @@ async function processAgenticRequest(
       requestContext
     );
 
+    // --- NEW LOGIC ---
+    // Check for the special document generation response type.
+    if (toolResult.toolOutput?.type === 'document_generated') {
+        console.log("[AgentService] Tool returned a generated document. Bypassing synthesizer.");
+        return {
+            finalAnswer: '[Document Generated]', // Placeholder for logs
+            // This is a special response object the frontend will look for.
+            reply: {
+                type: 'document_generated',
+                sender: 'bot',
+                role: 'model',
+                payload: toolResult.toolOutput.payload,
+                timestamp: new Date().toISOString(),
+            },
+            thinking: `The user requested a document. I used the 'generate_document' tool with the topic "${toolCall.parameters.topic}" and context from "${toolCall.parameters.context_source}".`,
+            references: [],
+            sourcePipeline: `agent-generate_document-${toolCall.parameters.doc_type}`
+        };
+    }
+    // --- END NEW LOGIC ---
+
     let pipeline = `${llmProvider}-agent-${toolCall.tool_name}`;
     if (
       toolCall.tool_name === "rag_search" &&
