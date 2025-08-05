@@ -162,7 +162,7 @@ const api = {
         });
         return {
           content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-          thinking: "No analysis data found in the database for this type.",
+          thinking: "No analysis data found in  the database for this type.",
         };
       }
       const { content, thinking } = parseAnalysisOutput(rawOutput);
@@ -226,37 +226,37 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+    return response.data;
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
-    return response.data; // Should be { analysis: "..." }
+    return response.data;
   },
   generateTestCases: async (payload) => {
     const response = await apiClient.post(
       "/tools/generate-test-cases",
       payload
     );
-    return response.data; // Should be { testCases: [...] }
+    return response.data;
   },
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
-    return response.data; // Should be { explanation: "..." }
+    return response.data;
   },
   getRecommendations: async (sessionId) => {
     const response = await apiClient.get(
       `/learning/recommendations/${sessionId}`
     );
-    return response.data; // Should be { recommendations: [...] }
+    return response.data;
   },
 
   findDocumentForTopic: async (topic) => {
     const response = await apiClient.post("/learning/find-document", { topic });
-    return response.data; // Should be { documentName: "..." }
+    return response.data;
   },
   getLearningPaths: async () => {
     const response = await apiClient.get("/learning/paths");
-    return response.data; // Should be an array of learning path objects
+    return response.data;
   },
 
   generateLearningPath: async (goal, context = null) => {
@@ -264,7 +264,7 @@ const api = {
       goal,
       context,
     });
-    return response.data; // Should be the newly created learning path object
+    return response.data;
   },
 
   updateModuleStatus: async (pathId, moduleId, status) => {
@@ -272,7 +272,7 @@ const api = {
       `/learning/paths/${pathId}/modules/${moduleId}`,
       { status }
     );
-    return response.data; // Should be the entire updated learning path object
+    return response.data;
   },
 
   generateQuiz: async (file, quizOption) => {
