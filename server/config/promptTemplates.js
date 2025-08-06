@@ -840,6 +840,8 @@ You are a meticulous Quality Assurance (QA) engineer. Your task is to generate a
 const PROMPT_COACH_TEMPLATE = `
 You are an expert Prompt Engineering Coach. Your task is to analyze the user's provided prompt and rewrite it to be more specific, provide more context, and ultimately be more effective for an AI Tutor specializing in academic and technical topics.
 
+Instruction : Do not give the prompt like mentioning the capability of the llm. Example : As an AI Tutor specializing in..or something different which explicitly mentioning llm its capability.
+
 Your entire output MUST be a single, valid JSON object with two keys: "improvedPrompt" and "explanation".
 - "improvedPrompt": Your rewritten, superior version of the prompt.
 - "explanation": A brief, bulleted list in Markdown explaining the key improvements you made. Use "- " for each bullet point.
