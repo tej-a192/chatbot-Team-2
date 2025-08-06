@@ -11,17 +11,12 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils
 import knowledge_engine
 import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
-import subprocess
-import tempfile
-import shutil
-import json
-
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +30,7 @@ config.setup_logging()
 try:
     from vector_db_service import VectorDBService
     import ai_core
-    import neo4j_handler 
+    import neo4j_handler
     from neo4j import exceptions as neo4j_exceptions
     from tts_service import initialize_tts
     import document_generator
@@ -44,10 +39,9 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    # This is the corrected line
     from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
-    import asyncio 
-    
+    import asyncio
+
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -62,10 +56,6 @@ try:
         logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
 
     def llm_wrapper(prompt, api_key=None):
-        """
-        A flexible wrapper for the Gemini API that can use a provided per-request API key
-        or fall back to the server's global key.
-        """
         key_to_use = api_key or config.GEMINI_API_KEY
         if not key_to_use:
             raise ConnectionError("Gemini API Key is not configured for this request.")
@@ -121,9 +111,7 @@ except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
 atexit.register(neo4j_handler.close_driver)
 
-
 initialize_tts()
-
 
 
 def create_error_response(message, status_code=500, details=None):
@@ -578,21 +566,6 @@ def export_podcast_route():
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
 
-@app.route('/generate_document', methods=['POST'])
-def generate_document_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
-    if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
-        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
-        if doc_type == 'pptx': document_generator.create_ppt(slides, path)
-        else: document_generator.create_doc(slides, path, "text_content")
-        return jsonify({"success": True, "filename": filename}), 201
-    except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
-
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
     if '..' in filename: return create_error_response("Invalid filename.", 400)
@@ -741,33 +714,77 @@ def get_turnitin_report_route():
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 
+# server/rag_service/app.py
+# ... (imports and other routes remain the same) ...
+
+@app.route('/generate_document', methods=['POST'])
+def generate_document_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
+    if not all([outline, doc_type, source_text, api_key]):
+        return create_error_response("Missing required fields", 400)
+        
+    try:
+        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
+        
+        parsed_data = []
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(expanded_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(expanded_content)
+
+        # --- THIS IS THE CRITICAL VALIDATION CHECK ---
+        if not parsed_data:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()}. The parsed data was empty after processing.")
+            return create_error_response(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file. Please try rephrasing or using a different source document.", 422) # 422 Unprocessable Entity
+
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', outline)[:50]
+        filename = f"gen_{safe_name}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+
+    except Exception as e:
+        logger.error(f"Error during document generation from content: {e}", exc_info=True)
+        return create_error_response(f"Failed to generate document: {str(e)}", 500)
+
+
 @app.route('/generate_document_from_topic', methods=['POST'])
 def generate_document_from_topic_route():
+    # ... (initial data extraction is the same)
     data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    
-    topic = data.get('topic')
-    doc_type = data.get('docType')
-    api_key = data.get('api_key')
-
+    topic, doc_type, api_key = data.get('topic'), data.get('docType'), data.get('api_key')
     if not all([topic, doc_type, api_key]):
         return create_error_response("Missing 'topic', 'docType', or 'api_key'", 400)
 
     try:
-        # 1. Generate the content from scratch
-        generated_content = document_generator.generate_content_from_topic(
-            topic, 
-            doc_type, 
-            lambda p: llm_wrapper(p, api_key)
-        )
+        generated_content = document_generator.generate_content_from_topic(topic, doc_type, lambda p: llm_wrapper(p, api_key))
 
-        # 2. Parse the generated content
+        parsed_data = []
         if doc_type == 'pptx':
             parsed_data = document_generator.parse_pptx_json(generated_content)
         else:
             parsed_data = document_generator.refined_parse_docx_markdown(generated_content)
 
-        # 3. Create the physical file
+        # --- THIS IS THE CRITICAL VALIDATION CHECK ---
+        if not parsed_data:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()} on topic '{topic}'.")
+            return create_error_response(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file based on that topic. Please try a different topic.", 422)
+
         safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
         filename = f"gen_{safe_topic}_{uuid.uuid4()}.{doc_type}"
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
@@ -777,12 +794,10 @@ def generate_document_from_topic_route():
         else:
             document_generator.create_doc(parsed_data, file_path, "text_content")
 
-        # 4. Send the file and schedule cleanup
         @after_this_request
         def cleanup(response):
             try:
                 os.remove(file_path)
-                logger.info(f"Cleaned up generated file: {file_path}")
             except OSError as e:
                 logger.error(f"Error deleting generated file {file_path}: {e}")
             return response

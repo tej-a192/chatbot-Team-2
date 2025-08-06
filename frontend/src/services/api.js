@@ -180,26 +180,6 @@ const api = {
       throw error;
     }
   },
-  generateDocument: async ({
-    markdownContent,
-    docType,
-    sourceDocumentName,
-  }) => {
-    const response = await apiClient.post(
-      "/generate/document",
-      { markdownContent, docType, sourceDocumentName },
-      { responseType: "blob" }
-    );
-    const contentDisposition = response.headers["content-disposition"];
-    let filename = `generated-document.${docType}`;
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-      if (filenameMatch && filenameMatch.length > 1) {
-        filename = filenameMatch[1];
-      }
-    }
-    return { fileBlob: response.data, filename: filename };
-  },
   generatePodcast: async ({
     analysisContent,
     sourceDocumentName,
@@ -307,6 +287,42 @@ const api = {
   deleteLearningPath: async (pathId) => {
     const response = await apiClient.delete(`/learning/paths/${pathId}`);
     return response.data;
+  },
+  generateDocument: async (payload) => {
+    // This function now handles the entire download process, including error handling.
+    const response = await apiClient.post("/generate/document", payload, { 
+        responseType: "blob" // Crucial: expect a file blob
+    });
+
+    // --- THIS IS THE FIX ---
+    // If the server sent back a JSON error instead of a file, it will have this content type.
+    if (response.data.type === 'application/json') {
+        const errorText = await response.data.text();
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || "An unknown error occurred during generation.");
+    }
+    // --- END OF FIX ---
+
+    const contentDisposition = response.headers["content-disposition"];
+    let filename = `generated-document.${payload.docType}`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = filenameMatch[1];
+      }
+    }
+    
+    // Trigger browser download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    return { success: true, filename }; // Return success for toast messages
   },
    generateDocumentFromTopic: async (payload) => {
     const { topic, docType } = payload;

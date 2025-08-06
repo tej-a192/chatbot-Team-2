@@ -19790,6 +19790,97 @@ const connectRedis = async () => {
 module.exports = { redisClient, connectRedis };
 ```
 
+`server/controllers/generationController.js`
+
+```javascript
+// server/controllers/generationController.js
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
+
+async function proxyToFileGeneration(req, res, endpoint, payload) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "Document generation service is not configured." });
+    }
+    const generationUrl = `${pythonServiceUrl}${endpoint}`;
+    
+    try {
+        console.log(`[GenController] Proxying request to Python: ${generationUrl}`);
+        const pythonResponse = await axios.post(generationUrl, payload, {
+            responseType: 'stream', // CRITICAL: Receive the response as a stream
+            timeout: 600000 // 10 minute timeout
+        });
+
+        // Pipe the file stream from Python directly back to the client
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        pythonResponse.data.pipe(res);
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Failed to generate document via proxy.";
+        console.error(`[GenController] Error proxying to Python service:`, errorMsg);
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
+    }
+}
+
+exports.generateDocument = async (req, res) => {
+    const { markdownContent, docType, sourceDocumentName } = req.body;
+    const userId = req.user._id;
+
+    try {
+        let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) apiKeyForRequest = decrypt(user.encryptedApiKey);
+        } else {
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
+            }
+        }
+        
+        if (!sourceDocumentText) return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document', {
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocument handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+
+exports.generateDocumentFromTopic = async (req, res) => {
+    const { topic, docType } = req.body;
+    const userId = req.user._id;
+
+    try {
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document_from_topic', {
+            topic, docType, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocumentFromTopic handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+```
+
 `server/middleware/authMiddleware.js`
 
 ```javascript
@@ -21375,17 +21466,12 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils
 import knowledge_engine
 import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
-import subprocess
-import tempfile
-import shutil
-import json
-
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21399,7 +21485,7 @@ config.setup_logging()
 try:
     from vector_db_service import VectorDBService
     import ai_core
-    import neo4j_handler 
+    import neo4j_handler
     from neo4j import exceptions as neo4j_exceptions
     from tts_service import initialize_tts
     import document_generator
@@ -21408,10 +21494,9 @@ try:
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    # This is the corrected line
     from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
-    import asyncio 
-    
+    import asyncio
+
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -21426,10 +21511,6 @@ try:
         logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
 
     def llm_wrapper(prompt, api_key=None):
-        """
-        A flexible wrapper for the Gemini API that can use a provided per-request API key
-        or fall back to the server's global key.
-        """
         key_to_use = api_key or config.GEMINI_API_KEY
         if not key_to_use:
             raise ConnectionError("Gemini API Key is not configured for this request.")
@@ -21485,9 +21566,7 @@ except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
 atexit.register(neo4j_handler.close_driver)
 
-
 initialize_tts()
-
 
 
 def create_error_response(message, status_code=500, details=None):
@@ -21942,21 +22021,6 @@ def export_podcast_route():
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
 
-@app.route('/generate_document', methods=['POST'])
-def generate_document_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
-    if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
-        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
-        if doc_type == 'pptx': document_generator.create_ppt(slides, path)
-        else: document_generator.create_doc(slides, path, "text_content")
-        return jsonify({"success": True, "filename": filename}), 201
-    except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
-
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
     if '..' in filename: return create_error_response("Invalid filename.", 400)
@@ -22105,8 +22169,71 @@ def get_turnitin_report_route():
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 
+# server/rag_service/app.py
+# ... (imports and other routes remain the same) ...
+
+@app.route('/generate_document', methods=['POST'])
+def generate_document_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    outline = data.get('markdownContent')
+    doc_type = data.get('docType')
+    source_text = data.get('sourceDocumentText')
+    api_key = data.get('api_key')
+
+    if not all([outline, doc_type, source_text, api_key]):
+        return create_error_response("Missing required fields for document generation", 400)
+        
+    try:
+        # 1. Expand content using LLM (No change here)
+        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
+        
+        # 2. Parse the LLM output (No change here)
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(expanded_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(expanded_content)
+
+        # --- THIS IS THE FIX ---
+        # 3. Validate the parsed data BEFORE creating a file
+        if not parsed_data or not isinstance(parsed_data, list) or len(parsed_data) == 0:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()}. The parsed data was empty or invalid.")
+            raise ValueError(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file. Please try rephrasing or using a different source document.")
+        # --- END OF FIX ---
+
+        # 4. Create the physical file (Now guaranteed to have valid data)
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', outline)[:50]
+        filename = f"gen_{safe_name}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        # 5. Schedule cleanup and send the file (No change here)
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up generated file: {file_path}")
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+
+    except Exception as e:
+        logger.error(f"Error during document generation from content: {e}", exc_info=True)
+        # The ValueError from our validation step will be caught here
+        return create_error_response(f"Failed to generate document: {str(e)}", 500)
+
+
 @app.route('/generate_document_from_topic', methods=['POST'])
 def generate_document_from_topic_route():
+    # ... (initial data extraction is the same)
     data = request.get_json()
     if not data: return create_error_response("Request must be JSON", 400)
     
@@ -22118,20 +22245,27 @@ def generate_document_from_topic_route():
         return create_error_response("Missing 'topic', 'docType', or 'api_key'", 400)
 
     try:
-        # 1. Generate the content from scratch
+        # 1. Generate the content from scratch (No change here)
         generated_content = document_generator.generate_content_from_topic(
             topic, 
             doc_type, 
             lambda p: llm_wrapper(p, api_key)
         )
 
-        # 2. Parse the generated content
+        # 2. Parse the generated content (No change here)
         if doc_type == 'pptx':
             parsed_data = document_generator.parse_pptx_json(generated_content)
         else:
             parsed_data = document_generator.refined_parse_docx_markdown(generated_content)
 
-        # 3. Create the physical file
+        # --- THIS IS THE FIX ---
+        # 3. Validate the parsed data BEFORE creating a file
+        if not parsed_data or not isinstance(parsed_data, list) or len(parsed_data) == 0:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()} on topic '{topic}'.")
+            raise ValueError(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file based on that topic. Please try a different topic.")
+        # --- END OF FIX ---
+
+        # 4. Create the physical file (Now guaranteed to have valid data)
         safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
         filename = f"gen_{safe_topic}_{uuid.uuid4()}.{doc_type}"
         file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
@@ -22141,7 +22275,7 @@ def generate_document_from_topic_route():
         else:
             document_generator.create_doc(parsed_data, file_path, "text_content")
 
-        # 4. Send the file and schedule cleanup
+        # 5. Send the file and schedule cleanup (No change here)
         @after_this_request
         def cleanup(response):
             try:
@@ -22155,9 +22289,8 @@ def generate_document_from_topic_route():
         
     except Exception as e:
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
+        # The ValueError from our validation step will also be caught here
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
-
-
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -25915,8 +26048,8 @@ function doesQuerySuggestRecall(query) {
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
-        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
-        documentContextName, filter
+        systemPrompt: clientSystemPrompt, criticalThinkingEnabled,
+        documentContextName
     } = req.body;
     
     const userId = req.user._id;
@@ -25940,140 +26073,89 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
-        const llmConfig = {
+        const requestContext = {
             llmProvider,
             ollamaModel,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
-            ollamaUrl: user?.ollamaUrl
-        };
-
-        const historyFromDb = chatSession ? chatSession.messages : [];
-        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        const historyForLlm = [];
-
-        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            historyForLlm.push({ 
-                role: 'user', 
-                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
-            });
-            historyForLlm.push({ 
-                role: 'model', 
-                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
-            });
-        }
-        
-        const formattedDbMessages = historyFromDb.map(msg => ({
-            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
-        }));
-        historyForLlm.push(...formattedDbMessages);
-        
-        const requestContext = {
-            documentContextName, criticalThinkingEnabled, filter,
-            userId: userId.toString(), 
-            systemPrompt: clientProvidedSystemInstruction,
-            isWebSearchEnabled: !!useWebSearch, 
+            ollamaUrl: user?.ollamaUrl,
+            userId: userId.toString(),
+            isWebSearchEnabled: !!useWebSearch,
             isAcademicSearchEnabled: !!useAcademicSearch,
-            ...llmConfig
+            documentContextName,
+            systemPrompt: clientSystemPrompt,
+            criticalThinkingEnabled,
         };
 
-        if (criticalThinkingEnabled) {
-            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
+        const historyForLlm = chatSession ? chatSession.messages.map(msg => ({
+            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
+        })) : [];
+
+        // --- THIS IS THE FIX ---
+        // 1. Call the agent service.
+        const agentResponse = await processAgenticRequest(
+            query.trim(), historyForLlm, clientSystemPrompt, requestContext
+        );
+
+        // 2. Prepare the message object for the database.
+        const aiMessageForDb = {
+            sender: 'bot',
+            role: 'model',
+            parts: [{ text: agentResponse.finalAnswer }],
+            text: agentResponse.finalAnswer,
+            timestamp: new Date(),
+            thinking: agentResponse.thinking,
+            references: agentResponse.references || [],
+            source_pipeline: agentResponse.sourcePipeline,
+        };
+
+        // 3. Prepare the response object for the client. This includes the action payload.
+        const aiMessageForClient = { ...aiMessageForDb, action: agentResponse.action || null };
+        
+        // 4. CRITICAL CHECK: If there is an action, send the response and stop.
+        if (aiMessageForClient.action) {
+            console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
             
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.flushHeaders();
-
-            const accumulatedThoughts = [];
-
-            const interceptingStreamCallback = (eventData) => {
-                if (eventData.type === 'thought' || eventData.type === 'error') {
-                    if (eventData.type === 'thought') {
-                        accumulatedThoughts.push(eventData.content);
-                    }
-                    streamEvent(res, eventData);
-                }
-            };
-
-            const totResult = await processQueryWithToT_Streaming(
-                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
-            );
-
-            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
-
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: totResult.finalAnswer }],
-                text: totResult.finalAnswer,
-                timestamp: new Date(),
-                thinking: accumulatedThoughts.join(''),
-                references: totResult.references || [],
-                source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-
-            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
-            
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
-
-            await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
-            );
-
-            if (totResult.finalAnswer) {
-                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
-            }
-            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
-            res.end();
-        } else {
-            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
-
-            const agentResponse = await processAgenticRequest(
-                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
-            );
-
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }],
-                text: agentResponse.finalAnswer,
-                timestamp: new Date(),
-                thinking: agentResponse.thinking || null,
-                references: agentResponse.references || [],
-                source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-            
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues;
-
+            // Save user message and the AI's action message to DB
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
-
-            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForClient });
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            
+            return res.status(200).json({ reply: aiMessageForClient });
         }
+
+        // 5. If no action, proceed with normal post-response tasks.
+        if (criticalThinkingEnabled) {
+             aiMessageForClient.criticalThinkingCues = await generateCues(agentResponse.finalAnswer, requestContext);
+        }
+
+        await ChatHistory.findOneAndUpdate(
+            { sessionId: sessionId, userId: userId },
+            { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
+            { upsert: true, new: true }
+        );
+
+        console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
+        
+        // 6. Send the regular response object (without an action) back to the client.
+        res.status(200).json({ reply: aiMessageForClient });
+        
+        // 7. Asynchronously extract KG data.
+        if (agentResponse.finalAnswer) {
+             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId.toString(), requestContext);
+        }
+        // --- END OF FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
         const clientMessage = error.message || "Failed to get response from AI service.";
-        
-        if (res.headersSent && !res.writableEnded) {
-            streamEvent(res, { type: 'error', content: clientMessage });
-            res.end();
-        } else if (!res.headersSent) {
+        if (!res.headersSent) {
             res.status(error.status || 500).json({ message: clientMessage });
         }
     }
 });
+
 
 router.post('/history', async (req, res) => {
     const { previousSessionId, skipAnalysis } = req.body;
@@ -26657,73 +26739,89 @@ module.exports = router;
 
 ```javascript
 // server/controllers/generationController.js
-const documentGenerator = require('../services/documentGenerator');
-const { callGemini, callOllama } = require('../services/llmService');
-const { DOCX_EXPANSION_PROMPT_TEMPLATE, PPTX_EXPANSION_PROMPT_TEMPLATE } = require('../config/promptTemplates');
-const { getLlmChoice } = require('../utils/utils');
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
 
-// Handler for generating docs from markdown (from Analysis panel)
+async function proxyToFileGeneration(req, res, endpoint, payload) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "Document generation service is not configured." });
+    }
+    const generationUrl = `${pythonServiceUrl}${endpoint}`;
+    
+    try {
+        console.log(`[GenController] Proxying request to Python: ${generationUrl}`);
+        const pythonResponse = await axios.post(generationUrl, payload, {
+            responseType: 'stream', // CRITICAL: Receive the response as a stream
+            timeout: 600000 // 10 minute timeout
+        });
+
+        // Pipe the file stream from Python directly back to the client
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        pythonResponse.data.pipe(res);
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Failed to generate document via proxy.";
+        console.error(`[GenController] Error proxying to Python service:`, errorMsg);
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
+    }
+}
+
 exports.generateDocument = async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
+    const userId = req.user._id;
+
     try {
-        const { buffer, filename } = await documentGenerator.createDocument(
-            markdownContent,
-            docType,
-            sourceDocumentName
-        );
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Content-Type', docType === 'pptx' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        res.send(buffer);
+        let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) apiKeyForRequest = decrypt(user.encryptedApiKey);
+        } else {
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
+            }
+        }
+        
+        if (!sourceDocumentText) return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document', {
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
+        });
     } catch (error) {
-        console.error(`Error generating document from markdown:`, error);
-        res.status(500).json({ message: "Failed to generate document.", error: error.message });
+        console.error(`[GenController] Error in generateDocument handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
     }
 };
 
-// Handler for generating docs from a topic (from main chat agent)
 exports.generateDocumentFromTopic = async (req, res) => {
     const { topic, docType } = req.body;
-    const user = req.user;
+    const userId = req.user._id;
 
     try {
-        console.log(`[GenController] Generating ${docType} for topic: "${topic}"`);
-        const { llmChoice, model, apiKey, ollamaUrl } = getLlmChoice(user);
-        const llmCallFunction = llmChoice === 'gemini' ? callGemini : callOllama;
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
 
-        // Step 1: Use LLM to generate the markdown content for the document
-        const template = docType === 'pptx' ? PPTX_EXPANSION_PROMPT_TEMPLATE : DOCX_EXPANSION_PROMPT_TEMPLATE;
-        const prompt = template
-            .replace('{source_document_text', 'General knowledge.') // Source text isn't available in this flow
-            .replace('{outline_content}', `A document about: ${topic}`);
-
-        console.log("[GenController] Calling LLM to generate document content...");
-        const markdownContent = await llmCallFunction({
-            systemPrompt: prompt,
-            userPrompt: `Generate the content for the topic: "${topic}"`,
-            history: [],
-            model,
-            apiKey,
-            ollamaUrl,
-            json: docType === 'pptx' // Only force JSON for PPTX
+        await proxyToFileGeneration(req, res, '/generate_document_from_topic', {
+            topic, docType, api_key: apiKeyForRequest
         });
-        
-        console.log("[GenController] LLM content received. Now creating file buffer...");
-        // Step 2: Use the document generator service to create the file from the generated content
-        const { buffer, filename } = await documentGenerator.createDocument(
-            markdownContent,
-            docType,
-            topic // Use topic for the filename base
-        );
-
-        // Step 3: Set headers and send the file buffer
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Content-Type', docType === 'pptx' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        res.send(buffer);
-        console.log(`[GenController] Successfully sent ${filename} to user.`);
-
     } catch (error) {
-        console.error(`Error generating document from topic:`, error);
-        res.status(500).json({ message: "Failed to generate document from topic.", error: error.message });
+        console.error(`[GenController] Error in generateDocumentFromTopic handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
     }
 };
 ```
@@ -28841,19 +28939,16 @@ async function processAgenticRequest(
     llmOptions
   );
   const toolCall = parseToolCall(routerResponseText);
-  console.log("[AgentService] Router decided on tool call:", toolCall);
-
 
   // --- INTERCEPT LOGIC FOR DOCUMENT GENERATION ---
   if (toolCall && toolCall.tool_name === "generate_document") {
     console.log(`[AgentService] Intercepting tool call for document generation.`);
-    
-    // Extract topic and doc_type from the original user query as a fallback
     const topicMatch = userQuery.match(/(?:on|about|regarding)\s+(.+)/i);
     const docTypeMatch = userQuery.match(/\b(pptx|docx)\b/i);
 
     const topic = toolCall.parameters?.topic || (topicMatch ? topicMatch[1].trim() : userQuery);
     const doc_type = toolCall.parameters?.doc_type || (docTypeMatch ? docTypeMatch[0].toLowerCase() : 'docx');
+
 
     if (!topic || !doc_type) {
       return {
@@ -28882,7 +28977,6 @@ async function processAgenticRequest(
         },
       },
     };
-    console.log("[AgentService] Returning DOWNLOAD_DOCUMENT action to controller:", actionResponse);
     return actionResponse;
   }
   // --- END INTERCEPT LOGIC ---

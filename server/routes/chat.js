@@ -39,7 +39,6 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
-
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -105,9 +104,23 @@ router.post('/message', async (req, res) => {
 
         // 3. Prepare the response object for the client. This includes the action payload.
         const aiMessageForClient = { ...aiMessageForDb, action: agentResponse.action || null };
+        
+        // 4. CRITICAL CHECK: If there is an action, send the response and stop.
+        if (aiMessageForClient.action) {
+            console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+            
+            // Save user message and the AI's action message to DB
+            await ChatHistory.findOneAndUpdate(
+                { sessionId: sessionId, userId: userId },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
+                { upsert: true, new: true }
+            );
+            
+            return res.status(200).json({ reply: aiMessageForClient });
+        }
 
-        // 4. Run post-response tasks like generating cues and saving to DB.
-        if (criticalThinkingEnabled && !agentResponse.action) {
+        // 5. If no action, proceed with normal post-response tasks.
+        if (criticalThinkingEnabled) {
              aiMessageForClient.criticalThinkingCues = await generateCues(agentResponse.finalAnswer, requestContext);
         }
 
@@ -119,10 +132,10 @@ router.post('/message', async (req, res) => {
 
         console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
         
-        // 5. Send the correct object (with the action) back to the client.
+        // 6. Send the regular response object (without an action) back to the client.
         res.status(200).json({ reply: aiMessageForClient });
         
-        // 6. Asynchronously extract KG data.
+        // 7. Asynchronously extract KG data.
         if (agentResponse.finalAnswer) {
              extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId.toString(), requestContext);
         }

@@ -28,7 +28,7 @@ function parseToolCall(responseText) {
         200
       )}...`
     );
-     // Fallback for non-JSON responses that contain the tool name
+    // Fallback for non-JSON responses that contain the tool name
     if (typeof responseText === 'string' && responseText.toLowerCase().includes("generate_document")) {
         console.log("[AgentService] Fallback: Detected 'generate_document' in text, creating tool call.");
         return { tool_name: 'generate_document', parameters: {} }; // Parameters will be extracted from query later
@@ -84,6 +84,7 @@ async function processAgenticRequest(
 
     const topic = toolCall.parameters?.topic || (topicMatch ? topicMatch[1].trim() : userQuery);
     const doc_type = toolCall.parameters?.doc_type || (docTypeMatch ? docTypeMatch[0].toLowerCase() : 'docx');
+
 
     if (!topic || !doc_type) {
       return {
