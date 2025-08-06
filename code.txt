@@ -4,17 +4,6 @@
 
 ```
 
-`frontend/.env`
-
-```
-#REACT_APP_API_BASE_URL=http://localhost:5001/api
-# OR for Vite:
-VITE_API_BASE_URL=http://localhost:5001/api
-VITE_ADMIN_USERNAME=admin@admin.com
-VITE_ADMIN_PASSWORD=admin123
-
-```
-
 `frontend/code.txt`
 
 ```
@@ -12301,7 +12290,9 @@ export default SubjectList;
 ```javascript
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
+// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -12366,7 +12357,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-    // const [promptFromNav, setPromptFromNav] = useState('');
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
@@ -12427,6 +12417,22 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
+
+            // --- THIS IS THE FIX ---
+            // Check for and handle the download action, even in streaming mode.
+            if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
+                    {
+                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+            // --- END OF FIX ---
         }
     }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
@@ -12438,11 +12444,30 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             useWebSearch: options.useWebSearch,
             useAcademicSearch: options.useAcademicSearch, 
             systemPrompt, 
+            criticalThinkingEnabled: options.criticalThinkingEnabled,
             documentContextName: options.documentContextName
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...response.reply, id: placeholderId, isStreaming: false } : msg));
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId 
+                ? { ...response.reply, id: placeholderId, isStreaming: false } 
+                : msg
+            ));
+            
+           if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(response.reply.action.payload),
+                    {
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+
         } else {
             throw new Error("Invalid response from AI service.");
         }
@@ -12560,7 +12585,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         setUseWebSearch(false);
         setUseAcademicSearch(false);
 
-        // This is now an auto-sending action
         const options = {
             useWebSearch: rec.actionType === 'web_search',
             useAcademicSearch: rec.actionType === 'academic_search',
@@ -12589,13 +12613,13 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     query = `Based on the document "${documentName}", please explain "${rec.topic}".`;
                 } catch (error) {
                     toast.error(error.message || `Could not find a document for "${rec.topic}".`, { id: 'doc-find-toast' });
-                    return; // Stop execution if document not found
+                    return;
                 }
                 break;
             }
             default:
                 toast.error(`Unknown recommendation type: ${rec.actionType}`);
-                return; // Stop execution
+                return;
         }
         
         toast.success(`Exploring "${rec.topic}" for you...`);
@@ -12733,7 +12757,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 isOpen={isCoachModalOpen}
                 onClose={() => setIsCoachModalOpen(false)}
                 onApply={(improvedPrompt) => {
-                    // This logic now lives here, where it can set the initial prompt state
                     setInitialPromptForNewSession(improvedPrompt);
                 }}
                 data={coachData}
@@ -14322,7 +14345,9 @@ const AcademicIntegrityPage = () => {
 
             // Update progress based on synchronous results
             if(initialReport.bias) setCurrentStep(1);
-            if(initialReport.readability``) setCurrentStep(2);
+            // --- THIS IS THE FIX ---
+            if(initialReport.readability) setCurrentStep(2);
+            // --- END FIX ---
             if(initialReport.plagiarism) setCurrentStep(3);
             
             // If plagiarism check is pending, start polling
@@ -14979,8 +15004,8 @@ export default CodeExecutorPage;
 ```javascript
 // frontend/src/components/tools/IntegrityReportPanel.jsx
 import React from 'react';
-import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale, BookOpen } from 'lucide-react';
+import ReadabilityMetrics from './ReadabilityMetrics'; // <-- NEW IMPORT
 
 const Section = ({ title, icon: Icon, children }) => (
     <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
@@ -15029,7 +15054,7 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
         );
     }
 
-    const { plagiarism, bias, facts } = report;
+    const { plagiarism, bias, readability } = report; // <-- ADDED readability
 
     return (
         <div className="h-full flex flex-col bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
@@ -15075,31 +15100,13 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                     {/* --- END OF FIX --- */}
                 </Section>
 
-                {/* Fact-Checking Section */}
-                <Section title="Fact-Checking" icon={Lightbulb}>
-                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
-                    {Array.isArray(facts) ? (
-                        facts.length === 0 ? (
-                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
-                        ) : (
-                            <ul className="space-y-3">
-                                {facts.map((item, i) => (
-                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
-                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
-                                        onClick={() => onFindingSelect(item)}
-                                    >
-                                        <p><strong>Claim:</strong> "{item.claim}"</p>
-                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
-                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
-                                    </li>
-                                ))}
-                            </ul>
-                        )
+                {/* --- NEW Readability Section --- */}
+                <Section title="Readability Analysis" icon={BookOpen}>
+                    {readability?.status === 'error' ? (
+                        <p className="text-red-500">{readability.message}</p>
                     ) : (
-                        // If facts is not an array, it's our error object.
-                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
+                        <ReadabilityMetrics metrics={readability} />
                     )}
-                     {/* --- END OF FIX --- */}
                 </Section>
             </div>
         </div>
@@ -15652,6 +15659,194 @@ export default QuizSetup;
     transform: rotate(-90deg);
     transform-origin: 50% 50%;
 }
+```
+
+`frontend/src/components/tools/ReadabilityMetrics.jsx`
+
+```javascript
+// frontend/src/components/tools/ReadabilityMetrics.jsx
+import React from 'react';
+import './ReadabilityMetrics.css';
+
+const Gauge = ({ value, maxValue, label, tooltip, higherIsBetter = true }) => {
+    const radius = 50;
+    const circumference = 2 * Math.PI * radius;
+    const arcLength = circumference * 0.75; // Use 3/4 of the circle
+    
+    let progress = Math.max(0, Math.min(value / maxValue, 1));
+    if (!higherIsBetter) {
+        progress = 1 - progress; // Invert progress for metrics where lower is better
+    }
+
+    const offset = arcLength - progress * arcLength;
+
+    let colorClass = 'stroke-green-500';
+    if (progress < 0.66) colorClass = 'stroke-yellow-500';
+    if (progress < 0.33) colorClass = 'stroke-red-500';
+
+    return (
+        <div className="flex flex-col items-center group relative" title={tooltip}>
+            <svg width="120" height="120" viewBox="0 0 120 120">
+                {/* Background arc */}
+                <circle
+                    className="text-gray-200 dark:text-gray-700"
+                    strokeWidth="10" stroke="currentColor" fill="transparent"
+                    r={radius} cx="60" cy="60"
+                    strokeDasharray={arcLength} strokeDashoffset="0"
+                    strokeLinecap="round" transform="rotate(135, 60, 60)"
+                />
+                {/* Progress arc */}
+                <circle
+                    className={`gauge-progress-circle ${colorClass}`}
+                    strokeWidth="10" stroke="currentColor" fill="transparent"
+                    r={radius} cx="60" cy="60"
+                    strokeDasharray={arcLength} strokeDashoffset={offset}
+                    strokeLinecap="round" transform="rotate(135, 60, 60)"
+                />
+                <text x="50%" y="50%" textAnchor="middle" dy=".3em" className="text-2xl font-bold fill-current text-text-light dark:text-text-dark">
+                    {value.toFixed(1)}
+                </text>
+            </svg>
+            <span className="text-xs font-semibold mt-1 text-center">{label}</span>
+        </div>
+    );
+};
+
+const ReadabilityMetrics = ({ metrics }) => {
+    if (!metrics || Object.keys(metrics).length === 0) {
+        return <p className="text-text-muted-light dark:text-text-muted-dark">No readability data available.</p>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Simple Stat Cards */}
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Word Count</p>
+                    <p className="text-2xl font-bold">{metrics.wordCount}</p>
+                </div>
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Sentence Count</p>
+                    <p className="text-2xl font-bold">{metrics.sentenceCount}</p>
+                </div>
+                <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Avg. Sentence</p>
+                    <p className="text-2xl font-bold">{metrics.avgSentenceLength} words</p>
+                </div>
+                 <div className="p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg text-center">
+                    <p className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">Dale-Chall Score</p>
+                    <p className="text-2xl font-bold" title="Scores 9.0-9.9 are understandable by an average 11th/12th grader. Lower is easier.">{metrics.daleChall.toFixed(1)}</p>
+                </div>
+            </div>
+            {/* Gauge Visualizations */}
+             <div className="flex justify-around items-center flex-wrap gap-4 pt-4 border-t border-dashed border-border-light dark:border-border-dark">
+                <Gauge value={metrics.fleschReadingEase} maxValue={100} label="Reading Ease" tooltip="Higher scores are easier to read. 60-70 is standard for most documents." higherIsBetter={true} />
+                <Gauge value={metrics.fleschKincaidGrade} maxValue={20} label="Grade Level" tooltip="Indicates the US school-grade level needed to understand the text. Lower is easier." higherIsBetter={false} />
+                <Gauge value={metrics.gunningFog} maxValue={20} label="Gunning Fog Index" tooltip="Estimates the years of formal education needed. A score around 12 is widely readable." higherIsBetter={false} />
+            </div>
+        </div>
+    );
+};
+
+export default ReadabilityMetrics;
+```
+
+`frontend/src/components/tools/ReferenceFormatter.jsx`
+
+```javascript
+// frontend/src/components/tools/ReferenceFormatter.jsx
+import React, { useState } from 'react';
+import { Clipboard, Check, Sparkles, Loader2 } from 'lucide-react';
+import Button from '../core/Button';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+
+const ReferenceFormatter = () => {
+    const [rawText, setRawText] = useState('');
+    const [formattedText, setFormattedText] = useState('');
+    const [style, setStyle] = useState('APA');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isCopied, setIsCopied] = useState(false);
+
+    const handleFormat = async () => {
+        if (!rawText.trim()) {
+            toast.error("Please paste your references to format.");
+            return;
+        }
+        setIsLoading(true);
+        setFormattedText('');
+        try {
+            const response = await api.formatReferences({ text: rawText, style });
+            const formattedResult = response.formatted_references.join('\n\n');
+            setFormattedText(formattedResult);
+        } catch (error) {
+            toast.error(error.message || "Failed to format references.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(formattedText).then(() => {
+            setIsCopied(true);
+            toast.success("Formatted references copied!");
+            setTimeout(() => setIsCopied(false), 2000);
+        });
+    };
+
+    return (
+        <div className="p-4 md:p-6 h-full flex flex-col">
+            <div className="flex-shrink-0 mb-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <div>
+                    <h2 className="text-lg font-bold">AI-Powered Reference Formatter</h2>
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Paste your bibliography and let AI format it into a consistent style.</p>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <select value={style} onChange={(e) => setStyle(e.target.value)} className="input-field w-full sm:w-auto">
+                        <option>APA</option>
+                        <option>MLA</option>
+                        <option>Chicago</option>
+                        <option>IEEE</option>
+                    </select>
+                    <Button onClick={handleFormat} isLoading={isLoading} leftIcon={<Sparkles size={16}/>}>
+                        Format
+                    </Button>
+                </div>
+            </div>
+            <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden">
+                <div className="flex flex-col">
+                    <label className="font-semibold mb-1">Paste Raw References Here</label>
+                    <textarea
+                        value={rawText}
+                        onChange={(e) => setRawText(e.target.value)}
+                        placeholder="Paste your messy references, bibliography, or works cited here..."
+                        className="input-field flex-grow resize-none custom-scrollbar"
+                    />
+                </div>
+                <div className="flex flex-col">
+                    <div className="flex justify-between items-center mb-1">
+                        <label className="font-semibold">Formatted Result</label>
+                        {formattedText && (
+                            <Button onClick={handleCopy} variant="ghost" size="sm" leftIcon={isCopied ? <Check size={14}/> : <Clipboard size={14}/>}>
+                                {isCopied ? 'Copied' : 'Copy'}
+                            </Button>
+                        )}
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-md p-3 flex-grow overflow-auto custom-scrollbar relative">
+                        {isLoading && (
+                             <div className="absolute inset-0 flex items-center justify-center bg-surface-light/50 dark:bg-surface-dark/50">
+                                <Loader2 size={24} className="animate-spin text-primary"/>
+                            </div>
+                        )}
+                        <pre className="whitespace-pre-wrap text-sm">{formattedText}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ReferenceFormatter;
 ```
 
 `frontend/src/components/tools/TestCaseManager.jsx`
@@ -17428,7 +17623,41 @@ const api = {
     const response = await apiClient.delete(`/learning/paths/${pathId}`);
     return response.data;
   },
+   generateDocumentFromTopic: async (payload) => {
+    const { topic, docType } = payload;
+    const response = await apiClient.post(
+      `/generate/document/from-topic`,
+      { topic, docType },
+      { responseType: "blob" } // CRITICAL: This tells axios to expect a file
+    );
+
+    // Extract filename from the 'Content-Disposition' header
+    const contentDisposition = response.headers["content-disposition"];
+    let filename = `generated-document.${docType}`; // a fallback
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = filenameMatch[1];
+      }
+    }
+    
+    // Create a temporary link to trigger the browser's automatic download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+
+    // Clean up the temporary link from memory
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    return { success: true, filename }; // Return success status for the toast
+  },
+
 };
+
 
 export default api;
 ```
@@ -17673,20 +17902,30 @@ export default defineConfig({
 `server/.env`
 
 ```
+#server env
+
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+# ENCRYPTION_SECRET=your_generated_64_character_hex_string_here
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyDAWe6VKqmUfZKk7oWCByrUEDrn06sCtbc"
+# GEMINI_API_KEY="AIzaSyAs2yfPBnCTjUcjuy8cwYRUdx23cECrqcI"
 GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
-PROMPT_COACH_GEMINI_MODEL=gemini-2.5-pro
-PROMPT_COACH_OLLAMA_MODEL=qwen2.5:14b-instruct
 PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
+# OLLAMA_API_BASE_URL="http://172.180.9.187:11434"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
 ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
 REDIS_URL="redis://localhost:6379"
+# --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
 
+# --- Turnitin Core API Credentials ---
+TURNITIN_API_URL="https://your-institution.turnitin.com/api/v1"
+TURNITIN_API_KEY="your_api_key"
+TURNITIN_API_SECRET="your_api_secret"
 ```
 
 `server/config/db.js`
@@ -19551,6 +19790,97 @@ const connectRedis = async () => {
 module.exports = { redisClient, connectRedis };
 ```
 
+`server/controllers/generationController.js`
+
+```javascript
+// server/controllers/generationController.js
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
+
+async function proxyToFileGeneration(req, res, endpoint, payload) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "Document generation service is not configured." });
+    }
+    const generationUrl = `${pythonServiceUrl}${endpoint}`;
+    
+    try {
+        console.log(`[GenController] Proxying request to Python: ${generationUrl}`);
+        const pythonResponse = await axios.post(generationUrl, payload, {
+            responseType: 'stream', // CRITICAL: Receive the response as a stream
+            timeout: 600000 // 10 minute timeout
+        });
+
+        // Pipe the file stream from Python directly back to the client
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        pythonResponse.data.pipe(res);
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Failed to generate document via proxy.";
+        console.error(`[GenController] Error proxying to Python service:`, errorMsg);
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
+    }
+}
+
+exports.generateDocument = async (req, res) => {
+    const { markdownContent, docType, sourceDocumentName } = req.body;
+    const userId = req.user._id;
+
+    try {
+        let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) apiKeyForRequest = decrypt(user.encryptedApiKey);
+        } else {
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
+            }
+        }
+        
+        if (!sourceDocumentText) return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document', {
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocument handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+
+exports.generateDocumentFromTopic = async (req, res) => {
+    const { topic, docType } = req.body;
+    const userId = req.user._id;
+
+    try {
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document_from_topic', {
+            topic, docType, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocumentFromTopic handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+```
+
 `server/middleware/authMiddleware.js`
 
 ```javascript
@@ -21136,17 +21466,12 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils
 import knowledge_engine
 import media_processor
-
+import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
-import subprocess
-import tempfile
-import shutil
-import json
-
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21160,16 +21485,18 @@ config.setup_logging()
 try:
     from vector_db_service import VectorDBService
     import ai_core
-    import neo4j_handler 
+    import neo4j_handler
     from neo4j import exceptions as neo4j_exceptions
+    from tts_service import initialize_tts
     import document_generator
     import podcast_generator
     import google.generativeai as genai
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
-    import asyncio 
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
+    import asyncio
+
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -21184,10 +21511,6 @@ try:
         logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
 
     def llm_wrapper(prompt, api_key=None):
-        """
-        A flexible wrapper for the Gemini API that can use a provided per-request API key
-        or fall back to the server's global key.
-        """
         key_to_use = api_key or config.GEMINI_API_KEY
         if not key_to_use:
             raise ConnectionError("Gemini API Key is not configured for this request.")
@@ -21242,6 +21565,9 @@ try:
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
 atexit.register(neo4j_handler.close_driver)
+
+initialize_tts()
+
 
 def create_error_response(message, status_code=500, details=None):
     log_message = f"API Error ({status_code}): {message}"
@@ -21670,26 +21996,20 @@ def export_podcast_route():
         return create_error_response("Missing 'sourceDocumentText', 'analysisContent', or 'api_key'", 400)
 
     try:
+        # 1. Generate the script using the LLM (no change here)
         script = podcast_generator.generate_podcast_script(
             source_document_text, 
             analysis_content,
             podcast_options,
             lambda p: llm_wrapper(p, api_key)
         )
-        
-        temp_gtts_filename = f"podcast_gtts_{uuid.uuid4()}.mp3"
-        temp_gtts_path = os.path.join(app.config['GENERATED_DOCS_DIR'], temp_gtts_filename)
-        podcast_generator.synthesize_audio_with_gtts(script, temp_gtts_path)
 
-        sound = AudioSegment.from_mp3(temp_gtts_path)
-        sped_up_sound = sound.speedup(playback_speed=1.20)
-        
+        # 2. Synthesize the script into a high-quality, dual-speaker MP3
         final_mp3_filename = f"podcast_final_{uuid.uuid4()}.mp3"
         final_mp3_path = os.path.join(app.config['GENERATED_DOCS_DIR'], final_mp3_filename)
-        
-        sped_up_sound.export(final_mp3_path, format="mp3")
-        os.remove(temp_gtts_path)
+        podcast_generator.create_podcast_from_script(script, final_mp3_path)
 
+        # 3. Send the file to the user and clean up afterwards
         @after_this_request
         def cleanup(response):
             try: os.remove(final_mp3_path)
@@ -21700,21 +22020,6 @@ def export_podcast_route():
     except Exception as e:
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
-
-@app.route('/generate_document', methods=['POST'])
-def generate_document_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
-    if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
-        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
-        if doc_type == 'pptx': document_generator.create_ppt(slides, path)
-        else: document_generator.create_doc(slides, path, "text_content")
-        return jsonify({"success": True, "filename": filename}), 201
-    except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
@@ -21802,72 +22107,190 @@ def query_kg_route():
         return create_error_response(f"KG query failed: {str(e)}", 500)
 
 
+
 @app.route('/analyze_integrity', methods=['POST'])
 def analyze_integrity_route():
     data = request.get_json()
-    text = data.get('text')
-    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
-    api_key = data.get('api_key')
-
+    text, checks, api_key = data.get('text'), data.get('checks', []), data.get('api_key')
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
+    results = {}
+    llm_func = lambda p: llm_wrapper(p, api_key)
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            if 'plagiarism' in checks:
+                try:
+                    submission_id = await submit_to_turnitin(session, text)
+                    results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+                except Exception as e:
+                    logger.error(f"Turnitin submission failed: {e}", exc_info=True)
+                    results['plagiarism'] = {"status": "error", "message": str(e)}
+    
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        results = {}
-        
-        # --- Plagiarism (Async Start) ---
-        if 'plagiarism' in checks:
-            try:
-                submission_id = loop.run_until_complete(submit_to_turnitin(text))
-                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-            except Exception as e:
-                logger.error(f"Turnitin submission failed: {e}")
-                results['plagiarism'] = {"status": "error", "message": str(e)}
-
-        # --- Bias & Fact-Checking (Sync) ---
-        llm_func = lambda p: llm_wrapper(p, api_key)
+        asyncio.run(main())
         
         if 'bias' in checks:
             try:
-                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+                results['bias'] = check_bias_hybrid(text, llm_func)
             except Exception as e:
-                logger.error(f"Bias check failed: {e}")
+                logger.error(f"Bias check failed: {e}", exc_info=True)
                 results['bias'] = {"status": "error", "message": str(e)}
-
-        # --- THIS IS THE REPLACEMENT ---
+        
         if 'readability' in checks:
             try:
-                results['readability'] = integrity_services.analyze_readability(text)
+                results['readability'] = calculate_readability(text)
             except Exception as e:
-                logger.error(f"Readability check failed: {e}")
+                logger.error(f"Readability check failed: {e}", exc_info=True)
                 results['readability'] = {"status": "error", "message": str(e)}
-        # --- END REPLACEMENT ---
-        
-        loop.close()
-        return jsonify(results), 200
 
+        return jsonify(results), 200
     except Exception as e:
         return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
-        
-             
+
+
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
-    data = request.get_json()
-    submission_id = data.get('submissionId')
+    submission_id = request.json.get('submissionId')
     if not submission_id:
         return create_error_response("Missing 'submissionId'", 400)
-        
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            return await integrity_services.get_turnitin_report(session, submission_id)
+
     try:
-        # Run the async report fetching function in a managed event loop
-        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
+        report = asyncio.run(main())
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
+
+
+# server/rag_service/app.py
+# ... (imports and other routes remain the same) ...
+
+@app.route('/generate_document', methods=['POST'])
+def generate_document_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    outline = data.get('markdownContent')
+    doc_type = data.get('docType')
+    source_text = data.get('sourceDocumentText')
+    api_key = data.get('api_key')
+
+    if not all([outline, doc_type, source_text, api_key]):
+        return create_error_response("Missing required fields for document generation", 400)
+        
+    try:
+        # 1. Expand content using LLM (No change here)
+        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
+        
+        # 2. Parse the LLM output (No change here)
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(expanded_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(expanded_content)
+
+        # --- THIS IS THE FIX ---
+        # 3. Validate the parsed data BEFORE creating a file
+        if not parsed_data or not isinstance(parsed_data, list) or len(parsed_data) == 0:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()}. The parsed data was empty or invalid.")
+            raise ValueError(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file. Please try rephrasing or using a different source document.")
+        # --- END OF FIX ---
+
+        # 4. Create the physical file (Now guaranteed to have valid data)
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', outline)[:50]
+        filename = f"gen_{safe_name}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        # 5. Schedule cleanup and send the file (No change here)
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up generated file: {file_path}")
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+
+    except Exception as e:
+        logger.error(f"Error during document generation from content: {e}", exc_info=True)
+        # The ValueError from our validation step will be caught here
+        return create_error_response(f"Failed to generate document: {str(e)}", 500)
+
+
+@app.route('/generate_document_from_topic', methods=['POST'])
+def generate_document_from_topic_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    topic = data.get('topic')
+    doc_type = data.get('docType')
+    api_key = data.get('api_key')
+
+    if not all([topic, doc_type, api_key]):
+        return create_error_response("Missing 'topic', 'docType', or 'api_key'", 400)
+
+    try:
+        # 1. Generate the content from scratch (No change here)
+        generated_content = document_generator.generate_content_from_topic(
+            topic, 
+            doc_type, 
+            lambda p: llm_wrapper(p, api_key)
+        )
+
+        # 2. Parse the generated content (No change here)
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(generated_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(generated_content)
+
+        # --- THIS IS THE FIX ---
+        # 3. Validate the parsed data BEFORE creating a file
+        if not parsed_data or not isinstance(parsed_data, list) or len(parsed_data) == 0:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()} on topic '{topic}'.")
+            raise ValueError(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file based on that topic. Please try a different topic.")
+        # --- END OF FIX ---
+
+        # 4. Create the physical file (Now guaranteed to have valid data)
+        safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
+        filename = f"gen_{safe_topic}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        # 5. Send the file and schedule cleanup (No change here)
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up generated file: {file_path}")
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
+        # The ValueError from our validation step will also be caught here
+        return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -22807,6 +23230,10 @@ from pptx.enum.text import PP_ALIGN
 from docx import Document
 from docx.shared import Inches as DocxInches
 import logging
+from prompts import (
+    PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE,
+    DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23021,6 +23448,25 @@ def create_doc(slides_data, output_path, content_key="text_content"):
         doc.add_paragraph("[No content to generate]")
     doc.save(output_path)
     return True
+
+
+def generate_content_from_topic(topic, doc_type, llm_function):
+    """Uses an LLM to generate document content from scratch based on a topic."""
+    logger.info(f"Generating content for a new '{doc_type}' on topic: '{topic}'")
+
+    if doc_type == 'pptx':
+        prompt = PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+    else: # for 'docx'
+        prompt = DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+
+    generated_content = llm_function(prompt)
+    
+    if not generated_content or not generated_content.strip():
+        raise ValueError("LLM failed to generate content from the topic.")
+    
+    logger.info(f"LLM generated content from topic. Length: {len(generated_content)}")
+    return generated_content
+
 ```
 
 `server/rag_service/file_parser.py`
@@ -23207,52 +23653,38 @@ def chunk_text(text, file_name, user_id):
 ```python
 # server/rag_service/integrity_services.py
 import logging
-import requests
 import time
 import re
 import json
 from typing import Dict, Any, List
-import textstat
+import asyncio
+import aiohttp
+
 import config
-from prompts import (
-    BIAS_CHECK_PROMPT_TEMPLATE, 
-    FACT_CHECK_EXTRACT_PROMPT_TEMPLATE,
-    FACT_CHECK_VERIFY_PROMPT_TEMPLATE
-)
-from academic_search import search_all_apis as academic_search
-from ddgs import DDGS
+from prompts import BIAS_CHECK_PROMPT_TEMPLATE
+import textstat
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache for Turnitin token
 turnitin_token_cache = { "token": None, "expires_at": 0 }
 
-# --- NEW: Robust JSON Extraction Helper ---
 def _extract_json_from_llm_response(text: str) -> Dict[str, Any]:
-    """
-    Finds and parses a JSON object from a string that might contain other text,
-    including markdown code fences.
-    """
-    # Pattern to find JSON within ```json ... ``` or just ``` ... ```
     json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
     if json_match:
         json_string = json_match.group(1)
     else:
-        # Fallback to finding the first '{' and the last '}'
         start_index = text.find('{')
         end_index = text.rfind('}')
         if start_index != -1 and end_index != -1 and end_index > start_index:
             json_string = text[start_index:end_index+1]
         else:
             raise ValueError("No valid JSON object found in the LLM response.")
-            
     return json.loads(json_string)
-# --- END NEW HELPER ---
-
 
 # --- Plagiarism Service (Turnitin) ---
-# ... (get_turnitin_auth_token, submit_to_turnitin, get_turnitin_report functions remain exactly the same) ...
-async def get_turnitin_auth_token() -> str:
+
+async def get_turnitin_auth_token(session: aiohttp.ClientSession) -> str:
     """Gets a JWT from Turnitin, using a simple in-memory cache."""
     if turnitin_token_cache["token"] and time.time() < turnitin_token_cache["expires_at"]:
         return turnitin_token_cache["token"]
@@ -23268,54 +23700,51 @@ async def get_turnitin_auth_token() -> str:
     }
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     
-    response = requests.post(url, data=payload, headers=headers)
-    response.raise_for_status()
-    data = response.json()
+    async with session.post(url, data=payload, headers=headers) as response:
+        response.raise_for_status()
+        data = await response.json()
 
-    turnitin_token_cache["token"] = data['access_token']
-    turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60  # 60s buffer
-    return data['access_token']
+        turnitin_token_cache["token"] = data['access_token']
+        turnitin_token_cache["expires_at"] = time.time() + data['expires_in'] - 60
+        return data['access_token']
 
-async def submit_to_turnitin(text: str, filename: str = "pasted_text.txt") -> str:
+async def submit_to_turnitin(session: aiohttp.ClientSession, text: str, filename: str = "pasted_text.txt") -> str:
     """Submits text to Turnitin and returns a submission ID."""
-    token = await get_turnitin_auth_token()
+    token = await get_turnitin_auth_token(session)
     url = f"{config.TURNITIN_API_URL}/submissions"
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     payload = {
-        'owner': 'api-user@example.com', # A generic owner identifier
+        'owner': 'api-user@example.com',
         'title': f"Integrity Check - {filename}",
         'file_content': text
     }
+    
+    async with session.post(url, json=payload, headers=headers) as response:
+        response.raise_for_status()
+        data = await response.json()
+        return data['id']
 
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    return response.json()['id']
-
-async def get_turnitin_report(submission_id: str) -> Dict[str, Any]:
+async def get_turnitin_report(session: aiohttp.ClientSession, submission_id: str) -> Dict[str, Any]:
     """Polls for and returns the final Turnitin similarity report."""
-    token = await get_turnitin_auth_token()
+    token = await get_turnitin_auth_token(session)
     report_url = f"{config.TURNITIN_API_URL}/submissions/{submission_id}/similarity_report"
     headers = {'Authorization': f'Bearer {token}'}
 
-    for _ in range(12):  # Poll for up to 2 minutes (12 * 10s)
-        response = requests.get(report_url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 202: # Accepted, but not ready
-            time.sleep(10)
-        else:
-            response.raise_for_status()
+    for _ in range(12):
+        async with session.get(report_url, headers=headers) as response:
+            if response.status == 200:
+                return await response.json()
+            elif response.status == 202:
+                await asyncio.sleep(10)
+            else:
+                response.raise_for_status()
     raise TimeoutError("Turnitin report generation timed out after 2 minutes.")
 
 
 # --- Bias & Inclusivity Service ---
-
 def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
-    """Performs a hybrid check for biased language."""
     from bias_wordlists import INCLUSIVE_LANGUAGE_REPLACEMENTS
-    
     findings = []
-    # 1. Fast library check
     for term, suggestion in INCLUSIVE_LANGUAGE_REPLACEMENTS.items():
         if re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE):
             findings.append({
@@ -23323,117 +23752,34 @@ def check_bias_hybrid(text: str, llm_function) -> List[Dict[str, str]]:
                 "reason": "This term may have a more inclusive or objective alternative.", 
                 "suggestion": suggestion
             })
-
-    # 2. Deep LLM check
-    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+    prompt = BIAS_CHECK_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000])
     try:
         response_text = llm_function(prompt)
-        # --- THIS IS THE FIX ---
         llm_findings = _extract_json_from_llm_response(response_text).get("findings", [])
         findings.extend(llm_findings)
     except Exception as e:
         logger.error(f"LLM bias check failed: {e}")
-        # Optionally, re-raise or handle the error, but don't let it crash
-        # For now, we log it and proceed with only the wordlist findings.
-
-    # Deduplicate findings
     unique_findings = {f['text'].lower(): f for f in findings}
     return list(unique_findings.values())
 
 
-# --- Fact-Checking Service ---
-async def check_facts_agentic(text: str, llm_function) -> List[Dict[str, str]]:
-    """Performs an agentic workflow to fact-check claims."""
-    # 1. Extract Claims
-    extract_prompt = FACT_CHECK_EXTRACT_PROMPT_TEMPLATE.format(text_to_analyze=text[:30000]) # Limit context
+# --- Readability Service ---
+def calculate_readability(text: str) -> Dict[str, Any]:
+    """Calculates various readability metrics for the given text."""
+    logger.info(f"Calculating readability for text of length {len(text)}")
     try:
-        # --- THIS IS THE FIX ---
-        extract_response = llm_function(extract_prompt)
-        claims = _extract_json_from_llm_response(extract_response).get("claims", [])
-    except Exception as e:
-        logger.error(f"Fact-check claim extraction failed: {e}")
-        return [{"claim": "Error", "status": "Failed", "evidence": "Error during claim extraction."}]
-
-    if not claims: return []
-
-    # 2. Verify each claim
-    verified_claims = []
-    for claim in claims:
-        # 2a. Gather Evidence
-        web_results = []
-        try:
-            with DDGS() as ddgs:
-                web_results = list(ddgs.text(claim, max_results=3))
-        except Exception as e:
-            logger.warning(f"DDGS web search failed for claim '{claim}': {e}")
-        
-        academic_results = await academic_search(claim, 2)
-        
-        search_results_text = "WEB RESULTS:\n"
-        search_results_text += "\n\n".join([f"[{i+1}] {r['title']}\n{r['body']}" for i, r in enumerate(web_results)])
-        search_results_text += "\n\nACADEMIC RESULTS:\n"
-        search_results_text += "\n\n".join([f"[A{i+1}] {r['title']}\n{r['summary']}" for i, r in enumerate(academic_results)])
-
-        # 2b. Synthesize & Verify
-        verify_prompt = FACT_CHECK_VERIFY_PROMPT_TEMPLATE.format(claim=claim, search_results=search_results_text)
-        try:
-            # --- THIS IS THE FIX ---
-            verify_response = llm_function(verify_prompt)
-            synthesis = _extract_json_from_llm_response(verify_response)
-            verified_claims.append({"claim": claim, **synthesis})
-
-            # time.sleep(4)
-
-        except Exception as e:
-            logger.error(f"Fact-check synthesis failed for claim '{claim}': {e}")
-            verified_claims.append({"claim": claim, "status": "Error", "evidence": "AI synthesis failed."})
-
-    return verified_claims
-
-
-def analyze_readability(text: str) -> Dict[str, Any]:
-    """
-    Analyzes the text for readability using the textstat library.
-    Returns a dictionary of key metrics.
-    """
-    if not text or not text.strip():
-        return {}
-        
-    logger.info("Performing readability analysis...")
-    try:
-        # Flesch Reading Ease: Score from 0-100. Higher is easier. 60-70 is standard.
-        flesch_ease = textstat.flesch_reading_ease(text)
-        
-        # Flesch-Kincaid Grade Level: US school grade level equivalent.
-        flesch_grade = textstat.flesch_kincaid_grade(text)
-        
-        # Gunning Fog Index: Grade level, higher is harder.
-        gunning_fog = textstat.gunning_fog(text)
-        
-        # Dale-Chall Readability Score: Best for general audiences.
-        dale_chall = textstat.dale_chall_readability_score(text)
-        
-        # Word Count
-        word_count = textstat.lexicon_count(text, removepunct=True)
-        
-        # Sentence Count
-        sentence_count = textstat.sentence_count(text)
-
-        # Average sentence length
-        avg_sentence_length = round(word_count / sentence_count, 2) if sentence_count > 0 else 0
-
         return {
-            "fleschReadingEase": flesch_ease,
-            "fleschKincaidGrade": flesch_grade,
-            "gunningFog": gunning_fog,
-            "daleChall": dale_chall,
-            "wordCount": word_count,
-            "sentenceCount": sentence_count,
-            "avgSentenceLength": avg_sentence_length
+            "fleschReadingEase": textstat.flesch_reading_ease(text),
+            "fleschKincaidGrade": textstat.flesch_kincaid_grade(text),
+            "gunningFog": textstat.gunning_fog(text),
+            "daleChall": textstat.dale_chall_readability_score(text),
+            "wordCount": textstat.lexicon_count(text, removepunct=True),
+            "sentenceCount": textstat.sentence_count(text),
+            "avgSentenceLength": textstat.avg_sentence_length(text),
         }
     except Exception as e:
-        logger.error(f"Textstat readability analysis failed: {e}")
-        raise ValueError(f"Could not compute readability scores: {e}")
+        logger.error(f"Readability calculation failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to calculate metrics: {str(e)}"}
 ```
 
 `server/rag_service/knowledge_engine.py`
@@ -23929,30 +24275,34 @@ def search_knowledge_graph(user_id: str, document_name: str, query_text: str) ->
 `server/rag_service/podcast_generator.py`
 
 ```python
-
 # server/rag_service/podcast_generator.py
 import logging
 import re
-from gtts import gTTS
+from pydub import AudioSegment
+import tts_service  # Import our high-quality TTS service
 
 logger = logging.getLogger(__name__)
 
+# --- PROMPT UPDATED FOR THREE SPEAKERS ---
 PODCAST_SCRIPT_PROMPT_TEMPLATE = """
-You are an AI podcast script generator. Your SOLE task is to generate a realistic, two-speaker educational dialogue based on the provided text. The script should be substantial, aiming for a length of at least 600-800 words to ensure a meaningful discussion.
+You are an AI podcast script generator. Your SOLE task is to generate a highly realistic, emotionally engaging, three-speaker educational dialogue based on the provided text. The script should sound like real people collaborating, complete with natural flow, occasional laughter, casual banter, and distinct personalities.
 
-**CRITICAL INSTRUCTION:** Your entire output must be ONLY the script itself. Start directly with "SPEAKER_A:". Do NOT include any preamble, introduction, or metadata like "Here is the script:".
+**CRITICAL INSTRUCTION:** Your entire output must be ONLY the script itself. Start directly with "SPEAKER_C:". Do NOT include any preamble, introduction, or metadata like "Here is the script:".
 
 ---
 ## Podcast Style Guide
-- **Format**: Two-speaker conversational podcast.
-- **SPEAKER_A**: The "Curious Learner". Asks clarifying questions and drives the conversation.
-- **SPEAKER_B**: The "Expert Teacher". Provides clear, detailed explanations based on the document.
-- **Dialogue Flow**: Natural back-and-forth. Create at least 5-7 exchanges.
+- **Format**: Three-speaker conversational podcast.
+- **SPEAKER_A**: The "Curious Learner" (Female Voice). Asks insightful and sometimes playful or puzzled questions, often relating topics to everyday experiences. Brings warmth and emotional curiosity to the discussion.
+- **SPEAKER_B**: The "Expert Teacher" (Male Voice). Offers rich, articulate explanations using metaphors, relatable examples, and the occasional witty comment. Confident but not robotic — he should show excitement when explaining something cool or important.
+- **SPEAKER_C**: The "Podcast Host" (Male Voice). Friendly, energetic, and sometimes humorous. Opens and steers the conversation, keeps it on track, and wraps up each segment with key takeaways. Brings moments of laughter, “aha!” moments, or surprise reactions to keep things lively.
+- **Tone**: Natural, engaging, collaborative, warm, and sometimes humorous. Do not be afraid to insert laughter (e.g., [laughs], [chuckles]) or expressions (e.g., “Wow!”, “That’s wild!”, “Wait, really?”) to mimic real-life conversations.
+- **Dialogue Flow**: The Host (C) starts the podcast. Ensure an authentic, dynamic back-and-forth among all speakers. Create at least 8–10 meaningful exchanges to ensure a deep and flowing discussion.
+- **Add Personality**: Speakers should occasionally react to each other’s points (e.g., “That’s a great point, B!”, “Exactly!”, “Oof, I never thought of it that way!”). Avoid making it too scripted or flat — let the speakers interrupt briefly, joke, or affirm each other naturally.
 
 ---
 ## Task-Specific Instructions
 - **Podcast Purpose**: {purpose_instruction}
-- **Podcast Length**: {length_instruction}
+- **Podcast Length**: {length_instruction} (Minimum 800–1000 words. Don’t rush through the discussion — let each speaker fully express thoughts and responses.)
 
 ---
 ## Source Material
@@ -23961,12 +24311,13 @@ You are an AI podcast script generator. Your SOLE task is to generate a realisti
 **DOCUMENT TEXT (Use this for all factual answers):**
 {document_content}
 ---
-**FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_A:"):**
+**FINAL SCRIPT OUTPUT (Remember: Start IMMEDIATELY with "SPEAKER_C:")**
 """
 
+
 def generate_podcast_script(source_document_text, outline_content, podcast_options, llm_function):
-    """Generates a two-speaker podcast script using the LLM with dynamic options."""
-    logger.info(f"Generating podcast script with options: {podcast_options}")
+    """Generates a three-speaker podcast script using the LLM with dynamic options."""
+    logger.info(f"Generating 3-speaker podcast script with options: {podcast_options}")
 
     purpose_map = {
         'introduction': "Focus on high-level concepts and definitions. Assume the listener is new to the topic. Keep explanations simple and clear.",
@@ -23994,25 +24345,55 @@ def generate_podcast_script(source_document_text, outline_content, podcast_optio
     script = llm_function(prompt)
     if not script or not script.strip():
         raise ValueError("LLM failed to generate a podcast script.")
-    logger.info(f"LLM generated podcast script. Length: {len(script)}")
+    logger.info(f"LLM generated 3-speaker podcast script. Length: {len(script)}")
     return script
 
-def synthesize_audio_with_gtts(text: str, output_path: str):
+def create_podcast_from_script(script: str, output_path: str):
     """
-    Synthesizes audio from text using the gTTS library and saves it as an MP3.
+    Synthesizes a full podcast from a script using the multi-speaker TTS service.
+    
+    Args:
+        script (str): The script with SPEAKER_A, SPEAKER_B, and SPEAKER_C labels.
+        output_path (str): The path to save the final MP3 file.
     """
-    logger.info(f"Synthesizing audio with gTTS for text of length {len(text)}...")
+    logger.info(f"Starting high-quality 3-speaker podcast synthesis for script of length {len(script)}.")
     
-    clean_text = re.sub(r'SPEAKER_[AB]:', '', text).replace('*', '').replace('#', '').strip()
-    
-    try:
-        tts = gTTS(text=clean_text, lang='en', slow=False)
-        tts.save(output_path)
-        logger.info(f"gTTS audio saved successfully to {output_path}")
-    except Exception as e:
-        logger.error(f"gTTS failed during synthesis: {e}", exc_info=True)
-        raise IOError("Text-to-Speech synthesis with gTTS failed.") from e
+    final_podcast = AudioSegment.empty()
+    silence_between_speakers = AudioSegment.silent(duration=700)
 
+    lines = script.strip().split('\n')
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+
+        # --- REGEX UPDATED FOR THREE SPEAKERS (A, B, or C) ---
+        match = re.match(r'SPEAKER_([ABC]):\s*(.*)', line, re.IGNORECASE)
+        if match:
+            speaker, text = match.groups()
+            text = text.strip()
+
+            if text:
+                logger.info(f"Synthesizing line {i+1}/{len(lines)} for SPEAKER_{speaker}...")
+                try:
+                    # The tts_service will handle the pitch shifting based on the speaker label
+                    audio_segment = tts_service.synthesize_speech(text, speaker)
+                    
+                    final_podcast += audio_segment + silence_between_speakers
+                except Exception as e:
+                    logger.error(f"Could not synthesize line {i+1}. Skipping. Error: {e}")
+            else:
+                logger.warning(f"Skipping empty dialogue line for SPEAKER_{speaker} at line {i+1}.")
+        else:
+            logger.warning(f"Line {i+1} does not match speaker format and will be skipped: '{line[:50]}...'")
+
+    if len(final_podcast) == 0:
+        raise ValueError("Podcast synthesis resulted in an empty audio file. Check script format and TTS service.")
+
+    logger.info(f"Exporting final 3-speaker podcast ({len(final_podcast) / 1000:.2f} seconds) to {output_path}")
+    final_podcast.export(output_path, format="mp3", bitrate="192k")
+    logger.info(f"High-quality 3-speaker podcast saved successfully to {output_path}")
 ```
 
 `server/rag_service/prompts.py`
@@ -24211,6 +24592,58 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 
 **FINAL JSON OUTPUT (start immediately with `{{`):**
 """
+
+
+# server/rag_service/prompts.py
+
+# (Keep all existing prompts)
+
+# ... at the end of the file ...
+
+# ==============================================================================
+# === ON-THE-FLY DOCUMENT GENERATION PROMPTS ===
+# ==============================================================================
+
+DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
+You are a professional content creator and subject matter expert. Your task is to generate a full, detailed, multi-page document in Markdown format about the given TOPIC. You must use your own internal knowledge. The final output must be a single block of well-structured Markdown text.
+
+**INSTRUCTIONS:**
+1.  **Main Title:** Start the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
+2.  **Structure:** Create a logical structure with clear H2 and H3 headings for different sections.
+3.  **Content Generation:** For each section, write detailed, professional paragraphs.
+4.  **Markdown Usage:** Use bullet points, bold text, and clear paragraphs to structure the content effectively.
+
+---
+**TOPIC:**
+{topic}
+---
+
+**FINAL DOCUMENT MARKDOWN:**
+"""
+
+PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
+You are a professional presentation designer and subject matter expert. Your task is to generate a full, detailed, 6-8 slide presentation on the given TOPIC using your internal knowledge. Your output MUST be a single, valid JSON array, where each object represents a slide.
+
+**JSON Object Schema for each slide:**
+{{
+  "slide_title": "A concise and engaging title for the slide.",
+  "slide_content": "Detailed, professional paragraph(s) and/or bullet points on the topic. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
+  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition."
+}}
+
+**INSTRUCTIONS:**
+1.  **Create Slides:** Generate 6-8 slide objects in the JSON array, covering the topic logically.
+2.  **Generate Content:** Write the content for each slide.
+3.  **Create Image Prompts:** For each slide, generate a unique and descriptive `image_prompt`.
+4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
+
+---
+**TOPIC:**
+{topic}
+---
+
+**FINAL PRESENTATION JSON ARRAY:**
+"""
 ```
 
 `server/rag_service/quiz_utils.py`
@@ -24324,6 +24757,10 @@ playwright
 moviepy
 Werkzeug
 aiohttp
+video/quicktime
+textstat
+TTS
+pydub
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -24397,6 +24834,99 @@ def enhance_script_with_llm(raw_transcription: str, source_document_text: str, l
         
     logger.info(f"LLM generated enhanced script. Length: {len(enhanced_script)}")
     return enhanced_script
+```
+
+`server/rag_service/tts_service.py`
+
+```python
+# server/rag_service/tts_service.py
+import torch
+from TTS.api import TTS
+import logging
+from pydub import AudioSegment
+import io
+import os
+
+logger = logging.getLogger(__name__)
+
+# --- Model Configuration ---
+# Using the dedicated Indian English model.
+MODEL_NAME = "tts_models/en/ljspeech/vits--neon"
+
+tts_instance = None
+
+def initialize_tts():
+    """
+    Initializes the Coqui TTS model once at application startup.
+    """
+    global tts_instance
+    if tts_instance is None:
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Initializing Coqui TTS with Indian English model '{MODEL_NAME}' on device: {device}")
+            
+            tts_instance = TTS(MODEL_NAME).to(device)
+            
+            logger.info("Coqui TTS Indian English model loaded successfully and is ready for synthesis.")
+        except Exception as e:
+            logger.critical(f"FATAL: Could not initialize Coqui TTS model. High-quality podcast generation will be unavailable. Error: {e}", exc_info=True)
+
+def synthesize_speech(text: str, speaker: str) -> AudioSegment:
+    """
+    Synthesizes speech and applies pitch shifting to create three distinct voices
+    from a single-speaker model.
+
+    Args:
+        text (str): The text to synthesize.
+        speaker (str): The speaker identifier ('A', 'B', or 'C').
+
+    Returns:
+        AudioSegment: A pydub AudioSegment object of the synthesized speech.
+    """
+    if tts_instance is None:
+        raise RuntimeError("TTS service is not initialized. High-quality synthesis is unavailable.")
+    
+    try:
+        wav_buffer = io.BytesIO()
+        
+        tts_instance.tts_to_file(
+            text=text,
+            speaker=None,
+            file_path=wav_buffer,
+            speed=1.1
+        )
+        wav_buffer.seek(0)
+        
+        audio_segment = AudioSegment.from_file(wav_buffer, format="wav")
+
+        # --- REFINED Pitch Shifting for Three Distinct Voices ---
+        # A semitone is a musical interval. We shift by fractions of a semitone for subtle changes.
+        # The formula for semitone shift is 2**(semitones/12).
+        
+        if speaker.upper() == 'A':
+            # Speaker A (Learner): Higher pitch to simulate a female voice.
+            # Shift up by +2 semitones.
+            semitones = 2.0
+            new_sample_rate = int(audio_segment.frame_rate * (2.0 ** (semitones / 12.0)))
+            
+        elif speaker.upper() == 'B':
+            # Speaker B (Expert): Lower pitch for a deep, authoritative male voice.
+            # Shift down by -2 semitones.
+            semitones = -2.0
+            new_sample_rate = int(audio_segment.frame_rate * (2.0 ** (semitones / 12.0)))
+
+        else: # Speaker C (Host)
+            # Speaker C (Host): Slightly lower pitch for a standard, neutral male voice, distinct from the expert.
+            # Shift down by -0.5 semitones.
+            semitones = -0.5
+            new_sample_rate = int(audio_segment.frame_rate * (2.0 ** (semitones / 12.0)))
+        
+        pitched_segment = audio_segment._spawn(audio_segment.raw_data, overrides={'frame_rate': new_sample_rate})
+        return pitched_segment.set_frame_rate(audio_segment.frame_rate)
+
+    except Exception as e:
+        logger.error(f"Error during TTS synthesis for speaker {speaker}: {e}", exc_info=True)
+        raise IOError(f"Failed to synthesize audio for speaker {speaker}.")
 ```
 
 `server/rag_service/vector_db_service.py`
@@ -25518,8 +26048,8 @@ function doesQuerySuggestRecall(query) {
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
-        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
-        documentContextName, filter
+        systemPrompt: clientSystemPrompt, criticalThinkingEnabled,
+        documentContextName
     } = req.body;
     
     const userId = req.user._id;
@@ -25543,140 +26073,89 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
-        const llmConfig = {
+        const requestContext = {
             llmProvider,
             ollamaModel,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
-            ollamaUrl: user?.ollamaUrl
-        };
-
-        const historyFromDb = chatSession ? chatSession.messages : [];
-        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        const historyForLlm = [];
-
-        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            historyForLlm.push({ 
-                role: 'user', 
-                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
-            });
-            historyForLlm.push({ 
-                role: 'model', 
-                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
-            });
-        }
-        
-        const formattedDbMessages = historyFromDb.map(msg => ({
-            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
-        }));
-        historyForLlm.push(...formattedDbMessages);
-        
-        const requestContext = {
-            documentContextName, criticalThinkingEnabled, filter,
-            userId: userId.toString(), 
-            systemPrompt: clientProvidedSystemInstruction,
-            isWebSearchEnabled: !!useWebSearch, 
+            ollamaUrl: user?.ollamaUrl,
+            userId: userId.toString(),
+            isWebSearchEnabled: !!useWebSearch,
             isAcademicSearchEnabled: !!useAcademicSearch,
-            ...llmConfig
+            documentContextName,
+            systemPrompt: clientSystemPrompt,
+            criticalThinkingEnabled,
         };
 
-        if (criticalThinkingEnabled) {
-            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
+        const historyForLlm = chatSession ? chatSession.messages.map(msg => ({
+            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
+        })) : [];
+
+        // --- THIS IS THE FIX ---
+        // 1. Call the agent service.
+        const agentResponse = await processAgenticRequest(
+            query.trim(), historyForLlm, clientSystemPrompt, requestContext
+        );
+
+        // 2. Prepare the message object for the database.
+        const aiMessageForDb = {
+            sender: 'bot',
+            role: 'model',
+            parts: [{ text: agentResponse.finalAnswer }],
+            text: agentResponse.finalAnswer,
+            timestamp: new Date(),
+            thinking: agentResponse.thinking,
+            references: agentResponse.references || [],
+            source_pipeline: agentResponse.sourcePipeline,
+        };
+
+        // 3. Prepare the response object for the client. This includes the action payload.
+        const aiMessageForClient = { ...aiMessageForDb, action: agentResponse.action || null };
+        
+        // 4. CRITICAL CHECK: If there is an action, send the response and stop.
+        if (aiMessageForClient.action) {
+            console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
             
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.flushHeaders();
-
-            const accumulatedThoughts = [];
-
-            const interceptingStreamCallback = (eventData) => {
-                if (eventData.type === 'thought' || eventData.type === 'error') {
-                    if (eventData.type === 'thought') {
-                        accumulatedThoughts.push(eventData.content);
-                    }
-                    streamEvent(res, eventData);
-                }
-            };
-
-            const totResult = await processQueryWithToT_Streaming(
-                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
-            );
-
-            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
-
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: totResult.finalAnswer }],
-                text: totResult.finalAnswer,
-                timestamp: new Date(),
-                thinking: accumulatedThoughts.join(''),
-                references: totResult.references || [],
-                source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-
-            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
-            
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
-
-            await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
-            );
-
-            if (totResult.finalAnswer) {
-                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
-            }
-            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
-            res.end();
-        } else {
-            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
-
-            const agentResponse = await processAgenticRequest(
-                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
-            );
-
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }],
-                text: agentResponse.finalAnswer,
-                timestamp: new Date(),
-                thinking: agentResponse.thinking || null,
-                references: agentResponse.references || [],
-                source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-            
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues;
-
+            // Save user message and the AI's action message to DB
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
-
-            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForClient });
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            
+            return res.status(200).json({ reply: aiMessageForClient });
         }
+
+        // 5. If no action, proceed with normal post-response tasks.
+        if (criticalThinkingEnabled) {
+             aiMessageForClient.criticalThinkingCues = await generateCues(agentResponse.finalAnswer, requestContext);
+        }
+
+        await ChatHistory.findOneAndUpdate(
+            { sessionId: sessionId, userId: userId },
+            { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
+            { upsert: true, new: true }
+        );
+
+        console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
+        
+        // 6. Send the regular response object (without an action) back to the client.
+        res.status(200).json({ reply: aiMessageForClient });
+        
+        // 7. Asynchronously extract KG data.
+        if (agentResponse.finalAnswer) {
+             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId.toString(), requestContext);
+        }
+        // --- END OF FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
         const clientMessage = error.message || "Failed to get response from AI service.";
-        
-        if (res.headersSent && !res.writableEnded) {
-            streamEvent(res, { type: 'error', content: clientMessage });
-            res.end();
-        } else if (!res.headersSent) {
+        if (!res.headersSent) {
             res.status(error.status || 500).json({ message: clientMessage });
         }
     }
 });
+
 
 router.post('/history', async (req, res) => {
     const { previousSessionId, skipAnalysis } = req.body;
@@ -25864,12 +26343,20 @@ const axios = require('axios');
 const router = express.Router();
 const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
-const { decrypt } = require('../utils/crypto');
+const KnowledgeSource = require('../models/KnowledgeSource'); // Import the correct model
+const { decrypt } = require('../utils/crypto'); // For decrypting user's API key
 
+// All routes here are protected by the authMiddleware applied in server.js
+
+// @route   POST /api/export/podcast
+// @desc    Generate a high-quality, dual-speaker podcast from a document and proxy the audio stream.
+// @access  Private
 router.post('/podcast', async (req, res) => {
+    // 1. Destructure the request body
     const { analysisContent, sourceDocumentName, podcastOptions } = req.body;
-    const userId = req.user._id;
+    const userId = req.user._id; // Get user ID from the authenticated session
 
+    // 2. Validate the input
     if (!analysisContent || !sourceDocumentName || !podcastOptions) {
         return res.status(400).json({ message: 'analysisContent, sourceDocumentName, and podcastOptions are required.' });
     }
@@ -25878,53 +26365,74 @@ router.post('/podcast', async (req, res) => {
         let sourceDocumentText = null;
         let apiKeyForRequest = null;
         
-        // Fetch the user to get their documents and encrypted API key
-        const user = await User.findById(userId).select('uploadedDocuments.filename uploadedDocuments.text +encryptedApiKey');
-
-        // Check user's documents first
-        const userDoc = user?.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-        if (userDoc?.text) {
-            sourceDocumentText = userDoc.text;
-            if (user.encryptedApiKey) {
+        // 3. Smartly fetch the document text and the correct API key
+        
+        // First, fetch the user to get their encrypted API key if it exists
+        const user = await User.findById(userId).select('+encryptedApiKey preferredLlmProvider');
+        if (!user) {
+            // This is a sanity check; user should exist if they passed authMiddleware
+            return res.status(404).json({ message: 'Authenticated user not found.' });
+        }
+        
+        // Next, check if the requested document is one of the user's personal Knowledge Sources
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            // Found it in the user's personal collection
+            console.log(`[Node Export] Found source text for podcast in user's KnowledgeSource: '${sourceDocumentName}'`);
+            sourceDocumentText = userSource.textContent;
+            
+            // For user documents, we must use the user's own API key
+            if (user.preferredLlmProvider === 'gemini' && user.encryptedApiKey) {
                 apiKeyForRequest = decrypt(user.encryptedApiKey);
             }
+            // If the user prefers Ollama, apiKeyForRequest will remain null, which is fine.
+            
         } else {
-            // Fallback to checking admin documents
-            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
+            // If not found, fall back to checking the shared Admin Documents (Subjects)
+            console.log(`[Node Export] Source not in user's collection. Checking Admin Subjects for: '${sourceDocumentName}'`);
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
             if (adminDoc?.text) {
                 sourceDocumentText = adminDoc.text;
-                apiKeyForRequest = process.env.GEMINI_API_KEY; // Admin docs use server's key
+                // For admin documents, the system MUST use the server's global API key
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
             }
         }
         
+        // 4. Handle failure cases after checking all sources
         if (!sourceDocumentText) {
-            return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+            return res.status(404).json({ message: `Source document or subject '${sourceDocumentName}' could not be found.` });
         }
-        if (!apiKeyForRequest) {
-            return res.status(400).json({ message: "API Key for podcast generation is missing." });
+        if (user.preferredLlmProvider === 'gemini' && !apiKeyForRequest) {
+            // This case happens if the user selected Gemini but didn't provide a key, and the doc wasn't an admin doc
+            return res.status(400).json({ message: "An API Key for Gemini is required for podcast generation but is not configured for your account." });
         }
 
+        // 5. Proxy the request to the Python microservice
         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
         if (!pythonServiceUrl) {
-            return res.status(500).json({ message: "Audio generation service is not configured." });
+            return res.status(500).json({ message: "Audio generation service is not configured on the server." });
         }
 
         const generationUrl = `${pythonServiceUrl}/export_podcast`;
         
-        console.log(`[Node Export] Forwarding HQ podcast request to Python with API Key.`);
+        console.log(`[Node Export] Forwarding HQ podcast request to Python service.`);
 
+        // The payload for the Python service, including the correct API key
         const pythonPayload = {
             sourceDocumentText: sourceDocumentText,
             analysisContent: analysisContent,
             podcastOptions: podcastOptions,
-            api_key: apiKeyForRequest // <<< Pass the correct key
+            api_key: apiKeyForRequest // Pass the determined key
         };
         
+        // Make the request and stream the response
         const fileResponse = await axios.post(generationUrl, pythonPayload, {
             responseType: 'stream',
-            timeout: 600000 // 10 minute timeout
+            timeout: 600000 // 10 minute timeout for potentially long audio synthesis
         });
 
+        // 6. Stream the audio file back to the frontend client
         const safeFilename = sourceDocumentName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_');
         const finalFilename = `HQ_Podcast_${safeFilename}.mp3`;
         
@@ -25935,6 +26443,7 @@ router.post('/podcast', async (req, res) => {
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate podcast.";
         console.error(`[Node Export] Error proxying podcast generation: ${errorMsg}`);
+        // Ensure we don't try to send headers if the stream has already started
         if (!res.headersSent) {
             res.status(error.response?.status || 500).json({ message: errorMsg });
         }
@@ -26226,7 +26735,98 @@ module.exports = router;
 
 ```
 
-`server/routes/generation.js`
+`server/routes/generationController.js`
+
+```javascript
+// server/controllers/generationController.js
+const axios = require('axios');
+const User = require('../models/User');
+const AdminDocument = require('../models/AdminDocument');
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
+
+async function proxyToFileGeneration(req, res, endpoint, payload) {
+    const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+    if (!pythonServiceUrl) {
+        return res.status(500).json({ message: "Document generation service is not configured." });
+    }
+    const generationUrl = `${pythonServiceUrl}${endpoint}`;
+    
+    try {
+        console.log(`[GenController] Proxying request to Python: ${generationUrl}`);
+        const pythonResponse = await axios.post(generationUrl, payload, {
+            responseType: 'stream', // CRITICAL: Receive the response as a stream
+            timeout: 600000 // 10 minute timeout
+        });
+
+        // Pipe the file stream from Python directly back to the client
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        pythonResponse.data.pipe(res);
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Failed to generate document via proxy.";
+        console.error(`[GenController] Error proxying to Python service:`, errorMsg);
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
+    }
+}
+
+exports.generateDocument = async (req, res) => {
+    const { markdownContent, docType, sourceDocumentName } = req.body;
+    const userId = req.user._id;
+
+    try {
+        let sourceDocumentText = null;
+        let apiKeyForRequest = null;
+
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
+        
+        if (userSource?.textContent) {
+            sourceDocumentText = userSource.textContent;
+            if (user?.encryptedApiKey) apiKeyForRequest = decrypt(user.encryptedApiKey);
+        } else {
+            const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
+            if (adminDoc?.text) {
+                sourceDocumentText = adminDoc.text;
+                apiKeyForRequest = process.env.GEMINI_API_KEY;
+            }
+        }
+        
+        if (!sourceDocumentText) return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document', {
+            markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocument handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+
+exports.generateDocumentFromTopic = async (req, res) => {
+    const { topic, docType } = req.body;
+    const userId = req.user._id;
+
+    try {
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
+        if (!apiKeyForRequest) return res.status(400).json({ message: "API Key for generation is missing." });
+
+        await proxyToFileGeneration(req, res, '/generate_document_from_topic', {
+            topic, docType, api_key: apiKeyForRequest
+        });
+    } catch (error) {
+        console.error(`[GenController] Error in generateDocumentFromTopic handler:`, error);
+        if (!res.headersSent) res.status(500).json({ message: error.message });
+    }
+};
+```
+
+`server/routes/generationRoutes.js`
 
 ```javascript
 // // server/routes/generation.js
@@ -26622,6 +27222,71 @@ router.post('/document', async (req, res) => {
         res.status(error.response?.status || 500).json({ message: errorMsg });
     }
 });
+
+
+
+
+// ==============================================================================
+// === VVV THIS IS THE ENTIRELY NEW ROUTE YOU NEED TO ADD VVV ===
+// ==============================================================================
+// @route   POST /api/generate/document/from-topic
+// @desc    Generates a document from scratch based on a topic and proxies the download.
+// @access  Private (authMiddleware is applied in server.js)
+router.post('/document/from-topic', async (req, res) => {
+    const { topic, docType } = req.body;
+    const userId = req.user._id;
+
+    if (!topic || !docType) {
+        return res.status(400).json({ message: 'Topic and docType are required.' });
+    }
+
+    try {
+        const user = await User.findById(userId).select('+encryptedApiKey');
+        // Use the user's key if available, otherwise fall back to the server's global key
+        const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
+
+        if (!apiKeyForRequest) {
+            return res.status(400).json({ message: "API Key for document generation is missing." });
+        }
+
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) {
+            return res.status(500).json({ message: "Document generation service is not configured." });
+        }
+        
+        const generationUrl = `${pythonServiceUrl}/generate_document_from_topic`;
+        console.log(`[Node Generation] Proxying request for topic '${topic}' to Python service: ${generationUrl}`);
+
+        // Fetch the generated document from the Python service as a stream
+        const pythonResponse = await axios.post(generationUrl, {
+            topic,
+            docType,
+            api_key: apiKeyForRequest
+        }, { 
+            responseType: 'stream',
+            timeout: 600000 // 10 minute timeout for LLM generation and file creation
+        });
+
+        // Pipe the file stream directly back to the client.
+        // The 'Content-Disposition' header from Python tells the browser the filename.
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        pythonResponse.data.pipe(res);
+
+    } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || "Failed to generate document from topic.";
+        console.error(`[Node Generation] Error for topic '${topic}':`, errorMsg);
+        // If headers haven't been sent yet, we can send a JSON error.
+        // Otherwise, the connection will just terminate, which is acceptable for a failed stream.
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
+    }
+});
+// ==============================================================================
+// === ^^^ END OF THE NEW ROUTE ^^^ ===
+// ==============================================================================
+
 
 module.exports = router;
 ```
@@ -27703,9 +28368,6 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   }
 });
 
-
-// @desc    Initiates an academic integrity check.
-// @access  Private
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
     if (!text || text.trim().length < 50) {
@@ -27779,6 +28441,7 @@ router.get('/analyze-integrity/report/:reportId', async (req, res) => {
     
     res.status(200).json(report);
 });
+
 
 
 module.exports = router;
@@ -28060,7 +28723,7 @@ const uploadRoutes = require("./routes/upload");
 const analysisRoutes = require("./routes/analysis");
 const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
-const generationRoutes = require("./routes/generation");
+const generationRoutes = require("./routes/generationRoutes");
 const exportRoutes = require("./routes/export");
 const kgRoutes = require("./routes/kg");
 const llmConfigRoutes = require("./routes/llmConfig");
@@ -28229,6 +28892,11 @@ function parseToolCall(responseText) {
         200
       )}...`
     );
+    // Fallback for non-JSON responses that contain the tool name
+    if (typeof responseText === 'string' && responseText.toLowerCase().includes("generate_document")) {
+        console.log("[AgentService] Fallback: Detected 'generate_document' in text, creating tool call.");
+        return { tool_name: 'generate_document', parameters: {} }; // Parameters will be extracted from query later
+    }
     return null;
   }
 }
@@ -28242,9 +28910,7 @@ async function processAgenticRequest(
   const {
     llmProvider,
     ollamaModel,
-    userId,
     ollamaUrl,
-    documentContextName,
     apiKey,
   } = requestContext;
 
@@ -28273,6 +28939,47 @@ async function processAgenticRequest(
     llmOptions
   );
   const toolCall = parseToolCall(routerResponseText);
+
+  // --- INTERCEPT LOGIC FOR DOCUMENT GENERATION ---
+  if (toolCall && toolCall.tool_name === "generate_document") {
+    console.log(`[AgentService] Intercepting tool call for document generation.`);
+    const topicMatch = userQuery.match(/(?:on|about|regarding)\s+(.+)/i);
+    const docTypeMatch = userQuery.match(/\b(pptx|docx)\b/i);
+
+    const topic = toolCall.parameters?.topic || (topicMatch ? topicMatch[1].trim() : userQuery);
+    const doc_type = toolCall.parameters?.doc_type || (docTypeMatch ? docTypeMatch[0].toLowerCase() : 'docx');
+
+
+    if (!topic || !doc_type) {
+      return {
+        finalAnswer:
+          "I was about to generate a document, but I'm missing the topic or document type. Please clarify what you'd like me to create.",
+        thinking:
+          "The tool call for 'generate_document' was missing required parameters. Aborting and asking user for clarification.",
+        references: [],
+        sourcePipeline: "agent-error-missing-params",
+      };
+    }
+
+    // Return the special response with an 'action' payload for the frontend
+    const actionResponse = {
+      finalAnswer: `I'm starting the generation for your ${doc_type.toUpperCase()} on "${topic}". The download should begin automatically in a moment.`,
+      thinking: `User requested document generation. Tool call: ${JSON.stringify(
+        toolCall
+      )}. I will now send a command to the frontend to trigger the download.`,
+      references: [],
+      sourcePipeline: `agent-generate_document`,
+      action: {
+        type: "DOWNLOAD_DOCUMENT",
+        payload: {
+          topic: topic,
+          docType: doc_type,
+        },
+      },
+    };
+    return actionResponse;
+  }
+  // --- END INTERCEPT LOGIC ---
 
   if (requestContext.forceSimple === true || !toolCall || !toolCall.tool_name) {
     if (requestContext.forceSimple === true) {
@@ -28390,7 +29097,6 @@ async function processAgenticRequest(
 module.exports = {
   processAgenticRequest,
 };
-
 ```
 
 `server/services/criticalThinkingService.js`
@@ -29836,6 +30542,17 @@ const availableTools = {
         return await queryAcademicService(params.query);
     },
     requiredParams: ['query'],
+  },
+  generate_document: {
+    description: "Generates a document file (like a PPTX or DOCX) on a given topic using internal knowledge. Use this when the user explicitly asks to 'create', 'make', 'build', or 'generate' a file. You must infer the 'topic' and 'doc_type' from the user's query.",
+    execute: async (params) => {
+        // This tool's job is just to confirm the action. The agentService will handle the special response.
+        return { 
+            toolOutput: `Successfully initiated document generation for topic '${params.topic}' as a .${params.doc_type} file.`,
+            references: [] 
+        };
+    },
+    requiredParams: ['topic', 'doc_type'],
   }
 };
 

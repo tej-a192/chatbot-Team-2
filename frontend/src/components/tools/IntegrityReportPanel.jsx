@@ -1,7 +1,7 @@
 // frontend/src/components/tools/IntegrityReportPanel.jsx
 import React from 'react';
-import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale, BookOpen } from 'lucide-react';
+import ReadabilityMetrics from './ReadabilityMetrics'; // <-- NEW IMPORT
 
 const Section = ({ title, icon: Icon, children }) => (
     <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
@@ -50,7 +50,7 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
         );
     }
 
-    const { plagiarism, bias, facts } = report;
+    const { plagiarism, bias, readability } = report; // <-- ADDED readability
 
     return (
         <div className="h-full flex flex-col bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg">
@@ -96,31 +96,13 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                     {/* --- END OF FIX --- */}
                 </Section>
 
-                {/* Fact-Checking Section */}
-                <Section title="Fact-Checking" icon={Lightbulb}>
-                    {/* --- THIS IS THE FIX (Proactively applied to prevent the same bug) --- */}
-                    {Array.isArray(facts) ? (
-                        facts.length === 0 ? (
-                            <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No verifiable claims were extracted.</p>
-                        ) : (
-                            <ul className="space-y-3">
-                                {facts.map((item, i) => (
-                                    <li key={i} className={`p-2 rounded-md cursor-pointer hover:bg-opacity-20
-                                        ${item.status === 'Supported' ? 'bg-green-500/10' : item.status === 'Refuted' ? 'bg-red-500/10' : 'bg-gray-500/10'}`}
-                                        onClick={() => onFindingSelect(item)}
-                                    >
-                                        <p><strong>Claim:</strong> "{item.claim}"</p>
-                                        <p><strong>Status:</strong> <span className="font-semibold">{item.status}</span></p>
-                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Evidence:</strong> {item.evidence}</p>
-                                    </li>
-                                ))}
-                            </ul>
-                        )
+                {/* --- NEW Readability Section --- */}
+                <Section title="Readability Analysis" icon={BookOpen}>
+                    {readability?.status === 'error' ? (
+                        <p className="text-red-500">{readability.message}</p>
                     ) : (
-                        // If facts is not an array, it's our error object.
-                        <p className="text-red-500">{facts?.message || "An error occurred during the fact check."}</p>
+                        <ReadabilityMetrics metrics={readability} />
                     )}
-                     {/* --- END OF FIX --- */}
                 </Section>
             </div>
         </div>

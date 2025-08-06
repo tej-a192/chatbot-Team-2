@@ -58,7 +58,9 @@ const AcademicIntegrityPage = () => {
 
             // Update progress based on synchronous results
             if(initialReport.bias) setCurrentStep(1);
-            if(initialReport.readability``) setCurrentStep(2);
+            // --- THIS IS THE FIX ---
+            if(initialReport.readability) setCurrentStep(2);
+            // --- END FIX ---
             if(initialReport.plagiarism) setCurrentStep(3);
             
             // If plagiarism check is pending, start polling

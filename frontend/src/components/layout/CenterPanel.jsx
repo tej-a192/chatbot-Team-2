@@ -1,6 +1,8 @@
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
+// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -128,6 +130,22 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
+
+            // --- THIS IS THE FIX ---
+            // Check for and handle the download action, even in streaming mode.
+            if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
+                    {
+                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+            // --- END OF FIX ---
         }
     }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
@@ -139,11 +157,30 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             useWebSearch: options.useWebSearch,
             useAcademicSearch: options.useAcademicSearch, 
             systemPrompt, 
+            criticalThinkingEnabled: options.criticalThinkingEnabled,
             documentContextName: options.documentContextName
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...response.reply, id: placeholderId, isStreaming: false } : msg));
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId 
+                ? { ...response.reply, id: placeholderId, isStreaming: false } 
+                : msg
+            ));
+            
+           if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(response.reply.action.payload),
+                    {
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+
         } else {
             throw new Error("Invalid response from AI service.");
         }

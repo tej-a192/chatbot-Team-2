@@ -38,3 +38,7 @@ playwright
 moviepy
 Werkzeug
 aiohttp
+video/quicktime
+textstat
+TTS
+pydub

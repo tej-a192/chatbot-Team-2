@@ -11,17 +11,12 @@ import tempfile
 import shutil
 import json
 import re
+from werkzeug import utils as werkzeug_utils
 import knowledge_engine
 import media_processor
-
+import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
-import subprocess
-import tempfile
-import shutil
-import json
-
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,16 +30,18 @@ config.setup_logging()
 try:
     from vector_db_service import VectorDBService
     import ai_core
-    import neo4j_handler 
+    import neo4j_handler
     from neo4j import exceptions as neo4j_exceptions
+    from tts_service import initialize_tts
     import document_generator
     import podcast_generator
     import google.generativeai as genai
     from prompts import CODE_ANALYSIS_PROMPT_TEMPLATE, TEST_CASE_GENERATION_PROMPT_TEMPLATE, EXPLAIN_ERROR_PROMPT_TEMPLATE, QUIZ_GENERATION_PROMPT_TEMPLATE
     import quiz_utils
     from academic_search import search_all_apis as academic_search
-    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, analyze_readability
-    import asyncio 
+    from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
+    import asyncio
+
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
         safety_settings = [
@@ -59,10 +56,6 @@ try:
         logging.getLogger(__name__).error("GEMINI_API_KEY not found, AI features will fail.")
 
     def llm_wrapper(prompt, api_key=None):
-        """
-        A flexible wrapper for the Gemini API that can use a provided per-request API key
-        or fall back to the server's global key.
-        """
         key_to_use = api_key or config.GEMINI_API_KEY
         if not key_to_use:
             raise ConnectionError("Gemini API Key is not configured for this request.")
@@ -117,6 +110,9 @@ try:
 except Exception as e:
     logger.critical(f"Neo4j driver failed to initialize: {e}.")
 atexit.register(neo4j_handler.close_driver)
+
+initialize_tts()
+
 
 def create_error_response(message, status_code=500, details=None):
     log_message = f"API Error ({status_code}): {message}"
@@ -545,26 +541,20 @@ def export_podcast_route():
         return create_error_response("Missing 'sourceDocumentText', 'analysisContent', or 'api_key'", 400)
 
     try:
+        # 1. Generate the script using the LLM (no change here)
         script = podcast_generator.generate_podcast_script(
             source_document_text, 
             analysis_content,
             podcast_options,
             lambda p: llm_wrapper(p, api_key)
         )
-        
-        temp_gtts_filename = f"podcast_gtts_{uuid.uuid4()}.mp3"
-        temp_gtts_path = os.path.join(app.config['GENERATED_DOCS_DIR'], temp_gtts_filename)
-        podcast_generator.synthesize_audio_with_gtts(script, temp_gtts_path)
 
-        sound = AudioSegment.from_mp3(temp_gtts_path)
-        sped_up_sound = sound.speedup(playback_speed=1.20)
-        
+        # 2. Synthesize the script into a high-quality, dual-speaker MP3
         final_mp3_filename = f"podcast_final_{uuid.uuid4()}.mp3"
         final_mp3_path = os.path.join(app.config['GENERATED_DOCS_DIR'], final_mp3_filename)
-        
-        sped_up_sound.export(final_mp3_path, format="mp3")
-        os.remove(temp_gtts_path)
+        podcast_generator.create_podcast_from_script(script, final_mp3_path)
 
+        # 3. Send the file to the user and clean up afterwards
         @after_this_request
         def cleanup(response):
             try: os.remove(final_mp3_path)
@@ -575,21 +565,6 @@ def export_podcast_route():
     except Exception as e:
         logger.error(f"Failed to generate podcast: {e}", exc_info=True)
         return create_error_response(f"Failed to generate podcast: {str(e)}", 500)
-
-@app.route('/generate_document', methods=['POST'])
-def generate_document_route():
-    data = request.get_json()
-    if not data: return create_error_response("Request must be JSON", 400)
-    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
-    if not all([outline, doc_type, source_text, api_key]): return create_error_response("Missing required fields", 400)
-    try:
-        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
-        slides = document_generator.parse_pptx_json(expanded_content) if doc_type == 'pptx' else document_generator.refined_parse_docx_markdown(expanded_content)
-        filename, path = f"gen_{uuid.uuid4()}.{doc_type}", os.path.join(app.config['GENERATED_DOCS_DIR'], f"gen_{uuid.uuid4()}.{doc_type}")
-        if doc_type == 'pptx': document_generator.create_ppt(slides, path)
-        else: document_generator.create_doc(slides, path, "text_content")
-        return jsonify({"success": True, "filename": filename}), 201
-    except Exception as e: return create_error_response(f"Failed to generate document: {str(e)}", 500)
 
 @app.route('/download_document/<filename>', methods=['GET'])
 def download_document_route(filename):
@@ -677,72 +652,163 @@ def query_kg_route():
         return create_error_response(f"KG query failed: {str(e)}", 500)
 
 
+
 @app.route('/analyze_integrity', methods=['POST'])
 def analyze_integrity_route():
     data = request.get_json()
-    text = data.get('text')
-    checks = data.get('checks', []) # e.g., ["plagiarism", "bias", "readability"]
-    api_key = data.get('api_key')
-
+    text, checks, api_key = data.get('text'), data.get('checks', []), data.get('api_key')
     if not text or not checks:
         return create_error_response("Missing 'text' or 'checks' list", 400)
 
+    results = {}
+    llm_func = lambda p: llm_wrapper(p, api_key)
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            if 'plagiarism' in checks:
+                try:
+                    submission_id = await submit_to_turnitin(session, text)
+                    results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
+                except Exception as e:
+                    logger.error(f"Turnitin submission failed: {e}", exc_info=True)
+                    results['plagiarism'] = {"status": "error", "message": str(e)}
+    
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        results = {}
-        
-        # --- Plagiarism (Async Start) ---
-        if 'plagiarism' in checks:
-            try:
-                submission_id = loop.run_until_complete(submit_to_turnitin(text))
-                results['plagiarism'] = {"status": "pending", "submissionId": submission_id}
-            except Exception as e:
-                logger.error(f"Turnitin submission failed: {e}")
-                results['plagiarism'] = {"status": "error", "message": str(e)}
-
-        # --- Bias & Fact-Checking (Sync) ---
-        llm_func = lambda p: llm_wrapper(p, api_key)
+        asyncio.run(main())
         
         if 'bias' in checks:
             try:
-                results['bias'] = integrity_services.check_bias_hybrid(text, llm_func)
+                results['bias'] = check_bias_hybrid(text, llm_func)
             except Exception as e:
-                logger.error(f"Bias check failed: {e}")
+                logger.error(f"Bias check failed: {e}", exc_info=True)
                 results['bias'] = {"status": "error", "message": str(e)}
-
-        # --- THIS IS THE REPLACEMENT ---
+        
         if 'readability' in checks:
             try:
-                results['readability'] = integrity_services.analyze_readability(text)
+                results['readability'] = calculate_readability(text)
             except Exception as e:
-                logger.error(f"Readability check failed: {e}")
+                logger.error(f"Readability check failed: {e}", exc_info=True)
                 results['readability'] = {"status": "error", "message": str(e)}
-        # --- END REPLACEMENT ---
-        
-        loop.close()
-        return jsonify(results), 200
 
+        return jsonify(results), 200
     except Exception as e:
         return create_error_response(f"Integrity analysis failed: {str(e)}", 500)
-        
-             
+
+
 @app.route('/get_turnitin_report', methods=['POST'])
 def get_turnitin_report_route():
-    data = request.get_json()
-    submission_id = data.get('submissionId')
+    submission_id = request.json.get('submissionId')
     if not submission_id:
         return create_error_response("Missing 'submissionId'", 400)
-        
+    
+    async def main():
+        async with aiohttp.ClientSession() as session:
+            return await integrity_services.get_turnitin_report(session, submission_id)
+
     try:
-        # Run the async report fetching function in a managed event loop
-        report = asyncio.run(integrity_services.get_turnitin_report(submission_id))
+        report = asyncio.run(main())
         return jsonify({"status": "completed", "report": report}), 200
     except TimeoutError:
         return jsonify({"status": "pending"}), 202
     except Exception as e:
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
+
+
+# server/rag_service/app.py
+# ... (imports and other routes remain the same) ...
+
+@app.route('/generate_document', methods=['POST'])
+def generate_document_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    outline, doc_type, source_text, api_key = data.get('markdownContent'), data.get('docType'), data.get('sourceDocumentText'), data.get('api_key')
+    if not all([outline, doc_type, source_text, api_key]):
+        return create_error_response("Missing required fields", 400)
+        
+    try:
+        expanded_content = document_generator.expand_content_with_llm(outline, source_text, doc_type, lambda p: llm_wrapper(p, api_key))
+        
+        parsed_data = []
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(expanded_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(expanded_content)
+
+        # --- THIS IS THE CRITICAL VALIDATION CHECK ---
+        if not parsed_data:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()}. The parsed data was empty after processing.")
+            return create_error_response(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file. Please try rephrasing or using a different source document.", 422) # 422 Unprocessable Entity
+
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', outline)[:50]
+        filename = f"gen_{safe_name}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+
+    except Exception as e:
+        logger.error(f"Error during document generation from content: {e}", exc_info=True)
+        return create_error_response(f"Failed to generate document: {str(e)}", 500)
+
+
+@app.route('/generate_document_from_topic', methods=['POST'])
+def generate_document_from_topic_route():
+    # ... (initial data extraction is the same)
+    data = request.get_json()
+    topic, doc_type, api_key = data.get('topic'), data.get('docType'), data.get('api_key')
+    if not all([topic, doc_type, api_key]):
+        return create_error_response("Missing 'topic', 'docType', or 'api_key'", 400)
+
+    try:
+        generated_content = document_generator.generate_content_from_topic(topic, doc_type, lambda p: llm_wrapper(p, api_key))
+
+        parsed_data = []
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(generated_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(generated_content)
+
+        # --- THIS IS THE CRITICAL VALIDATION CHECK ---
+        if not parsed_data:
+            logger.error(f"AI failed to generate valid structured content for a {doc_type.upper()} on topic '{topic}'.")
+            return create_error_response(f"The AI was unable to structure the content correctly for a {doc_type.upper()} file based on that topic. Please try a different topic.", 422)
+
+        safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
+        filename = f"gen_{safe_topic}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
+        return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
+
+
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
