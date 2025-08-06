@@ -2,7 +2,7 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-2.5-pro";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
 const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;

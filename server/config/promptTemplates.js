@@ -201,6 +201,7 @@ const CHAT_SYSTEM_PROMPT_CORE_INSTRUCTIONS = `You are an expert AI assistant. Yo
     *   **Code Blocks:** Use \`\`\`language ... \`\`\` for code. Specify the language if known.
     *   **Tables:** Use Markdown tables for structured data.
     *   **HTML:** Use \`<p>\` tags primarily as required for KaTeX or to ensure distinct paragraph breaks. Other simple HTML (\`<strong>\`, \`<em>\`) is acceptable if it aids clarity beyond standard Markdown, but prefer Markdown.
+    *   **CRITICAL: Do NOT wrap your entire response in a single Markdown code block (e.g., \`\`\`markdown ... \`\`\`). Use Markdown elements directly for formatting.**
 4.  **Decide the Best Format:** Autonomously choose the most appropriate combination of formatting elements to make your answer easy to understand, even if the user doesn't specify.
 
 **Working with "Context Documents" (RAG) for Your Response:**
@@ -390,14 +391,23 @@ const CHAT_USER_PROMPT_TEMPLATES = {
 // === ToT Orchestrator  ===
 // ==============================================================================
 const PLANNER_PROMPT_TEMPLATE = `
-You are a meticulous AI planning agent. Your task is to analyze the user's query and generate 2-3 distinct, logical, step-by-step plans to answer it.
+You are a meticulous AI planning agent. Your task is to analyze the user's query and generate 4-5 distinct, logical, step-by-step plans to answer it.
 
 **User Query:** "{userQuery}"
 
+**AVAILABLE TOOLS (for your reference when selecting tool_call):**
+{available_tools_json}
+
+**CURRENT_MODE_INSTRUCTIONS (CRITICAL: Adhere to these strictly for your tool_call decisions):**
+{current_mode_tool_instruction}
+
 **Instructions:**
-1.  Create 2-3 unique plans. Each plan should have a descriptive "name".
-2.  Each plan must contain a list of "steps". Each step should be a clear, single-sentence instruction for a research agent (e.g., "Search the web for recent reviews of product X," "Analyze the provided document for mentions of 'cost analysis'").
-3.  Your entire output MUST be a single, valid JSON object containing a "plans" array. Do not provide any other text or explanation.
+1.  Create 4-5 unique plans. Each plan should have a descriptive "name".
+2.  Each plan must contain a list of "steps". Each step should be a clear, concise instruction for an executor.
+3.  For EACH step, you MUST include a "tool_call" field.
+    *   If the step requires using one of the "AVAILABLE TOOLS", set \`tool_call\` to an object: \`{"tool_name": "the_tool_name_you_chose", "parameters": {"query": "The exact parameter string for the tool"}}\`.
+    *   If the step can be answered directly using general knowledge (no specific tool needed), set \`tool_call\` to \`null\`.
+4.  Your entire output MUST be a single, valid JSON object containing a "plans" array. Do not provide any other text or explanation outside the JSON.
 
 **Example JSON Output Format:**
 \`\`\`json
@@ -406,20 +416,31 @@ You are a meticulous AI planning agent. Your task is to analyze the user's query
     {
       "name": "Comprehensive Research Plan",
       "steps": [
-        "First, search internal documents for foundational concepts related to the query.",
-        "Second, perform a web search for the latest real-world applications.",
-        "Finally, synthesize the findings from both internal and external sources."
+        {
+          "description": "First, search internal documents for foundational concepts related to the query.",
+          "tool_call": {"tool_name": "rag_search", "parameters": {"query": "foundational concepts of {userQuery}"}}
+        },
+        {
+          "description": "Second, perform a web search for the latest real-world applications.",
+          "tool_call": {"tool_name": "web_search", "parameters": {"query": "latest real-world applications of {userQuery}"}}
+        },
+        {
+          "description": "Finally, synthesize the findings from all sources.",
+          "tool_call": null
+        }
       ]
     },
     {
-      "name": "Quick Answer Plan",
+      "name": "Quick Direct Answer Plan",
       "steps": [
-        "Perform a direct web search for the user's query to find an immediate answer."
+        {
+          "description": "Provide a concise direct answer based on general knowledge.",
+          "tool_call": null
+        }
       ]
     }
   ]
 }
-\`\`\`
 
 Provide your JSON response now.
 `;
@@ -634,17 +655,26 @@ ${toolOutput}
 **YOUR COMPLETE, STRUCTURED RESPONSE:**
 `;
     }
-    else { // For RAG, KG, Academic, and other tools
+    else { // For RAG, KG, Tree of Thought, and other tools
         synthesizerUserMessage = `
+You are an expert AI Tutor and Synthesizer. You have just completed a multi-step research plan to answer the user's query. The key findings from your research are provided below.
+
+**YOUR FINAL TASK:**
+Your task is to now write a new, comprehensive, and well-structured final answer that directly addresses the **USER'S ORIGINAL QUERY**.
+- **USE THE GATHERED INFORMATION:** Use the "INFORMATION GATHERED" as your primary source of facts and context.
+- **EXPAND AND ELABORATE:** Do NOT simply copy the gathered information. You must synthesize it, connect the concepts, add clarifying details, and present it in a flowing, narrative style as if you are teaching the topic from scratch.
+- **ADHERE TO FORMATTING:** Follow all formatting rules (Markdown, KaTeX, etc.) from your core instructions.
+
+---
 **USER'S ORIGINAL QUERY:**
 "${originalQuery}"
 
 ---
-**INFORMATION GATHERED BY TOOL ('${toolName}'):**
+**INFORMATION GATHERED (Your research findings):**
 ${toolOutput}
 ---
 
-Based **only** on the information gathered by the tool above, please provide a comprehensive, well-formatted final answer to my original query. Adhere to all formatting rules from your core instructions. Do not mention that a tool was used and do not include citation markers like [1], [2].
+Provide your final, comprehensive, and well-formatted answer now.
 `;
     }
     return synthesizerUserMessage;

@@ -191,3 +191,55 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 
 **FINAL JSON OUTPUT (start immediately with `{{`):**
 """
+
+
+# server/rag_service/prompts.py
+
+# (Keep all existing prompts)
+
+# ... at the end of the file ...
+
+# ==============================================================================
+# === ON-THE-FLY DOCUMENT GENERATION PROMPTS ===
+# ==============================================================================
+
+DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
+You are a professional content creator and subject matter expert. Your task is to generate a full, detailed, multi-page document in Markdown format about the given TOPIC. You must use your own internal knowledge. The final output must be a single block of well-structured Markdown text.
+
+**INSTRUCTIONS:**
+1.  **Main Title:** Start the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
+2.  **Structure:** Create a logical structure with clear H2 and H3 headings for different sections.
+3.  **Content Generation:** For each section, write detailed, professional paragraphs.
+4.  **Markdown Usage:** Use bullet points, bold text, and clear paragraphs to structure the content effectively.
+
+---
+**TOPIC:**
+{topic}
+---
+
+**FINAL DOCUMENT MARKDOWN:**
+"""
+
+PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
+You are a professional presentation designer and subject matter expert. Your task is to generate a full, detailed, 6-8 slide presentation on the given TOPIC using your internal knowledge. Your output MUST be a single, valid JSON array, where each object represents a slide.
+
+**JSON Object Schema for each slide:**
+{{
+  "slide_title": "A concise and engaging title for the slide.",
+  "slide_content": "Detailed, professional paragraph(s) and/or bullet points on the topic. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
+  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition."
+}}
+
+**INSTRUCTIONS:**
+1.  **Create Slides:** Generate 6-8 slide objects in the JSON array, covering the topic logically.
+2.  **Generate Content:** Write the content for each slide.
+3.  **Create Image Prompts:** For each slide, generate a unique and descriptive `image_prompt`.
+4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
+
+---
+**TOPIC:**
+{topic}
+---
+
+**FINAL PRESENTATION JSON ARRAY:**
+"""

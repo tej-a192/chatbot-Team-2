@@ -20,7 +20,7 @@ const PROMPT_PRESETS = [
      { id: 'custom', name: 'Custom Prompt', icon: Settings2, text: "You are a helpful AI engineering tutor." }
 ];
 
-function LeftPanel() {
+function LeftPanel({ isChatProcessing }) {
     const {
         setIsLeftPanelOpen,
         systemPrompt, setSystemPrompt,
@@ -79,7 +79,7 @@ function LeftPanel() {
     const SelectedPresetIcon = PROMPT_PRESETS.find(p => p.id === selectedPresetId)?.icon || Settings2;
 
     return (
-        <div className="flex flex-col h-full">
+        <div className={`flex flex-col h-full ${isChatProcessing ? 'processing-overlay' : ''}`}>
             <div className="flex items-center justify-between mb-3 px-1 pt-1">
                 <h2 className="text-sm font-semibold text-text-light dark:text-text-dark">Assistant Controls</h2>
                 <IconButton

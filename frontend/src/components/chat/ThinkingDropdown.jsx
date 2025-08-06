@@ -13,12 +13,14 @@ function ThinkingDropdown({ children, isOpen, setIsOpen, isStreaming }) {
             >
                 <BrainCircuit size={14} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors" />
 
-                <span className={isStreaming ? 'shimmer-text !text-transparent' : ''}>
+                {/* --- THIS SPAN IS THE ONLY CHANGE --- */}
+                <span className={isStreaming ? 'shimmer-container' : ''}>
                     Thinking Process
                 </span>
 
                 <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
+
 
             {/* ✅ Always render motion.div, but animate visibility */}
             <motion.div

@@ -12,7 +12,7 @@ const iconMap = {
     docs: FileText,      // Icon for "Document List"
 };
 
-function LeftCollapsedNav() {
+function LeftCollapsedNav({ isChatProcessing }) {
     const { setIsLeftPanelOpen } = useAppState();
 
     // Define the items for the collapsed navigation bar
@@ -54,10 +54,11 @@ function LeftCollapsedNav() {
             exit={{ x: '-100%', opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             // Styling for the thin vertical bar
-            className="fixed left-0 top-16 bottom-0 z-30 w-14 sm:w-16 
+            className={`fixed left-0 top-16 bottom-0 z-30 w-14 sm:w-16 
                        bg-surface-light dark:bg-surface-dark 
                        border-r border-border-light dark:border-border-dark 
-                       shadow-lg flex flex-col items-center py-3 space-y-2 custom-scrollbar"
+                       shadow-lg flex flex-col items-center py-3 space-y-2 custom-scrollbar
+                       ${isChatProcessing ? 'processing-overlay' : ''}`}
         >
             {/* Button to open the full LeftPanel - Placed at the top */}
             <IconButton 
@@ -68,6 +69,7 @@ function LeftCollapsedNav() {
                 variant="ghost" 
                 size="lg" // Make it prominent
                 className="mb-2 text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light"
+                disabled={isChatProcessing}
             />
 
             {/* Icons for different sections of LeftPanel */}
@@ -83,6 +85,7 @@ function LeftCollapsedNav() {
                         variant="ghost"
                         size="md" 
                         className="text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light"
+                        disabled={isChatProcessing}
                     />
                 );
             })}

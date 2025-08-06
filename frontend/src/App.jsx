@@ -45,13 +45,23 @@ function SessionLoadingModal() {
     );
 }
 
-function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionLoading, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession, messages, setMessages }) {
+function MainAppLayout({ 
+    orchestratorStatus, 
+    handleNewChat, 
+    isSessionLoading, 
+    messages, 
+    setMessages 
+}) {
     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
     const {
         currentSessionId,
         isLeftPanelOpen,
         isRightPanelOpen,
         setSessionId: setGlobalSessionId,
+        initialPromptForNewSession,
+        setInitialPromptForNewSession,
+        initialActivityForNewSession,
+        setInitialActivityForNewSession
     } = useAppState();
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isChatProcessing, setIsChatProcessing] = useState(false);
@@ -82,7 +92,7 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages here
+            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -91,9 +101,9 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
             <AnimatePresence mode="wait">
                 {isLeftPanelOpen ? (
                     <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <LeftPanel />
+                        <LeftPanel isChatProcessing={isChatProcessing} />
                     </motion.aside>
-                ) : ( <LeftCollapsedNav /> )}
+                ) : ( <LeftCollapsedNav isChatProcessing={isChatProcessing} /> )}
             </AnimatePresence>
             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
                 <CenterPanel 
@@ -110,9 +120,9 @@ function MainAppLayout({ orchestratorStatus, navigate, handleNewChat, isSessionL
             <AnimatePresence mode="wait">
                 {isRightPanelOpen ? (
                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <RightPanel />
+                        <RightPanel isChatProcessing={isChatProcessing} /> {/* Pass the prop */}
                     </motion.aside>
-                ) : ( <RightCollapsedNav /> )}
+                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )} {/* Pass the prop */}
             </AnimatePresence>
         </div>
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
@@ -127,10 +137,6 @@ function App() {
         setSessionId: setGlobalSessionId, 
         currentSessionId, 
         isAdminSessionActive,
-        initialPromptForNewSession,      
-        setInitialPromptForNewSession, 
-        initialActivityForNewSession,    
-        setInitialActivityForNewSession
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
@@ -138,26 +144,23 @@ function App() {
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
-
-    // --- NEW LOGIC MOVED HERE FROM MainAppLayout ---
     const [appStateMessages, setAppStateMessages] = useState([]);
+    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-        const handleNewChat = useCallback(async (callbackOrMessages) => {
-        const messages = Array.isArray(callbackOrMessages) ? callbackOrMessages : [];
-        const callback = typeof callbackOrMessages === 'function' ? callbackOrMessages : null;
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+        const messages = appStateMessages;
 
-        if (messages.length === 0 && currentSessionId) {
+        if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
+            if (callback) callback(currentSessionId);
             return;
         }
-
+        
         setIsSessionLoading(true);
         try {
-            const data = await api.startNewSession(currentSessionId); 
+            const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
             if (data && data.newSessionId) {
                 setGlobalSessionId(data.newSessionId);
-                toast.success("New chat started!");
-
                 if (data.studyPlanSuggestion) {
                     const { topic, reason } = data.studyPlanSuggestion;
                     toast.custom((t) => (
@@ -168,46 +171,39 @@ function App() {
                             className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
                         >
                             <div className="flex items-start">
-                                <div className="flex-shrink-0 pt-0.5">
-                                    <GraduationCap className="h-6 w-6 text-primary" />
-                                </div>
+                                <div className="flex-shrink-0 pt-0.5"><GraduationCap className="h-6 w-6 text-primary" /></div>
                                 <div className="ml-3 flex-1">
                                     <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
                                     <div className="mt-4 flex gap-2">
-                                        <Button
-                                            size="sm"
-                                            onClick={() => {
-                                                navigate('/study-plan', { state: { prefilledGoal: topic } });
-                                                toast.dismiss(t.id);
-                                            }}
-                                        >
+                                        <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
                                             Create Plan for "{topic}"
                                         </Button>
-                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>
-                                            Dismiss
-                                        </Button>
+                                        <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
                                     </div>
                                 </div>
                             </div>
                         </motion.div>
-                    ), {
-                        id: `study-plan-toast-${topic}`,
-                        duration: Infinity,
-                    });
+                    ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                
-                if (callback) callback(data.newSessionId);
-
+                if (callback) {
+                    // Only show "New chat started!" toast if not explicitly skipping analysis
+                    if (!skipSessionAnalysis) {
+                         toast.success("New chat started!"); 
+                    }
+                    callback(data.newSessionId);
+                }
             } else {
                 toast.error(data.message || "Could not start new chat session.");
+                if (callback) callback(null);
             }
         } catch (error) {
             toast.error(`Failed to start new chat: ${error.message}`);
+            if (callback) callback(null);
         } finally {
             setIsSessionLoading(false);
         }
-    }, [currentSessionId, setGlobalSessionId, navigate]);
+    }, [currentSessionId, setGlobalSessionId, navigate, appStateMessages]);
     
     const fetchChatHistory = useCallback(async (sid) => {
         if (!sid || !regularUserToken) {
@@ -218,13 +214,15 @@ function App() {
             const sessionData = await api.getChatHistory(sid);
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
-            toast.error(`History load failed: ${error.message}`);
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found. Starting a new session.");
-                handleNewChat();
+                console.warn("Stale session ID found in localStorage. It will be replaced.");
+                localStorage.removeItem('aiTutorSessionId');
+                setGlobalSessionId(null);
+            } else {
+                toast.error(`History load failed: ${error.message}`);
             }
         }
-    }, [regularUserToken, handleNewChat]);
+    }, [regularUserToken, setGlobalSessionId]);
 
     useEffect(() => {
         if (currentSessionId && regularUserToken) {
@@ -233,41 +231,50 @@ function App() {
             setAppStateMessages([]);
         }
     }, [currentSessionId, regularUserToken, fetchChatHistory]);
-    // --- END OF MOVED LOGIC ---
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
     
     useEffect(() => {
-        if (isAdminSessionActive) {
+        const handleAuthAndSession = async () => {
+            if (isAdminSessionActive) {
+                setAppInitializing(false); setShowAuthModal(false);
+                if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
+                return;
+            }
+            if (regularUserAuthLoading) {
+                setAppInitializing(true); return;
+            }
             setAppInitializing(false);
-            setShowAuthModal(false);
-            if (!location.pathname.startsWith('/admin')) {
-                navigate('/admin/dashboard', { replace: true });
+            
+            if (regularUserToken && regularUser) {
+                setShowAuthModal(false);
+                if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
+
+                const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+                if (shouldCreateSession && !isCreatingSession) {
+                    setIsCreatingSession(true);
+                    console.log("[App.jsx] Lock acquired. Creating initial session...");
+                    await handleNewChat();
+                    setIsCreatingSession(false);
+                    console.log("[App.jsx] Initial session created. Lock released.");
+                }
+            } else if (!location.pathname.startsWith('/admin')) {
+                setShowAuthModal(true);
             }
-            return;
-        }
-        if (regularUserAuthLoading) {
-            setAppInitializing(true);
-            return;
-        }
-        setAppInitializing(false);
-        if (regularUserToken && regularUser) {
-            setShowAuthModal(false);
-            if (location.pathname.startsWith('/admin')) {
-                navigate('/', { replace: true });
-            } else if (!currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) { 
-                handleNewChat();
-            }
-        } else if (!location.pathname.startsWith('/admin')) {
-            setShowAuthModal(true);
-        }
-    }, [regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, currentSessionId, navigate, location.pathname, setGlobalSessionId, handleNewChat]);
+        };
+        handleAuthAndSession();
+    }, [
+        regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+    ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            handleNewChat();
+            // After successful login, we ensure no session ID exists,
+            // which will trigger the useEffect above to create one cleanly.
+            setGlobalSessionId(null); 
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
             }
@@ -288,7 +295,6 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                
                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
                     <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
@@ -305,17 +311,12 @@ function App() {
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
-                    navigate={navigate} 
                     handleNewChat={handleNewChat} 
                     isSessionLoading={isSessionLoading}
-                    initialPromptForNewSession={initialPromptForNewSession}
-                    setInitialPromptForNewSession={setInitialPromptForNewSession}
-                    initialActivityForNewSession={initialActivityForNewSession}
-                    setInitialActivityForNewSession={setInitialActivityForNewSession}
                     messages={appStateMessages}
                     setMessages={setAppStateMessages}
-                /> : null} />
-                </Routes>
+                 /> : null} />
+            </Routes>
         </div>
     );
 }

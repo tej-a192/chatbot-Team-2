@@ -1,6 +1,8 @@
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
+// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -9,7 +11,7 @@ import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame } from 'lucide-react';
+import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame, FileQuestion } from 'lucide-react';
 
 const features = [
     {
@@ -34,11 +36,12 @@ const features = [
         glowColor: 'orange'
     },
     {
-        icon: TestTubeDiagonal,
-        title: "API Endpoint Tester",
-        description: "A tool for testing and validating API endpoints will be available soon.",
-        status: 'soon',
-        glowColor: 'gray'
+        icon: FileQuestion,
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.', // Changed description
+        path: '/tools/quiz-generator',
+        status: 'active',
+        glowColor: 'yellow'
     }
 ];
 
@@ -46,6 +49,7 @@ const glowStyles = {
     blue: "hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-[0_0_20px_theme(colors.blue.500/40%)]",
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
+    yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
     gray: "" // No glow for disabled/soon cards
 };
 
@@ -63,7 +67,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const abortControllerRef = useRef(null);
     const [recommendations, setRecommendations] = useState([]);
     const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-    // const [promptFromNav, setPromptFromNav] = useState('');
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
@@ -124,6 +127,22 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         
         if (finalBotMessageObject) {
             setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
+
+            // --- THIS IS THE FIX ---
+            // Check for and handle the download action, even in streaming mode.
+            if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
+                    {
+                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+            // --- END OF FIX ---
         }
     }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
@@ -135,11 +154,30 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             useWebSearch: options.useWebSearch,
             useAcademicSearch: options.useAcademicSearch, 
             systemPrompt, 
+            criticalThinkingEnabled: options.criticalThinkingEnabled,
             documentContextName: options.documentContextName
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...response.reply, id: placeholderId, isStreaming: false } : msg));
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId 
+                ? { ...response.reply, id: placeholderId, isStreaming: false } 
+                : msg
+            ));
+            
+           if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
+                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
+                
+                toast.promise(
+                    api.generateDocumentFromTopic(response.reply.action.payload),
+                    {
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        success: (data) => `Successfully downloaded '${data.filename}'!`,
+                        error: (err) => `Download failed: ${err.message}`,
+                    }
+                );
+            }
+
         } else {
             throw new Error("Invalid response from AI service.");
         }
@@ -244,8 +282,8 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
             case 'Secure Code Executor':
                 navigate('/tools/code-executor');
                 break;
-            case 'API Endpoint Tester':
-                toast.info("The API Endpoint Tester is coming soon!");
+            case 'AI Quiz Generator':
+                navigate('/tools/quiz-generator');
                 break;
             default:
                 break;
@@ -257,7 +295,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         setUseWebSearch(false);
         setUseAcademicSearch(false);
 
-        // This is now an auto-sending action
         const options = {
             useWebSearch: rec.actionType === 'web_search',
             useAcademicSearch: rec.actionType === 'academic_search',
@@ -286,13 +323,13 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     query = `Based on the document "${documentName}", please explain "${rec.topic}".`;
                 } catch (error) {
                     toast.error(error.message || `Could not find a document for "${rec.topic}".`, { id: 'doc-find-toast' });
-                    return; // Stop execution if document not found
+                    return;
                 }
                 break;
             }
             default:
                 toast.error(`Unknown recommendation type: ${rec.actionType}`);
-                return; // Stop execution
+                return;
         }
         
         toast.success(`Exploring "${rec.topic}" for you...`);
@@ -430,7 +467,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 isOpen={isCoachModalOpen}
                 onClose={() => setIsCoachModalOpen(false)}
                 onApply={(improvedPrompt) => {
-                    // This logic now lives here, where it can set the initial prompt state
                     setInitialPromptForNewSession(improvedPrompt);
                 }}
                 data={coachData}

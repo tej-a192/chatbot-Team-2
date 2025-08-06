@@ -69,9 +69,10 @@ const api = {
     const response = await apiClient.get("/chat/sessions");
     return response.data;
   },
-  startNewSession: async (previousSessionId) => {
+  startNewSession: async (previousSessionId, skipAnalysis = false) => {
     const response = await apiClient.post("/chat/history", {
       previousSessionId,
+      skipAnalysis
     });
     return response.data;
   },
@@ -161,7 +162,7 @@ const api = {
         });
         return {
           content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
-          thinking: "No analysis data found in the database for this type.",
+          thinking: "No analysis data found in  the database for this type.",
         };
       }
       const { content, thinking } = parseAnalysisOutput(rawOutput);
@@ -225,37 +226,37 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+    return response.data;
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
-    return response.data; // Should be { analysis: "..." }
+    return response.data;
   },
   generateTestCases: async (payload) => {
     const response = await apiClient.post(
       "/tools/generate-test-cases",
       payload
     );
-    return response.data; // Should be { testCases: [...] }
+    return response.data;
   },
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
-    return response.data; // Should be { explanation: "..." }
+    return response.data;
   },
   getRecommendations: async (sessionId) => {
     const response = await apiClient.get(
       `/learning/recommendations/${sessionId}`
     );
-    return response.data; // Should be { recommendations: [...] }
+    return response.data;
   },
 
   findDocumentForTopic: async (topic) => {
     const response = await apiClient.post("/learning/find-document", { topic });
-    return response.data; // Should be { documentName: "..." }
+    return response.data;
   },
   getLearningPaths: async () => {
     const response = await apiClient.get("/learning/paths");
-    return response.data; // Should be an array of learning path objects
+    return response.data;
   },
 
   generateLearningPath: async (goal, context = null) => {
@@ -263,7 +264,7 @@ const api = {
       goal,
       context,
     });
-    return response.data; // Should be the newly created learning path object
+    return response.data;
   },
 
   updateModuleStatus: async (pathId, moduleId, status) => {
@@ -271,7 +272,7 @@ const api = {
       `/learning/paths/${pathId}/modules/${moduleId}`,
       { status }
     );
-    return response.data; // Should be the entire updated learning path object
+    return response.data;
   },
 
   generateQuiz: async (file, quizOption) => {
@@ -303,6 +304,44 @@ const api = {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
     return response.data; // Expects the full report object with status updates
   },
+  deleteLearningPath: async (pathId) => {
+    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+    return response.data;
+  },
+   generateDocumentFromTopic: async (payload) => {
+    const { topic, docType } = payload;
+    const response = await apiClient.post(
+      `/generate/document/from-topic`,
+      { topic, docType },
+      { responseType: "blob" } // CRITICAL: This tells axios to expect a file
+    );
+
+    // Extract filename from the 'Content-Disposition' header
+    const contentDisposition = response.headers["content-disposition"];
+    let filename = `generated-document.${docType}`; // a fallback
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = filenameMatch[1];
+      }
+    }
+    
+    // Create a temporary link to trigger the browser's automatic download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+
+    // Clean up the temporary link from memory
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    return { success: true, filename }; // Return success status for the toast
+  },
+
 };
+
 
 export default api;

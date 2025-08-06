@@ -13,7 +13,7 @@ import Button from '../core/Button.jsx';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 
-function RightPanel() {
+function RightPanel({ isChatProcessing }) {
     const { setIsRightPanelOpen, selectedDocumentForAnalysis, selectedSubject } = useAppState();
     const [isAnalyzerOpen, setIsAnalyzerOpen] = useState(true);
     
@@ -52,8 +52,7 @@ function RightPanel() {
 
     return (
         <>
-            <div className="flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar">
-                <div className="flex items-center justify-between pb-2 border-b border-border-light dark:border-border-dark">
+                <div className={`flex flex-col h-full p-3 sm:p-4 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark custom-scrollbar ${isChatProcessing ? 'processing-overlay' : ''}`}>                <div className="flex items-center justify-between pb-2 border-b border-border-light dark:border-border-dark">
                     <h2 className="text-base font-semibold">Advanced Tools</h2>
                     <IconButton
                         icon={PanelRightClose}

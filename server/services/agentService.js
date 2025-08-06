@@ -28,6 +28,11 @@ function parseToolCall(responseText) {
         200
       )}...`
     );
+     // Fallback for non-JSON responses that contain the tool name
+    if (typeof responseText === 'string' && responseText.toLowerCase().includes("generate_document")) {
+        console.log("[AgentService] Fallback: Detected 'generate_document' in text, creating tool call.");
+        return { tool_name: 'generate_document', parameters: {} }; // Parameters will be extracted from query later
+    }
     return null;
   }
 }
@@ -41,9 +46,7 @@ async function processAgenticRequest(
   const {
     llmProvider,
     ollamaModel,
-    userId,
     ollamaUrl,
-    documentContextName,
     apiKey,
   } = requestContext;
 
@@ -72,6 +75,46 @@ async function processAgenticRequest(
     llmOptions
   );
   const toolCall = parseToolCall(routerResponseText);
+
+  // --- INTERCEPT LOGIC FOR DOCUMENT GENERATION ---
+  if (toolCall && toolCall.tool_name === "generate_document") {
+    console.log(`[AgentService] Intercepting tool call for document generation.`);
+    const topicMatch = userQuery.match(/(?:on|about|regarding)\s+(.+)/i);
+    const docTypeMatch = userQuery.match(/\b(pptx|docx)\b/i);
+
+    const topic = toolCall.parameters?.topic || (topicMatch ? topicMatch[1].trim() : userQuery);
+    const doc_type = toolCall.parameters?.doc_type || (docTypeMatch ? docTypeMatch[0].toLowerCase() : 'docx');
+
+    if (!topic || !doc_type) {
+      return {
+        finalAnswer:
+          "I was about to generate a document, but I'm missing the topic or document type. Please clarify what you'd like me to create.",
+        thinking:
+          "The tool call for 'generate_document' was missing required parameters. Aborting and asking user for clarification.",
+        references: [],
+        sourcePipeline: "agent-error-missing-params",
+      };
+    }
+
+    // Return the special response with an 'action' payload for the frontend
+    const actionResponse = {
+      finalAnswer: `I'm starting the generation for your ${doc_type.toUpperCase()} on "${topic}". The download should begin automatically in a moment.`,
+      thinking: `User requested document generation. Tool call: ${JSON.stringify(
+        toolCall
+      )}. I will now send a command to the frontend to trigger the download.`,
+      references: [],
+      sourcePipeline: `agent-generate_document`,
+      action: {
+        type: "DOWNLOAD_DOCUMENT",
+        payload: {
+          topic: topic,
+          docType: doc_type,
+        },
+      },
+    };
+    return actionResponse;
+  }
+  // --- END INTERCEPT LOGIC ---
 
   if (requestContext.forceSimple === true || !toolCall || !toolCall.tool_name) {
     if (requestContext.forceSimple === true) {

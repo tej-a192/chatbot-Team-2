@@ -8,6 +8,10 @@ from pptx.enum.text import PP_ALIGN
 from docx import Document
 from docx.shared import Inches as DocxInches
 import logging
+from prompts import (
+    PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE,
+    DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,3 +226,21 @@ def create_doc(slides_data, output_path, content_key="text_content"):
         doc.add_paragraph("[No content to generate]")
     doc.save(output_path)
     return True
+
+
+def generate_content_from_topic(topic, doc_type, llm_function):
+    """Uses an LLM to generate document content from scratch based on a topic."""
+    logger.info(f"Generating content for a new '{doc_type}' on topic: '{topic}'")
+
+    if doc_type == 'pptx':
+        prompt = PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+    else: # for 'docx'
+        prompt = DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+
+    generated_content = llm_function(prompt)
+    
+    if not generated_content or not generated_content.strip():
+        raise ValueError("LLM failed to generate content from the topic.")
+    
+    logger.info(f"LLM generated content from topic. Length: {len(generated_content)}")
+    return generated_content

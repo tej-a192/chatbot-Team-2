@@ -296,144 +296,133 @@
   .panel-resize-handle[data-active='true']::after {
     @apply bg-primary/50;
   }
-
-  /* --- NEW: Twinkling Title Effect --- */
-  .twinkling-title {
-    animation: twinkle-effect 4s ease-in-out infinite;
+  
+  /* --- THIS IS THE CORRECTED SHIMMER CODE --- */
+  .shimmer-container {
+    @apply relative overflow-hidden;
   }
+
+  /* REPLACE the existing .shimmer-container::after block with this one */
+
+.shimmer-container::after {
+  content: '';
+  @apply absolute top-0 left-0 w-full h-full;
+  
+  /* The visual gradient for the shimmer */
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(0, 0, 0, 0.1) 50%, 
+    transparent 80%
+  );
+
+  /* THIS IS THE FIX: Use the Tailwind utility class for the animation */
+  @apply animate-shimmerSweep; 
 }
 
-@layer utilities {
-  /* --- NEW: Keyframes --- */
-  @keyframes twinkle-effect {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-      text-shadow: 0 0 8px theme('colors.orange.400' / 0.5);
-    }
-    50% {
-      opacity: 0.85;
-      transform: scale(0.98);
-      text-shadow: 0 0 16px theme('colors.amber.400' / 0.7);
-    }
+  /* CORRECTED: Dark mode shimmer with rgba */
+  html.dark .shimmer-container::after {
+    background: linear-gradient(
+      90deg,
+      transparent 20%,
+      rgba(255, 255, 255, 0.15) 50%,
+      transparent 80%
+    );
   }
+
+
+.code-block-copy-button {
+  @apply absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200;
+  @apply opacity-0 group-hover:opacity-100; /* Will be triggered by parent .prose pre:hover */
+}
+
+.code-block-copy-button:hover {
+  @apply bg-gray-600/90 text-white;
+}
+
+html.light .code-block-copy-button {
+  @apply bg-gray-200/80 text-text-muted-light;
+}
+
+html.light .code-block-copy-button:hover {
+  @apply bg-gray-300/90 text-text-light;
+}
+
+.prose pre {
+  @apply relative;
+}
+
+@property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.animated-border-button {
+  @apply relative z-0 inline-flex items-center justify-center overflow-hidden rounded-full;
+  background: conic-gradient(from var(--angle), #FFA000, #FF4500, #FFA000);
+  animation: spin-border 4s linear infinite; 
+  padding: 2px; 
+}
+
+.animated-border-button > span {
+  @apply block rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold px-5 py-2.5; /* Match padding to button content */
+  background: none;
+}
+
+.animated-border-button:hover > span {
+  @apply from-orange-600 to-red-600; 
+}
 }
 
 
-/* In frontend/src/index.css, add this at the end */
+
+
 
 @layer utilities {
-  /* Keyframes for the border rotation */
   @keyframes spin-border {
-    0% {
-      --angle: 0deg;
-    }
-    100% {
-      --angle: 360deg;
-    }
+    0% { --angle: 0deg; }
+    100% { --angle: 360deg; }
   }
 
   /* Keyframes for the twinkling/shining effect on text and icons */
   @keyframes twinkle-effect {
     0%, 100% {
       opacity: 1;
+      transform: scale(1);
       text-shadow: 0 0 8px currentColor, 0 0 10px currentColor;
     }
     50% {
       opacity: 0.85;
+      transform: scale(0.98);
       text-shadow: 0 0 12px currentColor, 0 0 16px currentColor;
     }
   }
-
+  
   /* Utility class to apply the twinkling animation */
   .twinkling-text {
     animation: twinkle-effect 4s ease-in-out infinite;
   }
-
-  /* 
-    This is the core of the rotating border effect.
-    We register '--angle' as a CSS property that can be animated.
-    This is a modern CSS feature that makes this animation smooth and performant.
-  */
+  
+  /* Register --angle as a property for smooth animation */
   @property --angle {
     syntax: '<angle>';
     initial-value: 0deg;
     inherits: false;
   }
 
+  /* Keyframes for the sweeping underline effect */
   @keyframes sweep-underline {
-  from {
-    transform: translateX(-101%); /* Start completely off-screen to the left */
-  }
-  to {
-    transform: translateX(101%); /* End completely off-screen to the right */
-  }
-}
-
-/* --- Utility class for the animated underline --- */
-.animated-underline {
-  position: relative;
-  display: inline-block;
-  padding-bottom: 4px;
-  overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
-}
-
-/* REVISED PSEUDO-ELEMENT for a smooth sweep */
-.animated-underline::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%; /* The gradient bar is the same width as the text */
-  height: 2px;
-  background: linear-gradient(
-    90deg, 
-    transparent, /* Start transparent */
-    theme('colors.orange.500'),
-    theme('colors.red.500'),
-    theme('colors.amber.400'),
-    transparent /* End transparent */
-  );
-  animation: sweep-underline 4s linear infinite;
-}
-
-/* --- Keyframes for the fiery "Hot" tag effect --- */
-@keyframes fire-flicker {
-  0%, 100% {
-    transform: scale(1, 1);
-    box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
-  }
-  50% {
-    transform: scale(1.05, 1.05);
-    box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
-  }
-}
-
-/* --- Utility class for the fire animation --- */
-.fire-tag-animation {
-  animation: fire-flicker 2.5s ease-in-out infinite;
-}
-}
-
-
-
-@layer utilities {
-  /* --- Keyframes for the sweeping underline effect --- */
-  @keyframes sweep-underline {
-    from {
-      transform: translateX(-101%); /* Start completely off-screen to the left */
-    }
-    to {
-      transform: translateX(101%); /* End completely off-screen to the right */
-    }
+    from { transform: translateX(-101%); }
+    to { transform: translateX(101%); }
   }
 
-  /* --- Utility class for the animated underline --- */
+  /* Utility class for the animated underline */
   .animated-underline {
     position: relative;
     display: inline-block;
     padding-bottom: 4px;
-    overflow: hidden; /* CRITICAL: This hides the gradient when it's off-screen */
+    overflow: hidden;
   }
 
   .animated-underline::after {
@@ -441,7 +430,7 @@
     position: absolute;
     bottom: 0;
     left: 0;
-    width: 100%; /* The gradient bar is the same width as the text */
+    width: 100%;
     height: 2px;
     background: linear-gradient(
       90deg, 
@@ -454,7 +443,7 @@
     animation: sweep-underline 4s linear infinite;
   }
 
-  /* --- Keyframes for the fiery "Hot" tag effect --- */
+  /* Keyframes for the fiery "Hot" tag effect */
   @keyframes fire-flicker {
     0%, 100% {
       transform: scale(1, 1);
@@ -466,8 +455,15 @@
     }
   }
 
-  /* --- Utility class for the fire animation --- */
+  /* Utility class for the fire animation */
   .fire-tag-animation {
     animation: fire-flicker 2.5s ease-in-out infinite;
+  }
+
+
+  .processing-overlay {
+    pointer-events: none; /* Disables all click/hover events */
+    opacity: 0.6;         /* Reduces opacity for visual feedback */
+    transition: opacity 0.3s ease-in-out; /* Smooth transition */
   }
 }

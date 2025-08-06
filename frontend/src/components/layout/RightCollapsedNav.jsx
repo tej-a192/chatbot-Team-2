@@ -11,7 +11,7 @@ const iconMap = {
     GitFork: GitFork,
 };
 
-function RightCollapsedNav() {
+function RightCollapsedNav({ isChatProcessing }) {
     const { setIsRightPanelOpen } = useAppState();
 
     const navItems = [
@@ -27,7 +27,8 @@ function RightCollapsedNav() {
             animate={{ x: '0%', opacity: 1 }}
             exit={{ x: '100%', opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed right-0 top-16 bottom-0 z-30 w-14 sm:w-16 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark shadow-lg flex-col items-center py-3 space-y-2 hidden md:flex"
+            className={`fixed right-0 top-16 bottom-0 z-30 w-14 sm:w-16 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark shadow-lg flex-col items-center py-3 space-y-2 hidden md:flex
+                       ${isChatProcessing ? 'processing-overlay' : ''}`}
         >
             {/* Open Panel Button AT THE TOP */}
             <IconButton 
@@ -38,6 +39,7 @@ function RightCollapsedNav() {
                 variant="ghost" 
                 size="lg"
                 className="mb-2 text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light"
+                disabled={isChatProcessing}
             />
             {navItems.map(item => {
                  const Icon = iconMap[item.iconName] || HelpCircle;
@@ -51,6 +53,7 @@ function RightCollapsedNav() {
                         variant="ghost"
                         size="md"
                         className="text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light"
+                        disabled={isChatProcessing}
                     />
                 );
             })}

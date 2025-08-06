@@ -741,6 +741,60 @@ def get_turnitin_report_route():
         return create_error_response(f"Failed to get Turnitin report: {str(e)}", 500)
 
 
+@app.route('/generate_document_from_topic', methods=['POST'])
+def generate_document_from_topic_route():
+    data = request.get_json()
+    if not data: return create_error_response("Request must be JSON", 400)
+    
+    topic = data.get('topic')
+    doc_type = data.get('docType')
+    api_key = data.get('api_key')
+
+    if not all([topic, doc_type, api_key]):
+        return create_error_response("Missing 'topic', 'docType', or 'api_key'", 400)
+
+    try:
+        # 1. Generate the content from scratch
+        generated_content = document_generator.generate_content_from_topic(
+            topic, 
+            doc_type, 
+            lambda p: llm_wrapper(p, api_key)
+        )
+
+        # 2. Parse the generated content
+        if doc_type == 'pptx':
+            parsed_data = document_generator.parse_pptx_json(generated_content)
+        else:
+            parsed_data = document_generator.refined_parse_docx_markdown(generated_content)
+
+        # 3. Create the physical file
+        safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '_', topic)[:50]
+        filename = f"gen_{safe_topic}_{uuid.uuid4()}.{doc_type}"
+        file_path = os.path.join(app.config['GENERATED_DOCS_DIR'], filename)
+
+        if doc_type == 'pptx':
+            document_generator.create_ppt(parsed_data, file_path)
+        else:
+            document_generator.create_doc(parsed_data, file_path, "text_content")
+
+        # 4. Send the file and schedule cleanup
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up generated file: {file_path}")
+            except OSError as e:
+                logger.error(f"Error deleting generated file {file_path}: {e}")
+            return response
+
+        return send_from_directory(app.config['GENERATED_DOCS_DIR'], filename, as_attachment=True)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
+        return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
+
+
+
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
     def process_media_file_route():

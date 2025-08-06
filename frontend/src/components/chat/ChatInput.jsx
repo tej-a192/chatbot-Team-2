@@ -227,7 +227,7 @@ function ChatInput({
                <IconButton
                     icon={icon}
                     onClick={() => setCriticalThinkingEnabled(!criticalThinkingEnabled)}
-                    title={criticalThinkingEnabled ? "Disable Critical Thinking (KG)" : "Enable Critical Thinking (KG)"}
+                    title={criticalThinkingEnabled ? "Disable Critical Thinking" : "Enable Critical Thinking"}
                     variant="ghost"
                     size="md"
                     className={`p-2 ${criticalThinkingEnabled ? 'text-purple-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}
