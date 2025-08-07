@@ -70,11 +70,16 @@ const ProfileSettingsModal = ({ isOpen, onClose }) => {
         });
     };
 
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         // Simple validation
         for (const key in profile) {
+            // --- THIS IS THE FIX ---
+            // Skip validation for the optional 'currentGoals' field
+            if (key === 'currentGoals') {
+                continue;
+            }
+            // --- END FIX ---
             if (!profile[key] || profile[key].trim() === '') {
                 toast.error(`Please fill out the '${key.replace(/([A-Z])/g, ' $1').trim()}' field.`);
                 return;

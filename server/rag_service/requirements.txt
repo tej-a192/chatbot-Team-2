@@ -26,7 +26,6 @@ sentence_transformers
 spacy
 opencv-python
 ddgs
-python-pptx
 python-docx
 reportlab
 google-generativeai
@@ -38,7 +37,6 @@ playwright
 moviepy
 Werkzeug
 aiohttp
-video/quicktime
 textstat
 TTS
 pydub

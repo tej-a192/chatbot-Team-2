@@ -288,7 +288,7 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
 
     if (!isComplex) {
         // Step 1: Stream the initial classification thought. This gives immediate feedback.
-        streamAndStoreThought(`**Analyzing Query**\nQuery classified as straightforward. Bypassing complex planning to generate a direct response.\n\n`);
+        streamAndStoreThought(`**Analyzing Query**\nQuery is simple. No need of Complex thinking process my Love 😊.\n\n`);
         
         // Step 2: Get the direct response. This now includes the LLM's own thinking process.
         const directResponse = await processAgenticRequest(
@@ -317,7 +317,7 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
     }
 
 
-    streamAndStoreThought("**Starting Complex Reasoning**\nQuery detected as complex. Initiating multi-step Tree of Thought process.\n\n");
+    streamAndStoreThought("**Starting Complex Reasoning**\nQuery detected as complex. Initiating multi-step thought process.\n\n**Hang on, We are doing our best to give the best outcome**\n\n\n");
     
     const plans = await generatePlans(query, requestContext);
     streamAndStoreThought(`**Planning Stage**\nGenerated ${plans.length} potential plans. Now evaluating the best approach.\n\n`);

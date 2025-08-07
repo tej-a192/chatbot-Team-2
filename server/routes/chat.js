@@ -42,8 +42,8 @@ function doesQuerySuggestRecall(query) {
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
-        systemPrompt: clientSystemPrompt, criticalThinkingEnabled,
-        documentContextName
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
     } = req.body;
     
     const userId = req.user._id;
@@ -67,84 +67,159 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
-        const requestContext = {
+        const llmConfig = {
             llmProvider,
             ollamaModel,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
-            ollamaUrl: user?.ollamaUrl,
-            userId: userId.toString(),
-            isWebSearchEnabled: !!useWebSearch,
-            isAcademicSearchEnabled: !!useAcademicSearch,
-            documentContextName,
-            systemPrompt: clientSystemPrompt,
-            criticalThinkingEnabled,
+            ollamaUrl: user?.ollamaUrl
         };
 
-        const historyForLlm = chatSession ? chatSession.messages.map(msg => ({
-            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
-        })) : [];
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
+        const historyForLlm = [];
 
-        // --- THIS IS THE FIX ---
-        // 1. Call the agent service.
-        const agentResponse = await processAgenticRequest(
-            query.trim(), historyForLlm, clientSystemPrompt, requestContext
-        );
-
-        // 2. Prepare the message object for the database.
-        const aiMessageForDb = {
-            sender: 'bot',
-            role: 'model',
-            parts: [{ text: agentResponse.finalAnswer }],
-            text: agentResponse.finalAnswer,
-            timestamp: new Date(),
-            thinking: agentResponse.thinking,
-            references: agentResponse.references || [],
-            source_pipeline: agentResponse.sourcePipeline,
-        };
-
-        // 3. Prepare the response object for the client. This includes the action payload.
-        const aiMessageForClient = { ...aiMessageForDb, action: agentResponse.action || null };
+        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
+            historyForLlm.push({ 
+                role: 'user', 
+                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
+            });
+            historyForLlm.push({ 
+                role: 'model', 
+                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
+            });
+        }
         
-        // 4. CRITICAL CHECK: If there is an action, send the response and stop.
-        if (aiMessageForClient.action) {
-            console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+        const formattedDbMessages = historyFromDb.map(msg => ({
+            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
+        }));
+        historyForLlm.push(...formattedDbMessages);
+        
+        const requestContext = {
+            documentContextName, criticalThinkingEnabled, filter,
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
+        };
+
+        if (criticalThinkingEnabled) {
+            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
             
-            // Save user message and the AI's action message to DB
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+
+            const accumulatedThoughts = [];
+
+            const interceptingStreamCallback = (eventData) => {
+                if (eventData.type === 'thought' || eventData.type === 'error') {
+                    if (eventData.type === 'thought') {
+                        accumulatedThoughts.push(eventData.content);
+                    }
+                    streamEvent(res, eventData);
+                }
+            };
+
+            const totResult = await processQueryWithToT_Streaming(
+                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
+            );
+
+            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            const aiMessageForClient = {
+                sender: 'bot', role: 'model',
+                parts: [{ text: totResult.finalAnswer }],
+                text: totResult.finalAnswer,
+                timestamp: new Date(),
+                thinking: accumulatedThoughts.join(''),
+                references: totResult.references || [],
+                source_pipeline: totResult.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues
+            };
+
+            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
+            
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues;
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
+
+            if (totResult.finalAnswer) {
+                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
+            }
+            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
+            res.end();
+        } else {
+            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
+
+            const agentResponse = await processAgenticRequest(
+                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
+            );
+
+            // --- THIS IS THE FIX ---
+            // Prepare the full response object, including any potential action
+            const aiMessageForClient = {
+                sender: 'bot', role: 'model',
+                parts: [{ text: agentResponse.finalAnswer }],
+                text: agentResponse.finalAnswer,
+                timestamp: new Date(),
+                thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [],
+                source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null // Include the action
+            };
+
+            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
+            if (aiMessageForClient.action) {
+                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+                
+                // Save both user message and the AI's action message to the database
+                await ChatHistory.findOneAndUpdate(
+                    { sessionId: sessionId, userId: userId },
+                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
+                    { upsert: true, new: true }
+                );
+                
+                // Return the response with the action, stopping execution here.
+                return res.status(200).json({ reply: aiMessageForClient });
+            }
+            // --- END OF FIX ---
+
+            // If there was NO action, proceed with the normal flow
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
+
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues;
+
+            await ChatHistory.findOneAndUpdate(
+                { sessionId: sessionId, userId: userId },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
+                { upsert: true, new: true }
+            );
+
+            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
+            res.status(200).json({ reply: aiMessageForClient });
             
-            return res.status(200).json({ reply: aiMessageForClient });
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
         }
-
-        // 5. If no action, proceed with normal post-response tasks.
-        if (criticalThinkingEnabled) {
-             aiMessageForClient.criticalThinkingCues = await generateCues(agentResponse.finalAnswer, requestContext);
-        }
-
-        await ChatHistory.findOneAndUpdate(
-            { sessionId: sessionId, userId: userId },
-            { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-            { upsert: true, new: true }
-        );
-
-        console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-        
-        // 6. Send the regular response object (without an action) back to the client.
-        res.status(200).json({ reply: aiMessageForClient });
-        
-        // 7. Asynchronously extract KG data.
-        if (agentResponse.finalAnswer) {
-             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId.toString(), requestContext);
-        }
-        // --- END OF FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
         const clientMessage = error.message || "Failed to get response from AI service.";
-        if (!res.headersSent) {
+        
+        if (res.headersSent && !res.writableEnded) {
+            streamEvent(res, { type: 'error', content: clientMessage });
+            res.end();
+        } else if (!res.headersSent) {
             res.status(error.status || 500).json({ message: clientMessage });
         }
     }

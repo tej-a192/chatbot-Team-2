@@ -332,6 +332,13 @@ const api = {
       { responseType: "blob" } // CRITICAL: This tells axios to expect a file
     );
 
+    if (response.data.type === 'application/json') {
+        const errorText = await response.data.text();
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || "An unknown error occurred during generation from topic.");
+    }
+
+
     // Extract filename from the 'Content-Disposition' header
     const contentDisposition = response.headers["content-disposition"];
     let filename = `generated-document.${docType}`; // a fallback

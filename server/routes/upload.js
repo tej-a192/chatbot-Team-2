@@ -60,7 +60,6 @@ const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 // Main upload route
 router.post('/', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No file received." });
-    
     const userId = req.user._id;
     const { originalname: originalName, path: serverPath, mimetype } = req.file;
     
@@ -145,8 +144,13 @@ router.post('/', upload.single('file'), async (req, res) => {
         }
         // If headers not sent, send error to client. This happens for initial errors.
         if (!res.headersSent) {
-             res.status(500).json({ message: error.message || "Server error during file processing." });
+        if (error.message && error.message.includes("E11000 duplicate key error")) {
+            res.status(400).json({ message: "File already exists" });
+        } else {
+            res.status(500).json({ message: error.message || "Server error during file processing." });
         }
+}
+
     }
 });
 

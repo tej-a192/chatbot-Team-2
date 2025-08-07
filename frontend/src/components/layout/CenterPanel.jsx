@@ -11,37 +11,40 @@ import { useAuth as useRegularAuth } from '../../hooks/useAuth';
 import { useAppState } from '../../contexts/AppStateContext';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { Globe, BookMarked, Code, TestTubeDiagonal, Sparkles, ChevronRight, Flame, FileQuestion } from 'lucide-react';
+import { BookMarked, Code, Sparkles, ChevronRight, Flame, FileQuestion, ShieldCheck } from 'lucide-react';
 
 const features = [
     {
-        icon: Globe,
-        title: "Web Search Agent",
-        description: "Get real-time answers and information from the web for up-to-the-minute topics.",
+        icon: ShieldCheck,
+        title: "Academic Integrity & Analysis",
+        description: "Check your text for potential plagiarism, biased language, and readability metrics.",
+        path: '/tools/integrity-checker',
         status: 'active',
         glowColor: 'blue'
     },
     {
-        icon: BookMarked,
-        title: "Academic Search",
-        description: "Find and synthesize information from academic papers and scholarly articles.",
+        icon: FileQuestion,
+        title: 'AI Quiz Generator',
+        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.',
+        path: '/tools/quiz-generator',
         status: 'active',
-        glowColor: 'purple'
+        glowColor: 'yellow'
     },
     {
         icon: Code,
         title: "Secure Code Executor",
         description: "Write, compile, and run code in a sandboxed environment with AI assistance.",
+        path: '/tools/code-executor',
         status: 'active',
         glowColor: 'orange'
     },
     {
-        icon: FileQuestion,
-        title: 'AI Quiz Generator',
-        description: 'Upload a document (PDF, DOCX, TXT) and generate a multiple-choice quiz to test your knowledge.', // Changed description
-        path: '/tools/quiz-generator',
+        icon: BookMarked,
+        title: "Academic Search",
+        description: "Find and synthesize information from academic papers and scholarly articles.",
+        action: 'toggleAcademicSearch', // Special action instead of a path
         status: 'active',
-        glowColor: 'yellow'
+        glowColor: 'purple'
     }
 ];
 
@@ -269,24 +272,19 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         fetchRecommendations();
     }, [currentSessionId, messages.length]);
 
-    const handleFeatureClick = (title) => {
-        switch (title) {
-            case 'Web Search Agent':
-                setUseWebSearch(true);
-                toast.success("Web Search has been enabled for your next message.");
-                break;
-            case 'Academic Search':
-                setUseAcademicSearch(true);
-                toast.success("Academic Search has been enabled for your next message.");
-                break;
-            case 'Secure Code Executor':
-                navigate('/tools/code-executor');
-                break;
-            case 'AI Quiz Generator':
-                navigate('/tools/quiz-generator');
-                break;
-            default:
-                break;
+    const handleFeatureClick = (feature) => {
+        if (feature.path) {
+            navigate(feature.path);
+        } else if (feature.action) {
+            switch (feature.action) {
+                case 'toggleAcademicSearch':
+                    setUseAcademicSearch(true);
+                    toast.success("Academic Search has been enabled for your next message.");
+                    break;
+                // Can add more state-based actions here in the future
+                default:
+                    break;
+            }
         }
     };
 
@@ -395,14 +393,14 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                                 {features.map((feature, index) => (
                                     <button 
                                         key={index}
-                                        onClick={() => handleFeatureClick(feature.title)}
+                                        onClick={() => handleFeatureClick(feature)}
                                         disabled={feature.status === 'soon'}
                                         className={`group relative text-left bg-surface-light dark:bg-surface-dark/50 border border-border-light dark:border-border-dark rounded-lg p-4 transition-all duration-300 ease-in-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed ${glowStyles[feature.glowColor]}`}
                                     >
                                         <div className="relative">
-                                            {feature.title === 'Secure Code Executor' && (
-                                                <div className="fire-tag-animation absolute -top-2.5 -right-2.5 flex items-center gap-1 bg-gradient-to-br from-red-500 to-orange-400 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
-                                                    <Flame size={12} />
+                                            {feature.title === 'Academic Integrity & Analysis' && (
+                                                <div className="fire-tag-animation absolute -top-4 -right-3 flex items-center gap-1 bg-gradient-to-br from-red-500 to-orange-400 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
+                                                    <Flame size={10} />
                                                     HOT
                                                 </div>
                                             )}
