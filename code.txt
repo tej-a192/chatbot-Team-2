@@ -7215,6 +7215,703 @@ export default {
 `frontend/src/App.jsx`
 
 ```javascript
+// // // frontend/src/App.jsx
+// // import React, { useState, useEffect, useCallback } from 'react';
+// // import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+// // import { useAuth as useRegularAuth } from './hooks/useAuth.jsx';
+// // import { useAppState } from './contexts/AppStateContext.jsx';
+// // import AuthModal from './components/auth/AuthModal.jsx';
+// // import TopNav from './components/layout/TopNav.jsx';
+// // import LeftPanel from './components/layout/LeftPanel.jsx';
+// // import CenterPanel from './components/layout/CenterPanel.jsx';
+// // import RightPanel from './components/layout/RightPanel.jsx';
+// // import LeftCollapsedNav from './components/layout/LeftCollapsedNav.jsx';
+// // import RightCollapsedNav from './components/layout/RightCollapsedNav.jsx';
+// // import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
+// // import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
+// // import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
+// // import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+// // import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
+// // import QuizGeneratorPage from './components/tools/QuizGeneratorPage.jsx';
+// // import api from './services/api.js';
+// // import toast from 'react-hot-toast';
+// // import { GraduationCap } from 'lucide-react';
+// // import { motion, AnimatePresence } from 'framer-motion';
+// // import Button from './components/core/Button.jsx';
+// // import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
+
+// // function SessionLoadingModal() {
+// //     return (
+// //         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]">
+// //             <motion.div
+// //                 key="session-loading-modal"
+// //                 initial={{ opacity: 0, scale: 0.9 }}
+// //                 animate={{ opacity: 1, scale: 1 }}
+// //                 exit={{ opacity: 0, scale: 0.9 }}
+// //                 className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl p-8 w-full max-w-md text-center"
+// //             >
+// //                 <div className="flex justify-center items-center mb-4">
+// //                     <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-b-4 border-primary"></div>
+// //                 </div>
+// //                 <h2 className="text-xl font-bold text-text-light dark:text-text-dark mb-2">Finalizing Session...</h2>
+// //                 <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+// //                     Summarizing key points and identifying topics for your future recommendations.
+// //                 </p>
+// //             </motion.div>
+// //         </div>
+// //     );
+// // }
+
+// // function MainAppLayout({ 
+// //     orchestratorStatus, 
+// //     handleNewChat, 
+// //     isSessionLoading, 
+// //     messages, 
+// //     setMessages 
+// // }) {
+// //     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
+// //     const {
+// //         currentSessionId,
+// //         isLeftPanelOpen,
+// //         isRightPanelOpen,
+// //         setSessionId: setGlobalSessionId,
+// //         initialPromptForNewSession,
+// //         setInitialPromptForNewSession,
+// //         initialActivityForNewSession,
+// //         setInitialActivityForNewSession
+// //     } = useAppState();
+// //     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+// //     const [isChatProcessing, setIsChatProcessing] = useState(false);
+    
+// //     const handleChatProcessingStatusChange = (isLoading) => {
+// //         setIsChatProcessing(isLoading);
+// //     };
+
+// //     const handleRegularUserLogout = () => {
+// //         regularUserLogout();
+// //         setGlobalSessionId(null);
+// //     };
+
+// //     const handleSelectSessionFromHistory = (sessionId) => {
+// //         if (sessionId && sessionId !== currentSessionId) {
+// //             setGlobalSessionId(sessionId);
+// //             toast.success(`Loading session...`);
+// //         }
+// //         setIsHistoryModalOpen(false);
+// //     };
+
+// //     return (
+// //     <>
+// //         <AnimatePresence>
+// //             {isSessionLoading && <SessionLoadingModal />}
+// //         </AnimatePresence>
+
+// //         <TopNav 
+// //             user={regularUser} 
+// //             onLogout={handleRegularUserLogout} 
+// //             onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+// //             onHistoryClick={() => setIsHistoryModalOpen(true)} 
+// //             orchestratorStatus={orchestratorStatus}
+// //             isChatProcessing={isChatProcessing}
+// //         />
+// //         <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+// //             <AnimatePresence mode="wait">
+// //                 {isLeftPanelOpen ? (
+// //                     <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+// //                         <LeftPanel />
+// //                     </motion.aside>
+// //                 ) : ( <LeftCollapsedNav /> )}
+// //             </AnimatePresence>
+// //             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+// //                 <CenterPanel 
+// //                     messages={messages} 
+// //                     setMessages={setMessages} 
+// //                     currentSessionId={currentSessionId}
+// //                     onChatProcessingChange={handleChatProcessingStatusChange}
+// //                     initialPromptForNewSession={initialPromptForNewSession}
+// //                     setInitialPromptForNewSession={setInitialPromptForNewSession}
+// //                     initialActivityForNewSession={initialActivityForNewSession}
+// //                     setInitialActivityForNewSession={setInitialActivityForNewSession}
+// //                 />
+// //             </main>
+// //             <AnimatePresence mode="wait">
+// //                 {isRightPanelOpen ? (
+// //                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+// //                         <RightPanel />
+// //                     </motion.aside>
+// //                 ) : ( <RightCollapsedNav /> )}
+// //             </AnimatePresence>
+// //         </div>
+// //         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
+// //     </>
+// //     );
+// // }
+
+// // function App() {
+// //     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
+// //     const { 
+// //         theme, 
+// //         setSessionId: setGlobalSessionId, 
+// //         currentSessionId, 
+// //         isAdminSessionActive,
+// //     } = useAppState();
+// //     const navigate = useNavigate();
+// //     const location = useLocation();
+// //     const [appInitializing, setAppInitializing] = useState(true);
+// //     const [showAuthModal, setShowAuthModal] = useState(false);
+// //     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+// //     const [isSessionLoading, setIsSessionLoading] = useState(false);
+// //     const [appStateMessages, setAppStateMessages] = useState([]);
+// //     const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
+
+// //     const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+// //         const messages = appStateMessages;
+
+// //         if (!forceNewChat && messages.length === 0 && currentSessionId) {
+// //             toast('This is already a new chat!', { icon: '✨' });
+// //             if (callback) callback(currentSessionId);
+// //             return;
+// //         }
+        
+// //         setIsSessionLoading(true);
+// //         try {
+// //             const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
+// //             if (data && data.newSessionId) {
+// //                 setGlobalSessionId(data.newSessionId);
+// //                 if (data.studyPlanSuggestion) {
+// //                     const { topic, reason } = data.studyPlanSuggestion;
+// //                     toast.custom((t) => (
+// //                         <motion.div
+// //                             initial={{ opacity: 0, y: -20 }}
+// //                             animate={{ opacity: 1, y: 0 }}
+// //                             exit={{ opacity: 0, y: -20 }}
+// //                             className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
+// //                         >
+// //                             <div className="flex items-start">
+// //                                 <div className="flex-shrink-0 pt-0.5"><GraduationCap className="h-6 w-6 text-primary" /></div>
+// //                                 <div className="ml-3 flex-1">
+// //                                     <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
+// //                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
+// //                                     <div className="mt-4 flex gap-2">
+// //                                         <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
+// //                                             Create Plan for "{topic}"
+// //                                         </Button>
+// //                                         <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
+// //                                     </div>
+// //                                 </div>
+// //                             </div>
+// //                         </motion.div>
+// //                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
+// //                 }
+// //                 if (callback) {
+// //                     // Only show "New chat started!" toast if not explicitly skipping analysis
+// //                     if (!skipSessionAnalysis) {
+// //                          toast.success("New chat started!"); 
+// //                     }
+// //                     callback(data.newSessionId);
+// //                 }
+// //             } else {
+// //                 toast.error(data.message || "Could not start new chat session.");
+// //                 if (callback) callback(null);
+// //             }
+// //         } catch (error) {
+// //             toast.error(`Failed to start new chat: ${error.message}`);
+// //             if (callback) callback(null);
+// //         } finally {
+// //             setIsSessionLoading(false);
+// //         }
+// //     }, [currentSessionId, setGlobalSessionId, navigate, appStateMessages]);
+    
+// //     const fetchChatHistory = useCallback(async (sid) => {
+// //         if (!sid || !regularUserToken) {
+// //             setAppStateMessages([]);
+// //             return;
+// //         }
+// //         try {
+// //             const sessionData = await api.getChatHistory(sid);
+// //             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
+// //         } catch (error) {
+// //             if (error.response && error.response.status === 404) {
+// //                 console.warn("Stale session ID found in localStorage. It will be replaced.");
+// //                 localStorage.removeItem('aiTutorSessionId');
+// //                 setGlobalSessionId(null);
+// //             } else {
+// //                 toast.error(`History load failed: ${error.message}`);
+// //             }
+// //         }
+// //     }, [regularUserToken, setGlobalSessionId]);
+
+// //     useEffect(() => {
+// //         if (currentSessionId && regularUserToken) {
+// //             fetchChatHistory(currentSessionId);
+// //         } else if (!regularUserToken) {
+// //             setAppStateMessages([]);
+// //         }
+// //     }, [currentSessionId, regularUserToken, fetchChatHistory]);
+
+// //     useEffect(() => { document.documentElement.className = theme; }, [theme]);
+// //     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    
+// //     useEffect(() => {
+// //         const handleAuthAndSession = async () => {
+// //             if (isAdminSessionActive) {
+// //                 setAppInitializing(false); setShowAuthModal(false);
+// //                 if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
+// //                 return;
+// //             }
+// //             if (regularUserAuthLoading) {
+// //                 setAppInitializing(true); return;
+// //             }
+// //             setAppInitializing(false);
+            
+// //             if (regularUserToken && regularUser) {
+// //                 setShowAuthModal(false);
+// //                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
+
+// //                 const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+// //                 if (shouldCreateSession && !isCreatingSession) {
+// //                     setIsCreatingSession(true);
+// //                     console.log("[App.jsx] Lock acquired. Creating initial session...");
+// //                     await handleNewChat();
+// //                     setIsCreatingSession(false);
+// //                     console.log("[App.jsx] Initial session created. Lock released.");
+// //                 }
+// //             } else if (!location.pathname.startsWith('/admin')) {
+// //                 setShowAuthModal(true);
+// //             }
+// //         };
+// //         handleAuthAndSession();
+// //     }, [
+// //         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
+// //         currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+// //     ]);
+
+// //     const handleAuthSuccess = (authData) => {
+// //         setShowAuthModal(false);
+// //         if (authData && !authData.isAdminLogin && authData.token) {
+// //             // After successful login, we ensure no session ID exists,
+// //             // which will trigger the useEffect above to create one cleanly.
+// //             setGlobalSessionId(null); 
+// //             if (authData.email && authData._id) {
+// //                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
+// //             }
+// //         }
+// //     };
+
+// //     if (appInitializing) {
+// //         return (
+// //             <div className="fixed inset-0 flex items-center justify-center bg-background-light dark:bg-background-dark">
+// //                 <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-primary"></div>
+// //             </div>
+// //         );
+// //     }
+
+// //     return (
+// //         <div className="flex flex-col h-screen overflow-hidden font-sans">
+// //             <AnimatePresence>
+// //                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
+// //             </AnimatePresence>
+// //             <Routes>
+// //                  <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
+// //                     <CodeExecutorPage /> : <Navigate to="/" />} 
+// //                 />
+// //                 <Route
+// //                     path="/study-plan"
+// //                     element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
+// //                 />
+// //                  <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+// //                     <QuizGeneratorPage /> : <Navigate to="/" />} 
+// //                 />
+// //                 <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+// //                     <AcademicIntegrityPage /> : <Navigate to="/" />}
+// //                 />
+// //                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+// //                 <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+// //                     orchestratorStatus={orchestratorStatus} 
+// //                     handleNewChat={handleNewChat} 
+// //                     isSessionLoading={isSessionLoading}
+// //                     messages={appStateMessages}
+// //                     setMessages={setAppStateMessages}
+// //                  /> : null} />
+// //             </Routes>
+// //         </div>
+// //     );
+// // }
+
+// // function AppWrapper() {
+// //     return (
+// //         <Router>
+// //             <App />
+// //         </Router>
+// //     );
+// // }
+
+// // export default AppWrapper;
+
+
+
+
+
+
+// // frontend/src/App.jsx
+// import React, { useState, useEffect, useCallback } from 'react';
+// import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+// import { useAuth as useRegularAuth } from './hooks/useAuth.jsx';
+// import { useAppState } from './contexts/AppStateContext.jsx';
+// import AuthModal from './components/auth/AuthModal.jsx';
+// import TopNav from './components/layout/TopNav.jsx';
+// import LeftPanel from './components/layout/LeftPanel.jsx';
+// import CenterPanel from './components/layout/CenterPanel.jsx';
+// import RightPanel from './components/layout/RightPanel.jsx';
+// import LeftCollapsedNav from './components/layout/LeftCollapsedNav.jsx';
+// import RightCollapsedNav from './components/layout/RightCollapsedNav.jsx';
+// import ChatHistoryModal from './components/chat/ChatHistoryModal.jsx';
+// import AdminDashboardPage from './components/admin/AdminDashboardPage.jsx';
+// import AdminProtectedRoute from './components/admin/AdminProtectedRoute.jsx';
+// import CodeExecutorPage from './components/tools/CodeExecutorPage.jsx';
+// import StudyPlanPage from './components/learning/StudyPlanPage.jsx';
+// import QuizGeneratorPage from './components/tools/QuizGeneratorPage.jsx';
+// import api from './services/api.js';
+// import toast from 'react-hot-toast';
+// import { GraduationCap } from 'lucide-react';
+// import { motion, AnimatePresence } from 'framer-motion';
+// import Button from './components/core/Button.jsx';
+// import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
+// import LandingPage from './components/landing/LandingPage.jsx'; // <<< NEW IMPORT
+
+// function SessionLoadingModal() {
+//     return (
+//         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]">
+//             <motion.div
+//                 key="session-loading-modal"
+//                 initial={{ opacity: 0, scale: 0.9 }}
+//                 animate={{ opacity: 1, scale: 1 }}
+//                 exit={{ opacity: 0, scale: 0.9 }}
+//                 className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl p-8 w-full max-w-md text-center"
+//             >
+//                 <div className="flex justify-center items-center mb-4">
+//                     <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-b-4 border-primary"></div>
+//                 </div>
+//                 <h2 className="text-xl font-bold text-text-light dark:text-text-dark mb-2">Finalizing Session...</h2>
+//                 <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+//                     Summarizing key points and identifying topics for your future recommendations.
+//                 </p>
+//             </motion.div>
+//         </div>
+//     );
+// }
+
+// function MainAppLayout({ 
+//     orchestratorStatus, 
+//     handleNewChat, 
+//     isSessionLoading, 
+//     messages, 
+//     setMessages 
+// }) {
+//     const { user: regularUser, logout: regularUserLogout } = useRegularAuth();
+//     const {
+//         currentSessionId,
+//         isLeftPanelOpen,
+//         isRightPanelOpen,
+//         setSessionId: setGlobalSessionId,
+//         initialPromptForNewSession,
+//         setInitialPromptForNewSession,
+//         initialActivityForNewSession,
+//         setInitialActivityForNewSession
+//     } = useAppState();
+//     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+//     const [isChatProcessing, setIsChatProcessing] = useState(false);
+    
+//     const handleChatProcessingStatusChange = (isLoading) => {
+//         setIsChatProcessing(isLoading);
+//     };
+
+//     const handleRegularUserLogout = () => {
+//         regularUserLogout();
+//         setGlobalSessionId(null);
+//     };
+
+//     const handleSelectSessionFromHistory = (sessionId) => {
+//         if (sessionId && sessionId !== currentSessionId) {
+//             setGlobalSessionId(sessionId);
+//             toast.success(`Loading session...`);
+//         }
+//         setIsHistoryModalOpen(false);
+//     };
+
+//     return (
+//     <>
+//         <AnimatePresence>
+//             {isSessionLoading && <SessionLoadingModal />}
+//         </AnimatePresence>
+
+//         <TopNav 
+//             user={regularUser} 
+//             onLogout={handleRegularUserLogout} 
+//             onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+//             onHistoryClick={() => setIsHistoryModalOpen(true)} 
+//             orchestratorStatus={orchestratorStatus}
+//             isChatProcessing={isChatProcessing}
+//         />
+//         <div className="flex flex-1 overflow-hidden pt-16 bg-background-light dark:bg-background-dark">
+//             <AnimatePresence mode="wait">
+//                 {isLeftPanelOpen ? (
+//                     <motion.aside key="left-panel-main" initial={{ x: '-100%' }} animate={{ x: '0%' }} exit={{ x: '-100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="w-full md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+//                         <LeftPanel />
+//                     </motion.aside>
+//                 ) : ( <LeftCollapsedNav /> )}
+//             </AnimatePresence>
+//             <main className={`flex-1 flex flex-col overflow-hidden p-1 sm:p-2 md:p-4 transition-all duration-300 ease-in-out ${isLeftPanelOpen ? 'lg:ml-0' : 'lg:ml-16 md:ml-14'} ${isRightPanelOpen ? 'lg:mr-0' : 'lg:mr-16 md:mr-14'}`}>
+//                 <CenterPanel 
+//                     messages={messages} 
+//                     setMessages={setMessages} 
+//                     currentSessionId={currentSessionId}
+//                     onChatProcessingChange={handleChatProcessingStatusChange}
+//                     initialPromptForNewSession={initialPromptForNewSession}
+//                     setInitialPromptForNewSession={setInitialPromptForNewSession}
+//                     initialActivityForNewSession={initialActivityForNewSession}
+//                     setInitialActivityForNewSession={setInitialActivityForNewSession}
+//                 />
+//             </main>
+//             <AnimatePresence mode="wait">
+//                 {isRightPanelOpen ? (
+//                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
+//                         <RightPanel />
+//                     </motion.aside>
+//                 ) : ( <RightCollapsedNav /> )}
+//             </AnimatePresence>
+//         </div>
+//         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
+//     </>
+//     );
+// }
+
+// function App() {
+//     const { token: regularUserToken, user: regularUser, loading: regularUserAuthLoading, setUser: setRegularUserInAuthContext } = useRegularAuth();
+//     const { 
+//         theme, 
+//         setSessionId: setGlobalSessionId, 
+//         currentSessionId, 
+//         isAdminSessionActive,
+//     } = useAppState();
+//     const navigate = useNavigate();
+//     const location = useLocation();
+//     const [appInitializing, setAppInitializing] = useState(true);
+//     const [showAuthModal, setShowAuthModal] = useState(false);
+//     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
+//     const [isSessionLoading, setIsSessionLoading] = useState(false);
+//     const [appStateMessages, setAppStateMessages] = useState([]);
+//     const [isCreatingSession, setIsCreatingSession] = useState(false);
+    
+//     // <<< NEW: State to control if the modal is for login or signup ---
+//     const [isLoginViewInModal, setIsLoginViewInModal] = useState(true);
+
+//     const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
+//         const messages = appStateMessages;
+
+//         if (!forceNewChat && messages.length === 0 && currentSessionId) {
+//             toast('This is already a new chat!', { icon: '✨' });
+//             if (callback) callback(currentSessionId);
+//             return;
+//         }
+        
+//         setIsSessionLoading(true);
+//         try {
+//             const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
+//             if (data && data.newSessionId) {
+//                 setGlobalSessionId(data.newSessionId);
+//                 if (data.studyPlanSuggestion) {
+//                     const { topic, reason } = data.studyPlanSuggestion;
+//                     toast.custom((t) => (
+//                         <motion.div
+//                             initial={{ opacity: 0, y: -20 }}
+//                             animate={{ opacity: 1, y: 0 }}
+//                             exit={{ opacity: 0, y: -20 }}
+//                             className="bg-surface-light dark:bg-surface-dark shadow-lg rounded-lg p-4 w-96 border border-border-light dark:border-border-dark"
+//                         >
+//                             <div className="flex items-start">
+//                                 <div className="flex-shrink-0 pt-0.5"><GraduationCap className="h-6 w-6 text-primary" /></div>
+//                                 <div className="ml-3 flex-1">
+//                                     <p className="text-sm font-semibold text-text-light dark:text-text-dark">Personalized Study Plan Suggestion</p>
+//                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
+//                                     <div className="mt-4 flex gap-2">
+//                                         <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
+//                                             Create Plan for "{topic}"
+//                                         </Button>
+//                                         <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
+//                                     </div>
+//                                 </div>
+//                             </div>
+//                         </motion.div>
+//                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
+//                 }
+//                 if (callback) {
+//                     if (!skipSessionAnalysis) {
+//                          toast.success("New chat started!"); 
+//                     }
+//                     callback(data.newSessionId);
+//                 }
+//             } else {
+//                 toast.error(data.message || "Could not start new chat session.");
+//                 if (callback) callback(null);
+//             }
+//         } catch (error) {
+//             toast.error(`Failed to start new chat: ${error.message}`);
+//             if (callback) callback(null);
+//         } finally {
+//             setIsSessionLoading(false);
+//         }
+//     }, [currentSessionId, setGlobalSessionId, navigate, appStateMessages]);
+    
+//     const fetchChatHistory = useCallback(async (sid) => {
+//         if (!sid || !regularUserToken) {
+//             setAppStateMessages([]);
+//             return;
+//         }
+//         try {
+//             const sessionData = await api.getChatHistory(sid);
+//             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
+//         } catch (error) {
+//             if (error.response && error.response.status === 404) {
+//                 localStorage.removeItem('aiTutorSessionId');
+//                 setGlobalSessionId(null);
+//             } else {
+//                 toast.error(`History load failed: ${error.message}`);
+//             }
+//         }
+//     }, [regularUserToken, setGlobalSessionId]);
+
+//     useEffect(() => {
+//         if (currentSessionId && regularUserToken) {
+//             fetchChatHistory(currentSessionId);
+//         } else if (!regularUserToken) {
+//             setAppStateMessages([]);
+//         }
+//     }, [currentSessionId, regularUserToken, fetchChatHistory]);
+
+//     useEffect(() => { document.documentElement.className = theme; }, [theme]);
+//     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
+    
+//     useEffect(() => {
+//         const handleAuthAndSession = async () => {
+//             if (isAdminSessionActive) {
+//                 setAppInitializing(false); setShowAuthModal(false);
+//                 if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
+//                 return;
+//             }
+//             if (regularUserAuthLoading) {
+//                 setAppInitializing(true); return;
+//             }
+//             setAppInitializing(false);
+            
+//             if (regularUserToken && regularUser) {
+//                 setShowAuthModal(false);
+//                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
+
+//                 const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+//                 if (shouldCreateSession && !isCreatingSession) {
+//                     setIsCreatingSession(true);
+//                     await handleNewChat(null, true, true); // Create a new session silently
+//                     setIsCreatingSession(false);
+//                 }
+//             }
+//             // <<< REMOVED: No longer automatically show AuthModal on load
+//         };
+//         handleAuthAndSession();
+//     }, [
+//         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
+//         currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+//     ]);
+
+//     const handleAuthSuccess = (authData) => {
+//         setShowAuthModal(false);
+//         if (authData && !authData.isAdminLogin && authData.token) {
+//             setGlobalSessionId(null); 
+//             if (authData.email && authData._id) {
+//                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
+//             }
+//             navigate('/', { replace: true }); // Navigate to main app after login/signup
+//         }
+//     };
+
+//     // <<< NEW: Function to open the AuthModal, passed to LandingPage
+//     const openAuthModal = (isLogin = true) => {
+//         setIsLoginViewInModal(isLogin);
+//         setShowAuthModal(true);
+//     };
+
+//     if (appInitializing) {
+//         return (
+//             <div className="fixed inset-0 flex items-center justify-center bg-background-light dark:bg-background-dark">
+//                 <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-primary"></div>
+//             </div>
+//         );
+//     }
+    
+//     const LoggedInRoutes = (
+//         <>
+//             <Route path="/tools/code-executor" element={<CodeExecutorPage />} />
+//             <Route path="/study-plan" element={<StudyPlanPage handleNewChat={handleNewChat} />} />
+//             <Route path="/tools/quiz-generator" element={<QuizGeneratorPage />} />
+//             <Route path="/tools/integrity-checker" element={<AcademicIntegrityPage />} />
+//             <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+//             <Route path="/*" element={
+//                 isAdminSessionActive 
+//                 ? <Navigate to="/admin/dashboard" replace /> 
+//                 : <MainAppLayout 
+//                     orchestratorStatus={orchestratorStatus} 
+//                     handleNewChat={handleNewChat} 
+//                     isSessionLoading={isSessionLoading}
+//                     messages={appStateMessages}
+//                     setMessages={setAppStateMessages}
+//                   />
+//             } />
+//         </>
+//     );
+
+//     const LoggedOutRoutes = (
+//         <>
+//             {/* All logged-out users see the landing page */}
+//             <Route path="/*" element={<LandingPage onLoginClick={openAuthModal} />} />
+//         </>
+//     );
+
+//     return (
+//         <div className="flex flex-col h-screen overflow-hidden font-sans">
+//             <AnimatePresence>
+//                 {showAuthModal && (
+//                     <AuthModal 
+//                         isOpen={showAuthModal} 
+//                         onClose={handleAuthSuccess} 
+//                         // The AuthModal now needs to know if it should start in login or signup view.
+//                         // However, the existing AuthModal has its own internal state `isLoginView`.
+//                         // We'll pass a function to the LandingPage that sets the state here, and
+//                         // the modal can then receive an initial state. For simplicity, we'll
+//                         // modify the modal to accept an initial view prop later if needed, but the
+//                         // current implementation with `onLoginClick` should handle it.
+//                     />
+//                 )}
+//             </AnimatePresence>
+//             <Routes>
+//                 {regularUserToken && regularUser ? LoggedInRoutes : LoggedOutRoutes}
+//             </Routes>
+//         </div>
+//     );
+// }
+
+// function AppWrapper() {
+//     return (
+//         <Router>
+//             <App />
+//         </Router>
+//     );
+// }
+
+// export default AppWrapper;
+
+
+
+
 // frontend/src/App.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
@@ -7239,6 +7936,8 @@ import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
 import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
+import LandingPage from './components/landing/LandingPage.jsx';
+import OnboardingFlow from './components/onboarding/OnboardingFlow.jsx';
 
 function SessionLoadingModal() {
     return (
@@ -7309,7 +8008,7 @@ function MainAppLayout({
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+            onNewChat={() => handleNewChat(messages)}
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -7362,17 +8061,19 @@ function App() {
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
     const [appStateMessages, setAppStateMessages] = useState([]);
-    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
-
-    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+    const [isCreatingSession, setIsCreatingSession] = useState(false);
+    const [isLoginViewInModal, setIsLoginViewInModal] = useState(true);
+    
+    // --- THIS IS THE FIX ---
+    const [isAwaitingOnboarding, setIsAwaitingOnboarding] = useState(false);
+    
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
         const messages = appStateMessages;
-
         if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
             if (callback) callback(currentSessionId);
             return;
         }
-        
         setIsSessionLoading(true);
         try {
             const data = await api.startNewSession(currentSessionId, skipSessionAnalysis); 
@@ -7404,7 +8105,6 @@ function App() {
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
                 if (callback) {
-                    // Only show "New chat started!" toast if not explicitly skipping analysis
                     if (!skipSessionAnalysis) {
                          toast.success("New chat started!"); 
                     }
@@ -7432,7 +8132,6 @@ function App() {
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found in localStorage. It will be replaced.");
                 localStorage.removeItem('aiTutorSessionId');
                 setGlobalSessionId(null);
             } else {
@@ -7463,39 +8162,68 @@ function App() {
                 setAppInitializing(true); return;
             }
             setAppInitializing(false);
+
+            // If we are waiting for onboarding, stop all other logic.
+            // The app will effectively "pause" on a blank screen with the onboarding modal.
+            if (isAwaitingOnboarding) {
+                return;
+            }
             
             if (regularUserToken && regularUser) {
                 setShowAuthModal(false);
+                
+                // This check now happens for existing users who log in.
+                // The `regularUser` object from AuthContext is now reliable.
+                if (regularUser.hasCompletedOnboarding === false) {
+                    setIsAwaitingOnboarding(true);
+                    return; // Stop further processing until onboarding is done
+                }
+                
                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
 
                 const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
                 if (shouldCreateSession && !isCreatingSession) {
                     setIsCreatingSession(true);
-                    console.log("[App.jsx] Lock acquired. Creating initial session...");
-                    await handleNewChat();
+                    await handleNewChat(null, true, true);
                     setIsCreatingSession(false);
-                    console.log("[App.jsx] Initial session created. Lock released.");
                 }
-            } else if (!location.pathname.startsWith('/admin')) {
-                setShowAuthModal(true);
             }
         };
         handleAuthAndSession();
     }, [
         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
-        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession,
+        isAwaitingOnboarding
     ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            // After successful login, we ensure no session ID exists,
-            // which will trigger the useEffect above to create one cleanly.
             setGlobalSessionId(null); 
             if (authData.email && authData._id) {
-                setRegularUserInAuthContext({ id: authData._id, email: authData.email });
+                // --- THIS IS THE FIX ---
+                // Create the user object for the context here, containing all needed info.
+                // The `useEffect` above will now correctly read this object.
+                const userForContext = { 
+                    id: authData._id, 
+                    email: authData.email,
+                    // Pass the backend status directly to the context
+                    hasCompletedOnboarding: authData.hasCompletedOnboarding
+                };
+                setRegularUserInAuthContext(userForContext);
+
+                // Now, check if onboarding is needed based on the fresh data from the API response.
+                if (authData.isNewUser || authData.hasCompletedOnboarding === false) {
+                    setIsAwaitingOnboarding(true);
+                }
             }
+            navigate('/', { replace: true });
         }
+    };
+
+    const openAuthModal = (isLogin = true) => {
+        setIsLoginViewInModal(isLogin);
+        setShowAuthModal(true);
     };
 
     if (appInitializing) {
@@ -7505,34 +8233,52 @@ function App() {
             </div>
         );
     }
-
-    return (
-        <div className="flex flex-col h-screen overflow-hidden font-sans">
-            <AnimatePresence>
-                {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
-            </AnimatePresence>
-            <Routes>
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
-                    <CodeExecutorPage /> : <Navigate to="/" />} 
-                />
-                <Route
-                    path="/study-plan"
-                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
-                />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
-                    <QuizGeneratorPage /> : <Navigate to="/" />} 
-                />
-                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
-                    <AcademicIntegrityPage /> : <Navigate to="/" />}
-                />
-                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+    
+    const LoggedInRoutes = (
+        <>
+            <Route path="/tools/code-executor" element={<CodeExecutorPage />} />
+            <Route path="/study-plan" element={<StudyPlanPage handleNewChat={handleNewChat} />} />
+            <Route path="/tools/quiz-generator" element={<QuizGeneratorPage />} />
+            <Route path="/tools/integrity-checker" element={<AcademicIntegrityPage />} />
+            <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+            <Route path="/*" element={
+                isAdminSessionActive 
+                ? <Navigate to="/admin/dashboard" replace /> 
+                : <MainAppLayout 
                     orchestratorStatus={orchestratorStatus} 
                     handleNewChat={handleNewChat} 
                     isSessionLoading={isSessionLoading}
                     messages={appStateMessages}
                     setMessages={setAppStateMessages}
-                 /> : null} />
+                  />
+            } />
+        </>
+    );
+
+    const LoggedOutRoutes = (
+        <>
+            <Route path="/*" element={<LandingPage onLoginClick={openAuthModal} />} />
+        </>
+    );
+
+    return (
+        <div className="flex flex-col h-screen overflow-hidden font-sans">
+            <AnimatePresence>
+                {showAuthModal && (
+                    <AuthModal 
+                        isOpen={showAuthModal} 
+                        onClose={handleAuthSuccess}
+                        initialViewIsLogin={isLoginViewInModal}
+                    />
+                )}
+                {/* The onboarding flow controls when the app is "unlocked" via onComplete */}
+                {isAwaitingOnboarding && 
+                    <OnboardingFlow onComplete={() => setIsAwaitingOnboarding(false)} />
+                }
+            </AnimatePresence>
+            <Routes>
+                {/* Only render the main app routes if we are NOT awaiting onboarding */}
+                {!isAwaitingOnboarding && (regularUserToken && regularUser ? LoggedInRoutes : LoggedOutRoutes)}
             </Routes>
         </div>
     );
@@ -9629,6 +10375,432 @@ export default RightPanel;
 `frontend/src/components/auth/AuthModal.jsx`
 
 ```javascript
+// // frontend/src/components/auth/AuthModal.jsx
+// import React, { useState, useEffect } from 'react';
+// import { useAuth } from '../../hooks/useAuth.jsx';
+// import { useAppState } from '../../contexts/AppStateContext.jsx';
+// import LLMSelection from './LLMSelection.jsx';
+// import toast from 'react-hot-toast';
+// import { LogIn, UserPlus, X, KeyRound, AtSign, AlertCircle, HardDrive, CheckSquare, Square, User, School, Hash, Award, Wrench, Calendar, Lightbulb, Goal, ChevronDown } from 'lucide-react';
+// import Button from '../core/Button.jsx';
+// import IconButton from '../core/IconButton.jsx';
+// import { motion, AnimatePresence } from 'framer-motion';
+
+
+// const yearOptions = {
+//     "Bachelor's": ["1st Year", "2nd Year", "3rd Year", "4th Year"],
+//     "Master's": ["1st Year", "2nd Year"],
+//     "PhD": ["Coursework", "Research Phase", "Writing Phase"],
+//     "Diploma": ["1st Year", "2nd Year", "3rd Year"]
+// };
+
+// const getYearOptions = (degree) => {
+//     return yearOptions[degree] || ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"];
+// };
+
+
+// function AuthModal({ isOpen, onClose }) {
+//     const { login, signup } = useAuth();
+// const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
+
+// const [isLoginView, setIsLoginView] = useState(true);
+//     const [step, setStep] = useState(1); // For signup pagination
+//     const [formData, setFormData] = useState({
+//         email: '',
+//         password: '',
+//         localSelectedLLM: 'gemini',
+//         apiKey: '',
+//         ollamaUrl: '',
+//         requestKeyFromAdmin: false,
+//         name: '',
+//         college: '',
+//         universityNumber: '',
+//         degreeType: 'Bachelors',
+//         branch: 'Computer Science',
+//         year: '1st Year',
+//         learningStyle: 'Visual',
+//         currentGoals: ''
+//     });
+
+//     const [error, setError] = useState('');
+//     const [loading, setLoading] = useState(false);
+
+//     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
+
+//     useEffect(() => {
+//         if (isOpen) {
+//             setError('');
+//             setStep(1); // Reset to first step on open
+//             setFormData({ // Reset all form data
+//                 email: '',
+//                 password: '',
+//                 localSelectedLLM: selectedLLM || 'gemini',
+//                 apiKey: '',
+//                 ollamaUrl: '',
+//                 requestKeyFromAdmin: false,
+//                 name: '',
+//                 college: '',
+//                 universityNumber: '',
+//                 degreeType: 'Bachelors',
+//                 branch: 'Computer Science',
+//                 year: '1st Year',
+//                 learningStyle: 'Visual',
+//                 currentGoals: ''
+//             });
+//         } else {
+//             setIsLoginView(true);
+//         }
+//     }, [isOpen, selectedLLM]);
+
+
+
+// const handleChange = (e) => {
+//     const { name, value, type, checked } = e.target;
+//     setFormData(prev => {
+//         const newState = { ...prev, [name]: type === 'checkbox' ? checked : value };
+//         if (name === 'degreeType') {
+//             const newYearOptions = getYearOptions(value);
+//             newState.year = newYearOptions[0];
+//         }
+//         return newState;
+//     });
+// };
+
+
+// const handleNext = () => {
+//     setError('');
+//     // --- Step 1 Validation ---
+//     if (step === 1) {
+//         if (!emailRegex.test(formData.email)) {
+//             return setError("Please enter a valid email address.");
+//         }
+//         if (formData.password.length < 6) {
+//             return setError("Password must be at least 6 characters long.");
+//         }
+//     }
+//     // --- Step 2 Validation (can be expanded) ---
+//     if (step === 2) {
+//          if (!formData.name.trim() || !formData.college.trim() || !formData.universityNumber.trim()) {
+//             return setError("Please fill out all academic profile fields.");
+//          }
+//     }
+//     setStep(prev => prev + 1);
+// };
+
+// const handleBack = () => {
+//     setError('');
+//     setStep(prev => prev - 1);
+// };
+
+// // --- Helper for consistent input styling ---
+//     const inputWrapperClass = "relative";
+//     const inputIconClass = "absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted-light dark:text-text-muted-dark";
+//     const inputFieldStyledClass = "input-field pl-10 py-2.5 text-sm w-full";
+//     const selectFieldStyledClass = "input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none";
+
+//     // --- Renders content for Step 1: Account Credentials ---
+//     const renderStep1 = () => (
+//         <div className="space-y-5">
+//             <div className={inputWrapperClass}>
+//                 <AtSign className={inputIconClass} />
+//                 <input type="text" name="email" className={inputFieldStyledClass} placeholder="Email Address" value={formData.email} onChange={handleChange} required disabled={loading} />
+//             </div>
+//             <div className={inputWrapperClass}>
+//                 <KeyRound className={inputIconClass} />
+//                 <input type="password" name="password" className={inputFieldStyledClass} placeholder="Password (min. 6 characters)" value={formData.password} onChange={handleChange} required minLength="6" disabled={loading} />
+//             </div>
+//         </div>
+//     );
+
+//     // --- Renders content for Step 2: Academic Profile ---
+//     const renderStep2 = () => (
+//         <div className="space-y-4">
+//             <p className="text-sm text-center text-text-muted-light dark:text-text-muted-dark">Tell us a bit about your academic background.</p>
+//             <div className={inputWrapperClass}>
+//                 <User className={inputIconClass} />
+//                 <input type="text" name="name" value={formData.name} onChange={handleChange} placeholder="Full Name" className={inputFieldStyledClass} required />
+//             </div>
+//             <div className={inputWrapperClass}>
+//                 <School className={inputIconClass} />
+//                 <input type="text" name="college" value={formData.college} onChange={handleChange} placeholder="College / Institution" className={inputFieldStyledClass} required />
+//             </div>
+//             <div className={inputWrapperClass}>
+//                 <Hash className={inputIconClass} />
+//                 <input type="text" name="universityNumber" value={formData.universityNumber} onChange={handleChange} placeholder="University Number" className={inputFieldStyledClass} required />
+//             </div>
+//             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+//                 <div className={inputWrapperClass}>
+//                     <Award className={inputIconClass} />
+//                     <select name="degreeType" value={formData.degreeType} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+//                         <option>Bachelor's</option><option>Master's</option><option>PhD</option><option>Diploma</option>
+//                     </select>
+//                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+//                 </div>
+//                 <div className={inputWrapperClass}>
+//                     <Wrench className={inputIconClass} />
+//                     <select name="branch" value={formData.branch} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+//                         <option>Computer Science</option><option>Mechanical</option><option>Electrical</option><option>Civil</option><option>Electronics</option><option>Other</option>
+//                     </select>
+//                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+//                 </div>
+//                 <div className={inputWrapperClass}>
+//                     <Calendar className={inputIconClass} />
+//                     <select name="year" value={formData.year} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+//                         {getYearOptions(formData.degreeType).map(option => (
+//                             <option key={option} value={option}>{option}</option>
+//                         ))}
+//                     </select>
+//                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+//                 </div>
+//             </div>
+//         </div>
+//     );
+
+//     // --- Renders content for Step 3: Learning & AI Preferences ---
+//     const renderStep3 = () => (
+//         <div className="space-y-4">
+//             <div className="space-y-2">
+//                 <label className="block text-sm font-medium text-text-light dark:text-text-dark">How do you learn best?</label>
+//                 <div className={inputWrapperClass}>
+//                     <Lightbulb className={inputIconClass} />
+//                     <select name="learningStyle" value={formData.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+//                         <option>Visual (diagrams, mind maps)</option>
+//                         <option>Auditory (podcasts, explanations)</option>
+//                         <option>Reading/Writing (detailed text)</option>
+//                         <option>Kinesthetic (hands-on examples, code)</option>
+//                     </select>
+//                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
+//                 </div>
+//             </div>
+//             <div className="space-y-2">
+//                 <label className="block text-sm font-medium text-text-light dark:text-text-dark">What are your current learning goals? (Optional)</label>
+//                 <div className={inputWrapperClass}>
+//                     <Goal className={inputIconClass} />
+//                     <textarea name="currentGoals" value={formData.currentGoals} onChange={handleChange} placeholder="e.g., 'Prepare for my AI exam', 'Understand thermodynamics basics'" className={`${inputFieldStyledClass} !h-24 resize-none`} maxLength="500"></textarea>
+//                 </div>
+//             </div>
+//             <div className="!mt-6">
+//                 <LLMSelection selectedLLM={formData.localSelectedLLM} onLlmChange={(llm) => handleChange({ target: { name: 'localSelectedLLM', value: llm }})} disabled={loading} />
+//             </div>
+//             {/* The rest of the LLM logic will be handled in the main return statement */}
+//         </div>
+//     );
+    
+//     const handleSubmit = async (e) => {
+//         e.preventDefault();
+//         setError('');
+//         setLoading(true);
+
+//         if (isLoginView) {
+//             const toastId = toast.loading('Logging in...');
+//             try {
+//                 const { email, password } = formData;
+//                 if (!emailRegex.test(email) && !(email === (import.meta.env.VITE_ADMIN_USERNAME || 'admin@admin.com'))) {
+//                     throw new Error("Please enter a valid email address.");
+//                 }
+//                 const authDataResponse = await login({ email, password });
+//                 if (authDataResponse.isAdminLogin) {
+//                     toast.success("Admin login successful!", { id: toastId });
+//                     setIsAdminSessionActive(true); 
+//                     onClose({ isAdminLogin: true });
+//                 } else {
+//                     toast.success(authDataResponse.message || 'Login Successful!', { id: toastId });
+//                     onClose(authDataResponse);
+//                 }
+//             } catch (err) {
+//                 const errorMessage = err.response?.data?.message || err.message;
+//                 setError(errorMessage);
+//                 toast.error(errorMessage, { id: toastId });
+//             } finally {
+//                 setLoading(false);
+//             }
+//         } else { // Handle multi-step signup submission
+//             const toastId = toast.loading('Creating your account...');
+//             // Final validation for Step 3
+//             if (formData.localSelectedLLM === 'gemini' && !formData.apiKey.trim() && !formData.requestKeyFromAdmin) {
+//                 setLoading(false);
+//                 toast.dismiss(toastId);
+//                 return setError("Gemini API Key is required, or request one from the admin.");
+//             }
+//             if (formData.localSelectedLLM === 'ollama' && !formData.ollamaUrl.trim()) {
+//                 setLoading(false);
+//                 toast.dismiss(toastId);
+//                 return setError("Ollama URL is required.");
+//             }
+            
+//             try {
+//                 // Consolidate data for the API
+//                 const signupData = {
+//                     email: formData.email,
+//                     password: formData.password,
+//                     preferredLlmProvider: formData.localSelectedLLM,
+//                     requestAdminKey: formData.requestKeyFromAdmin,
+//                     apiKey: formData.apiKey,
+//                     ollamaUrl: formData.ollamaUrl,
+//                     name: formData.name,
+//                     college: formData.college,
+//                     universityNumber: formData.universityNumber,
+//                     degreeType: formData.degreeType,
+//                     branch: formData.branch,
+//                     year: formData.year,
+//                     learningStyle: formData.learningStyle.split(' ')[0], // Send just "Visual", etc.
+//                     currentGoals: formData.currentGoals
+//                 };
+                
+//                 const authDataResponse = await signup(signupData);
+//                 setGlobalLLM(formData.localSelectedLLM);
+//                 toast.success(authDataResponse.message || 'Signup Successful!', { id: toastId });
+//                 onClose(authDataResponse);
+//             } catch (err) {
+//                 const errorMessage = err.response?.data?.message || err.message;
+//                 setError(errorMessage);
+//                 toast.error(errorMessage, { id: toastId });
+//             } finally {
+//                 setLoading(false);
+//             }
+//         }
+//     };
+
+
+//     return (
+//         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+//             <motion.div 
+//                 key="auth-modal-content"
+//                 initial={{ opacity: 0, scale: 0.95, y: -10 }}
+//                 animate={{ opacity: 1, scale: 1, y: 0 }}
+//                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
+//                 className="card-base p-6 sm:p-8 w-full max-w-lg" // Increased max-width for profile form
+//             >
+//                 <div className="flex justify-between items-start mb-4">
+//                     <div>
+//                         <h2 className="text-xl sm:text-2xl font-bold">{isLoginView ? 'Welcome Back' : 'Create Your Account'}</h2>
+//                         {!isLoginView && <p className="text-sm text-text-muted-light dark:text-text-muted-dark">Step {step} of 3</p>}
+//                     </div>
+//                     <IconButton icon={X} onClick={() => onClose(null)} variant="ghost" size="sm" title="Close" />
+//                 </div>
+
+//                 {/* --- Progress Bar for Signup --- */}
+//                 {!isLoginView && (
+//                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-6">
+//                         <motion.div
+//                             className="bg-primary h-1.5 rounded-full"
+//                             initial={{ width: '0%' }}
+//                             animate={{ width: `${(step / 3) * 100}%` }}
+//                             transition={{ ease: "easeInOut", duration: 0.5 }}
+//                         />
+//                     </div>
+//                 )}
+                
+//                 {error && (
+//                     <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2">
+//                         <AlertCircle size={16}/>{error}
+//                     </div>
+//                 )}
+
+//                 <form onSubmit={handleSubmit} className="space-y-5">
+//                     {/* --- Conditional Rendering Based on View/Step --- */}
+//                     <AnimatePresence mode="wait">
+//                         <motion.div
+//                             key={isLoginView ? 'login' : `step${step}`}
+//                             initial={{ opacity: 0, x: 20 }}
+//                             animate={{ opacity: 1, x: 0 }}
+//                             exit={{ opacity: 0, x: -20 }}
+//                             transition={{ duration: 0.2 }}
+//                         >
+//                             {isLoginView ? (
+//                                 <div className="space-y-5">
+//                                     <div className={inputWrapperClass}>
+//                                         <AtSign className={inputIconClass} />
+//                                         <input type="text" name="email" className={inputFieldStyledClass} placeholder="Email Address" value={formData.email} onChange={handleChange} required disabled={loading} />
+//                                     </div>
+//                                     <div className={inputWrapperClass}>
+//                                         <KeyRound className={inputIconClass} />
+//                                         <input type="password" name="password" className={inputFieldStyledClass} placeholder="Password" value={formData.password} onChange={handleChange} required disabled={loading} />
+//                                     </div>
+//                                 </div>
+//                             ) : (
+//                                 <>
+//                                     {step === 1 && renderStep1()}
+//                                     {step === 2 && renderStep2()}
+//                                     {step === 3 && renderStep3()}
+//                                 </>
+//                             )}
+//                         </motion.div>
+//                     </AnimatePresence>
+                    
+//                     {/* --- Renders Gemini/Ollama specific fields only on the last step of signup --- */}
+//                     {!isLoginView && step === 3 && (
+//                         <div className="space-y-4 pt-2 animate-fadeIn">
+//                             <div style={{ display: formData.localSelectedLLM === 'gemini' ? 'block' : 'none' }}>
+//                                 <motion.div key="gemini-input" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+//                                     <div className="flex items-center mb-3">
+//                                         <button type="button" onClick={() => handleChange({ target: { name: 'requestKeyFromAdmin', type: 'checkbox', checked: !formData.requestKeyFromAdmin }})} className="flex items-center text-sm text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light" disabled={loading}>
+//                                             {formData.requestKeyFromAdmin ? <CheckSquare size={16} className="text-primary mr-2" /> : <Square size={16} className="mr-2" />}
+//                                             Request API Key from Admin
+//                                         </button>
+//                                     </div>
+//                                     <AnimatePresence>
+//                                         {!formData.requestKeyFromAdmin && (
+//                                             <motion.div key="api-key-field" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+//                                                 <label htmlFor="api-key-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Gemini API Key <span className="text-red-500">*</span></label>
+//                                                 <div className={inputWrapperClass}>
+//                                                     <KeyRound className={inputIconClass} />
+//                                                     <input type="password" name="apiKey" id="api-key-input" className={inputFieldStyledClass} placeholder="Enter your Gemini API Key" value={formData.apiKey} onChange={handleChange} required={!formData.requestKeyFromAdmin && formData.localSelectedLLM === 'gemini'} disabled={loading} />
+//                                                 </div>
+//                                             </motion.div>
+//                                         )}
+//                                     </AnimatePresence>
+//                                 </motion.div>
+//                             </div>
+//                             <div style={{ display: formData.localSelectedLLM === 'ollama' ? 'block' : 'none' }}>
+//                                 <motion.div key="ollama-input" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+//                                     <label htmlFor="ollama-url-input" className="block text-xs font-medium text-text-muted-light dark:text-text-muted-dark mb-1">Ollama URL <span className="text-red-500">*</span></label>
+//                                     <div className={inputWrapperClass}>
+//                                         <HardDrive className={inputIconClass} />
+//                                         <input type="text" name="ollamaUrl" id="ollama-url-input" className={inputFieldStyledClass} placeholder="e.g., http://localhost:11434" value={formData.ollamaUrl} onChange={handleChange} required={formData.localSelectedLLM === 'ollama'} disabled={loading} />
+//                                     </div>
+//                                 </motion.div>
+//                             </div>
+//                         </div>
+//                     )}
+                    
+//                     {/* --- Dynamic Button Rendering --- */}
+//                     <div className="pt-2 flex items-center gap-3">
+//                         {!isLoginView && step > 1 && (
+//                             <Button type="button" variant="secondary" onClick={handleBack} disabled={loading}>
+//                                 Back
+//                             </Button>
+//                         )}
+//                         <div className="flex-grow">
+//                             {isLoginView ? (
+//                                 <Button type="submit" fullWidth isLoading={loading} leftIcon={<LogIn size={18}/>} className="py-2.5 !text-base">Login</Button>
+//                             ) : step < 3 ? (
+//                                 <Button type="button" fullWidth onClick={handleNext} disabled={loading} className="py-2.5 !text-base">Continue</Button>
+//                             ) : (
+//                                 <Button type="submit" fullWidth isLoading={loading} leftIcon={<UserPlus size={18}/>} className="py-2.5 !text-base">Create Account</Button>
+//                             )}
+//                         </div>
+//                     </div>
+//                 </form>
+
+//                 <p className="mt-6 text-center text-sm">
+//                     <button onClick={() => { setIsLoginView(!isLoginView); setError(''); setStep(1); }} className="font-medium text-primary hover:underline" disabled={loading}>
+//                         {isLoginView ? "Don't have an account? Sign Up" : "Already have an account? Login"}
+//                     </button>
+//                 </p>
+//             </motion.div>
+//         </div>
+//     );
+// }
+// export default AuthModal;
+
+
+
+
+
+
+
+
 // frontend/src/components/auth/AuthModal.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth.jsx';
@@ -9652,13 +10824,14 @@ const getYearOptions = (degree) => {
     return yearOptions[degree] || ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"];
 };
 
-
-function AuthModal({ isOpen, onClose }) {
+// <<< MODIFICATION: Added 'initialViewIsLogin' prop
+function AuthModal({ isOpen, onClose, initialViewIsLogin = true }) {
     const { login, signup } = useAuth();
-const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
-
-const [isLoginView, setIsLoginView] = useState(true);
-    const [step, setStep] = useState(1); // For signup pagination
+    const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
+    
+    // <<< MODIFICATION: Initialize state based on the new prop
+    const [isLoginView, setIsLoginView] = useState(initialViewIsLogin);
+    const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
         email: '',
         password: '',
@@ -9678,37 +10851,24 @@ const [isLoginView, setIsLoginView] = useState(true);
 
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
 
     useEffect(() => {
         if (isOpen) {
             setError('');
-            setStep(1); // Reset to first step on open
-            setFormData({ // Reset all form data
-                email: '',
-                password: '',
-                localSelectedLLM: selectedLLM || 'gemini',
-                apiKey: '',
-                ollamaUrl: '',
-                requestKeyFromAdmin: false,
-                name: '',
-                college: '',
-                universityNumber: '',
-                degreeType: 'Bachelors',
-                branch: 'Computer Science',
-                year: '1st Year',
-                learningStyle: 'Visual',
-                currentGoals: ''
+            setStep(1);
+            setIsLoginView(initialViewIsLogin); // <<< MODIFICATION: Reset view on open
+            setFormData({
+                email: '', password: '', localSelectedLLM: selectedLLM || 'gemini', apiKey: '',
+                ollamaUrl: '', requestKeyFromAdmin: false, name: '', college: '',
+                universityNumber: '', degreeType: 'Bachelors', branch: 'Computer Science',
+                year: '1st Year', learningStyle: 'Visual', currentGoals: ''
             });
-        } else {
-            setIsLoginView(true);
         }
-    }, [isOpen, selectedLLM]);
+    }, [isOpen, selectedLLM, initialViewIsLogin]); // <<< MODIFICATION: Added prop to dependency array
 
-
-
-const handleChange = (e) => {
+    // ... (rest of the file remains unchanged, paste the original content below)
+    const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => {
         const newState = { ...prev, [name]: type === 'checkbox' ? checked : value };
@@ -9836,7 +10996,6 @@ const handleBack = () => {
             <div className="!mt-6">
                 <LLMSelection selectedLLM={formData.localSelectedLLM} onLlmChange={(llm) => handleChange({ target: { name: 'localSelectedLLM', value: llm }})} disabled={loading} />
             </div>
-            {/* The rest of the LLM logic will be handled in the main return statement */}
         </div>
     );
     
@@ -9868,9 +11027,8 @@ const handleBack = () => {
             } finally {
                 setLoading(false);
             }
-        } else { // Handle multi-step signup submission
+        } else {
             const toastId = toast.loading('Creating your account...');
-            // Final validation for Step 3
             if (formData.localSelectedLLM === 'gemini' && !formData.apiKey.trim() && !formData.requestKeyFromAdmin) {
                 setLoading(false);
                 toast.dismiss(toastId);
@@ -9883,22 +11041,12 @@ const handleBack = () => {
             }
             
             try {
-                // Consolidate data for the API
                 const signupData = {
-                    email: formData.email,
-                    password: formData.password,
-                    preferredLlmProvider: formData.localSelectedLLM,
-                    requestAdminKey: formData.requestKeyFromAdmin,
-                    apiKey: formData.apiKey,
-                    ollamaUrl: formData.ollamaUrl,
-                    name: formData.name,
-                    college: formData.college,
-                    universityNumber: formData.universityNumber,
-                    degreeType: formData.degreeType,
-                    branch: formData.branch,
-                    year: formData.year,
-                    learningStyle: formData.learningStyle.split(' ')[0], // Send just "Visual", etc.
-                    currentGoals: formData.currentGoals
+                    email: formData.email, password: formData.password, preferredLlmProvider: formData.localSelectedLLM,
+                    requestAdminKey: formData.requestKeyFromAdmin, apiKey: formData.apiKey, ollamaUrl: formData.ollamaUrl,
+                    name: formData.name, college: formData.college, universityNumber: formData.universityNumber,
+                    degreeType: formData.degreeType, branch: formData.branch, year: formData.year,
+                    learningStyle: formData.learningStyle.split(' ')[0], currentGoals: formData.currentGoals
                 };
                 
                 const authDataResponse = await signup(signupData);
@@ -9923,7 +11071,7 @@ const handleBack = () => {
                 initial={{ opacity: 0, scale: 0.95, y: -10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="card-base p-6 sm:p-8 w-full max-w-lg" // Increased max-width for profile form
+                className="card-base p-6 sm:p-8 w-full max-w-lg"
             >
                 <div className="flex justify-between items-start mb-4">
                     <div>
@@ -9933,7 +11081,6 @@ const handleBack = () => {
                     <IconButton icon={X} onClick={() => onClose(null)} variant="ghost" size="sm" title="Close" />
                 </div>
 
-                {/* --- Progress Bar for Signup --- */}
                 {!isLoginView && (
                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-6">
                         <motion.div
@@ -9952,7 +11099,6 @@ const handleBack = () => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
-                    {/* --- Conditional Rendering Based on View/Step --- */}
                     <AnimatePresence mode="wait">
                         <motion.div
                             key={isLoginView ? 'login' : `step${step}`}
@@ -9982,7 +11128,6 @@ const handleBack = () => {
                         </motion.div>
                     </AnimatePresence>
                     
-                    {/* --- Renders Gemini/Ollama specific fields only on the last step of signup --- */}
                     {!isLoginView && step === 3 && (
                         <div className="space-y-4 pt-2 animate-fadeIn">
                             <div style={{ display: formData.localSelectedLLM === 'gemini' ? 'block' : 'none' }}>
@@ -10018,7 +11163,6 @@ const handleBack = () => {
                         </div>
                     )}
                     
-                    {/* --- Dynamic Button Rendering --- */}
                     <div className="pt-2 flex items-center gap-3">
                         {!isLoginView && step > 1 && (
                             <Button type="button" variant="secondary" onClick={handleBack} disabled={loading}>
@@ -12214,6 +13358,457 @@ function SubjectList({
 export default SubjectList;
 ```
 
+`frontend/src/components/landing/AudienceSection.jsx`
+
+```javascript
+// frontend/src/components/landing/AudienceSection.jsx
+import React from 'react';
+import { motion } from 'framer-motion';
+import { Check } from 'lucide-react';
+
+const studentsBenefits = [
+    "Personalized 24/7 AI tutor for any subject.",
+    "Generate quizzes from lecture notes for exam prep.",
+    "Practice coding with AI-powered feedback.",
+    "Turn dense papers into easy-to-understand podcasts.",
+];
+
+const educatorsBenefits = [
+    "Provide curated 'Subject' materials for your class.",
+    "Monitor student engagement through chat summaries.",
+    "Analyze common questions and content gaps.",
+    "Promote academic integrity with built-in tools.",
+];
+
+const AudienceCard = ({ title, benefits, color }) => (
+    <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        whileInView={{ opacity: 1, scale: 1 }}
+        viewport={{ once: true, amount: 0.5 }}
+        transition={{ duration: 0.5 }}
+        className="card-base p-8 h-full"
+    >
+        <h3 className={`text-2xl font-bold mb-6 text-${color}-500 dark:text-${color}-400`}>{title}</h3>
+        <ul className="space-y-4">
+            {benefits.map((benefit, i) => (
+                <li key={i} className="flex items-start gap-3">
+                    <Check className={`flex-shrink-0 w-5 h-5 mt-1 text-${color}-500 dark:text-${color}-400`} />
+                    <span className="text-text-light dark:text-text-dark">{benefit}</span>
+                </li>
+            ))}
+        </ul>
+    </motion.div>
+);
+
+const AudienceSection = () => {
+    return (
+        <section id="for-whom" className="py-20 lg:py-28 bg-background-light dark:bg-slate-900">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="text-center max-w-3xl mx-auto">
+                    <h2 className="text-3xl sm:text-4xl font-extrabold">Built for the Academic Community</h2>
+                    <p className="mt-4 text-lg text-text-muted-light dark:text-text-muted-dark">
+                        Whether you're a student striving for excellence or an educator fostering it, iMentor has tools for you.
+                    </p>
+                </div>
+                <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <AudienceCard title="For Students" benefits={studentsBenefits} color="primary" />
+                    <AudienceCard title="For Educators" benefits={educatorsBenefits} color="accent" />
+                </div>
+            </div>
+        </section>
+    );
+};
+
+export default AudienceSection;
+```
+
+`frontend/src/components/landing/CtaSection.jsx`
+
+```javascript
+// frontend/src/components/landing/CtaSection.jsx
+import React from 'react';
+import Button from '../core/Button';
+import { motion } from 'framer-motion';
+
+const CtaSection = ({ onLoginClick }) => {
+    return (
+        <section className="py-20 lg:py-28">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <motion.div
+                    initial={{ opacity: 0, y: 30 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ duration: 0.6 }}
+                    className="bg-primary/10 dark:bg-primary/20 p-8 sm:p-12 rounded-2xl text-center"
+                >
+                    <h2 className="text-3xl sm:text-4xl font-extrabold text-text-light dark:text-text-dark">
+                        Ready to Transform Your Learning?
+                    </h2>
+                    <p className="mt-4 max-w-2xl mx-auto text-lg text-text-muted-light dark:text-text-muted-dark">
+                        Join thousands of students and educators leveraging AI to achieve academic success. Create your free account today.
+                    </p>
+                    <div className="mt-8">
+                        <Button size="lg" onClick={() => onLoginClick(false)}>
+                            Sign Up and Get Started
+                        </Button>
+                    </div>
+                </motion.div>
+            </div>
+        </section>
+    );
+};
+
+export default CtaSection;
+```
+
+`frontend/src/components/landing/FeaturesSection.jsx`
+
+```javascript
+// frontend/src/components/landing/FeaturesSection.jsx
+import React from 'react';
+import { motion } from 'framer-motion';
+import { 
+    GraduationCap, BookOpen, BrainCircuit, Code, FileQuestion, Headphones, FileBarChart2, ShieldCheck, Globe 
+} from 'lucide-react';
+
+/**
+ * Feature data is derived from analysis of the source code.
+ * - StudyPlanPage.jsx -> Personalized Study Plans
+ * - CenterPanel.jsx -> Academic & Web Search, Critical Thinking Cues
+ * - RightPanel.jsx -> Document Analysis, KG Visualization
+ * - ToolsModal.jsx -> Code Executor, Quiz Generator, Integrity Checker
+ * - PodcastGenerator.jsx & generation routes -> Content Creation
+ */
+const features = [
+    {
+        icon: GraduationCap,
+        title: "Personalized Study Plans",
+        description: "Describe your learning goals and get a custom, step-by-step curriculum with actionable modules designed to address your knowledge gaps.",
+    },
+    {
+        icon: BookOpen,
+        title: "Advanced Research Assistant",
+        description: "Engage with academic papers, search the web for real-time information, and chat with your own documents and URLs as your primary knowledge base.",
+    },
+    {
+        icon: BrainCircuit,
+        title: "Deep Analysis & Visualization",
+        description: "Automatically generate FAQs, key topic summaries, and mind maps from any document. Visualize concepts as interactive knowledge graphs.",
+    },
+    {
+        icon: Code,
+        title: "Secure Code Executor",
+        description: "Write, run, and test code in multiple languages within a secure sandbox. Get AI-powered feedback, error explanations, and test case generation.",
+    },
+    {
+        icon: FileQuestion,
+        title: "AI-Powered Quiz Generator",
+        description: "Upload any document (PDF, DOCX) and instantly generate a multiple-choice quiz to test your comprehension and prepare for exams.",
+    },
+    {
+        icon: Headphones,
+        title: "Content Creation Tools",
+        description: "Transform your study materials into engaging content. Generate high-quality audio podcasts or export detailed analysis into DOCX and PPTX formats.",
+    }
+];
+
+const FeatureCard = ({ icon: Icon, title, description, index }) => (
+    <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.5 }}
+        transition={{ duration: 0.5, delay: index * 0.1 }}
+        className="card-base p-6 text-center"
+    >
+        <div className="inline-flex items-center justify-center p-3 bg-primary/10 rounded-lg mb-4">
+            <Icon className="h-8 w-8 text-primary" />
+        </div>
+        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <p className="text-sm text-text-muted-light dark:text-text-muted-dark">{description}</p>
+    </motion.div>
+);
+
+const FeaturesSection = () => {
+    return (
+        <section id="features" className="py-20 lg:py-28 bg-background-light dark:bg-slate-900">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="text-center max-w-3xl mx-auto">
+                    <h2 className="text-3xl sm:text-4xl font-extrabold">A Smarter Way to Learn</h2>
+                    <p className="mt-4 text-lg text-text-muted-light dark:text-text-muted-dark">
+                        iMentor is more than a chatbot. It's an all-in-one platform with specialized tools built for the demands of higher education and technical fields.
+                    </p>
+                </div>
+                <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {features.map((feature, index) => (
+                        <FeatureCard key={feature.title} index={index} {...feature} />
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+};
+
+export default FeaturesSection;
+```
+
+`frontend/src/components/landing/Footer.jsx`
+
+```javascript
+// frontend/src/components/landing/Footer.jsx
+import React from 'react';
+import { Server, Twitter, Github, Linkedin } from 'lucide-react';
+
+const Footer = () => {
+    return (
+        <footer className="bg-surface-light dark:bg-slate-900 border-t border-border-light dark:border-border-dark">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+                    <div className="flex items-center gap-2 text-xl font-bold text-text-light dark:text-text-dark">
+                        <Server className="text-primary" />
+                        <span>iMentor</span>
+                    </div>
+                    <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                        © {new Date().getFullYear()} iMentor. All Rights Reserved.
+                    </p>
+                    <div className="flex items-center space-x-4">
+                        <a href="#" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary transition-colors"><Twitter size={20} /></a>
+                        <a href="#" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary transition-colors"><Github size={20} /></a>
+                        <a href="#" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary transition-colors"><Linkedin size={20} /></a>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    );
+};
+
+export default Footer;
+```
+
+`frontend/src/components/landing/HeroSection.jsx`
+
+```javascript
+// frontend/src/components/landing/HeroSection.jsx
+import React from 'react';
+import Button from '../core/Button';
+import { motion } from 'framer-motion';
+import { ArrowRight } from 'lucide-react';
+
+const HeroSection = ({ onLoginClick }) => {
+    return (
+        <section id="home" className="relative pt-32 pb-20 lg:pt-48 lg:pb-28 overflow-hidden">
+            <div className="absolute inset-0 -z-10 bg-grid-slate-300/[0.2] dark:bg-grid-slate-700/[0.2] [mask-image:linear-gradient(to_bottom,white_40%,transparent_100%)]"></div>
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, ease: "easeOut" }}
+                >
+                    <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight text-text-light dark:text-text-dark">
+                        Your Personal AI Mentor for
+                        <span className="block bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mt-2">
+                            Higher Education
+                        </span>
+                    </h1>
+                    <p className="mt-6 max-w-2xl mx-auto text-lg text-text-muted-light dark:text-text-muted-dark">
+                        Go beyond simple answers. Generate study plans, analyze research, practice coding, and get personalized feedback on any subject.
+                    </p>
+                    <div className="mt-8 flex justify-center items-center gap-4">
+                        <Button size="lg" onClick={() => onLoginClick(false)} rightIcon={<ArrowRight size={18} />}>
+                            Get Started for Free
+                        </Button>
+                        <a href="#features">
+                            <Button size="lg" variant="outline">
+                                Explore Features
+                            </Button>
+                        </a>
+                    </div>
+                </motion.div>
+            </div>
+        </section>
+    );
+};
+
+export default HeroSection;
+```
+
+`frontend/src/components/landing/HowItWorksSection.jsx`
+
+```javascript
+// frontend/src/components/landing/HowItWorksSection.jsx
+import React from 'react';
+import { motion } from 'framer-motion';
+import { UploadCloud, MessagesSquare, BrainCircuit, GraduationCap } from 'lucide-react';
+
+const steps = [
+    {
+        icon: UploadCloud,
+        title: "1. Build Your Knowledge Base",
+        description: "Upload your lecture notes, research papers, textbooks, or even YouTube URLs to create a personalized knowledge source."
+    },
+    {
+        icon: MessagesSquare,
+        title: "2. Interact & Analyze",
+        description: "Chat with your documents, ask complex questions, and use advanced tools to generate summaries, mind maps, and FAQs."
+    },
+    {
+        icon: BrainCircuit,
+        title: "3. Generate & Create",
+        description: "Transform your knowledge into practical assets. Create podcasts for auditory learning, presentations for review, or quizzes for self-assessment."
+    },
+    {
+        icon: GraduationCap,
+        title: "4. Plan Your Success",
+        description: "Based on your interactions, iMentor suggests and helps you build personalized study plans to tackle your weakest areas and achieve your goals."
+    }
+];
+
+const HowItWorksSection = () => {
+    return (
+        <section id="how-it-works" className="py-20 lg:py-28">
+            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="text-center max-w-3xl mx-auto">
+                    <h2 className="text-3xl sm:text-4xl font-extrabold">Get Started in Minutes</h2>
+                    <p className="mt-4 text-lg text-text-muted-light dark:text-text-muted-dark">
+                        Unlock a powerful new way to study and research with a simple, intuitive workflow.
+                    </p>
+                </div>
+                <div className="relative mt-16">
+                    <div className="absolute left-1/2 -translate-x-1/2 top-5 bottom-5 w-px bg-border-light dark:bg-border-dark hidden md:block"></div>
+                    <div className="space-y-12">
+                        {steps.map((step, index) => (
+                            <motion.div
+                                key={step.title}
+                                initial={{ opacity: 0, y: 50 }}
+                                whileInView={{ opacity: 1, y: 0 }}
+                                viewport={{ once: true, amount: 0.5 }}
+                                transition={{ duration: 0.5 }}
+                                className={`flex flex-col md:flex-row items-center gap-8 ${index % 2 === 1 ? 'md:flex-row-reverse' : ''}`}
+                            >
+                                <div className="flex-1 text-center md:text-left">
+                                    <h3 className="text-2xl font-bold">{step.title}</h3>
+                                    <p className="mt-2 text-text-muted-light dark:text-text-muted-dark">{step.description}</p>
+                                </div>
+                                <div className="relative flex-shrink-0">
+                                    <div className="absolute -inset-2.5 bg-primary/20 blur-xl rounded-full"></div>
+                                    <div className="relative w-20 h-20 bg-surface-light dark:bg-surface-dark border-2 border-primary rounded-full flex items-center justify-center">
+                                        <step.icon className="w-10 h-10 text-primary" />
+                                    </div>
+                                </div>
+                                <div className="flex-1 hidden md:block"></div>
+                            </motion.div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+export default HowItWorksSection;
+```
+
+`frontend/src/components/landing/LandingNav.jsx`
+
+```javascript
+// frontend/src/components/landing/LandingNav.jsx
+import React, { useState } from 'react';
+import { Server, Menu, X } from 'lucide-react';
+import Button from '../core/Button';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const LandingNav = ({ onLoginClick }) => {
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const navItems = ["Features", "How It Works", "For Whom"];
+
+    return (
+        <header className="fixed top-0 left-0 right-0 z-50 bg-surface-light/80 dark:bg-surface-dark/80 backdrop-blur-lg border-b border-border-light dark:border-border-dark">
+            <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex items-center justify-between h-16">
+                    <a href="#home" className="flex items-center gap-2 text-xl font-bold text-text-light dark:text-text-dark">
+                        <Server className="text-primary" />
+                        <span>iMentor</span>
+                    </a>
+                    <div className="hidden md:flex items-center space-x-8">
+                        {navItems.map(item => (
+                            <a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`} className="text-sm font-medium text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors">
+                                {item}
+                            </a>
+                        ))}
+                    </div>
+                    <div className="hidden md:flex items-center space-x-2">
+                        <Button variant="ghost" size="sm" onClick={() => onLoginClick(true)}>Login</Button>
+                        <Button variant="primary" size="sm" onClick={() => onLoginClick(false)}>Sign Up</Button>
+                    </div>
+                    <div className="md:hidden">
+                        <button onClick={() => setIsMenuOpen(!isMenuOpen)}>
+                            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+                        </button>
+                    </div>
+                </div>
+            </nav>
+            <AnimatePresence>
+                {isMenuOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="md:hidden border-t border-border-light dark:border-border-dark"
+                    >
+                        <div className="px-4 py-3 space-y-2">
+                             {navItems.map(item => (
+                                <a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`} onClick={() => setIsMenuOpen(false)} className="block text-sm font-medium text-text-muted-light dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-light transition-colors py-1">
+                                    {item}
+                                </a>
+                            ))}
+                            <div className="flex items-center space-x-2 pt-2">
+                                <Button fullWidth variant="ghost" size="sm" onClick={() => { onLoginClick(true); setIsMenuOpen(false); }}>Login</Button>
+                                <Button fullWidth variant="primary" size="sm" onClick={() => { onLoginClick(false); setIsMenuOpen(false); }}>Sign Up</Button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </header>
+    );
+};
+
+export default LandingNav;
+```
+
+`frontend/src/components/landing/LandingPage.jsx`
+
+```javascript
+// frontend/src/components/landing/LandingPage.jsx
+import React from 'react';
+import LandingNav from './LandingNav';
+import HeroSection from './HeroSection';
+import FeaturesSection from './FeaturesSection';
+import HowItWorksSection from './HowItWorksSection';
+import AudienceSection from './AudienceSection';
+import CtaSection from './CtaSection';
+import Footer from './Footer';
+
+// The LandingPage component receives a function to open the AuthModal
+// This keeps the modal state managed by the main App.jsx component.
+const LandingPage = ({ onLoginClick }) => {
+    return (
+        <div className="bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans custom-scrollbar overflow-y-auto h-screen">
+            <LandingNav onLoginClick={onLoginClick} />
+            <main>
+                <HeroSection onLoginClick={onLoginClick} />
+                <FeaturesSection />
+                <HowItWorksSection />
+                <AudienceSection />
+                <CtaSection onLoginClick={onLoginClick} />
+            </main>
+            <Footer />
+        </div>
+    );
+};
+
+export default LandingPage;
+```
+
 `frontend/src/components/layout/CenterPanel.jsx`
 
 ```javascript
@@ -13972,6 +15567,300 @@ const StudyPlanPage = ({ handleNewChat }) => {
     );
 };
 export default StudyPlanPage;
+```
+
+`frontend/src/components/onboarding/OnboardingCard.jsx`
+
+```javascript
+// frontend/src/components/onboarding/OnboardingCard.jsx
+import React from 'react';
+import { motion } from 'framer-motion';
+import Button from '../core/Button';
+
+const cardVariants = {
+    enter: (direction) => ({
+        x: direction > 0 ? 300 : -300,
+        opacity: 0,
+        scale: 0.95
+    }),
+    center: {
+        zIndex: 1,
+        x: 0,
+        opacity: 1,
+        scale: 1
+    },
+    exit: (direction) => ({
+        zIndex: 0,
+        x: direction < 0 ? 300 : -300,
+        opacity: 0,
+        scale: 0.95
+    })
+};
+
+const OnboardingCard = ({
+    icon: Icon, title, description, visual,
+    isFinalStep, isFirstStep, onNext, onPrev, onSkip, onFinish
+}) => {
+    // We can track direction for a more dynamic animation
+    const [direction, setDirection] = React.useState(0);
+
+    const handleNext = () => { setDirection(1); onNext(); };
+    const handlePrev = () => { setDirection(-1); onPrev(); };
+
+    return (
+        <motion.div
+            custom={direction}
+            variants={cardVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{
+                x: { type: "spring", stiffness: 300, damping: 30 },
+                opacity: { duration: 0.2 }
+            }}
+            className="bg-surface-light dark:bg-surface-dark rounded-2xl shadow-2xl p-6 sm:p-8 overflow-hidden"
+        >
+            <div className="text-center">
+                <div className="inline-flex items-center justify-center p-3 bg-primary/10 rounded-xl mb-4">
+                    <Icon className="h-10 w-10 text-primary" />
+                </div>
+                <h2 className="text-2xl font-bold text-text-light dark:text-text-dark">{title}</h2>
+                <p className="mt-2 text-base text-text-muted-light dark:text-text-muted-dark max-w-md mx-auto">{description}</p>
+            </div>
+
+            <div className="my-8 h-32 flex items-center justify-center">
+                {/* This is where a real screenshot or illustration would go */}
+                <div className="w-48 h-full flex items-center justify-center text-center bg-gray-50 dark:bg-gray-800 border border-border-light dark:border-border-dark rounded-lg">
+                    {visual}
+                </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+                <Button variant="ghost" size="sm" onClick={onSkip} className="text-text-muted-light dark:text-text-muted-dark">
+                    {isFinalStep ? "Go to App" : "Skip Tutorial"}
+                </Button>
+                <div className="flex items-center gap-2">
+                    {!isFirstStep && (
+                        <Button variant="outline" size="sm" onClick={handlePrev}>
+                            Back
+                        </Button>
+                    )}
+                    {isFinalStep ? (
+                        <Button size="sm" onClick={onFinish}>
+                            Start Learning!
+                        </Button>
+                    ) : (
+                         <Button size="sm" onClick={handleNext}>
+                            Next
+                        </Button>
+                    )}
+                </div>
+            </div>
+        </motion.div>
+    );
+};
+
+export default OnboardingCard;
+```
+
+`frontend/src/components/onboarding/OnboardingFlow.jsx`
+
+```javascript
+// frontend/src/components/onboarding/OnboardingFlow.jsx
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+    LayoutDashboard, UploadCloud, MessagesSquare, BrainCircuit, Telescope, Wrench, GraduationCap, PartyPopper, Plus, Sparkles, ArrowRight
+} from 'lucide-react';
+import OnboardingCard from './OnboardingCard';
+import OnboardingProgress from './OnboardingProgress';
+import OnboardingVisual from './OnboardingVisual'; // <<< NEW IMPORT
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+
+const ONBOARDING_STEPS = [
+    {
+        icon: LayoutDashboard,
+        title: "Welcome to Your AI Mentor!",
+        description: "This quick tour will show you how to get the most out of iMentor. Let's explore your new personal learning assistant.",
+        visual: <div className="text-6xl animate-bounce">👋</div>
+    },
+    {
+        icon: UploadCloud,
+        title: "Build Your Knowledge Base",
+        description: "Start by uploading your own documents or pasting URLs. Your AI will use these as its primary source of truth for answering your questions.",
+        visual: <OnboardingVisual icon={UploadCloud} label="Located in Left Panel" subLabel="Add Files & URLs" />
+    },
+    {
+        icon: MessagesSquare,
+        title: "Master the Conversation",
+        description: "Use the '+' menu to enable Web Search for current events. Click the '✨' icon to ask the Prompt Coach for help asking better questions!",
+        visual: (
+            <div className="w-full h-full flex flex-col items-center justify-center p-2 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                <p className="text-xs font-semibold mb-2">In the Chat Input Bar:</p>
+                <div className="flex items-center gap-4">
+                    <div className="flex flex-col items-center">
+                        <Plus className="w-8 h-8 text-primary p-1 bg-primary/10 rounded" />
+                        <span className="text-xs mt-1">Options</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                        <Sparkles className="w-8 h-8 text-amber-500 p-1 bg-amber-500/10 rounded" />
+                        <span className="text-xs mt-1">Coach</span>
+                    </div>
+                </div>
+            </div>
+        )
+    },
+    {
+        icon: BrainCircuit,
+        title: "Enable Critical Thinking Mode",
+        description: "Click the '🧠' icon to activate a more advanced reasoning engine. The AI will think step-by-step and provide prompts to challenge its own answers.",
+        visual: <OnboardingVisual icon={BrainCircuit} label="Located in Chat Input" subLabel="Click the Brain Icon" />
+    },
+    {
+        icon: Telescope,
+        title: "Analyze & Synthesize Content",
+        description: "After selecting a source from your Knowledge Base, use the Right Panel to instantly generate FAQs, Mind Maps, and even full audio podcasts.",
+        visual: (
+             <div className="w-full h-full flex items-center justify-center p-2 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                <div className="flex items-center gap-2 text-center text-xs font-semibold text-text-muted-light dark:text-text-muted-dark">
+                    <span>Select Source<br/>(Left Panel)</span>
+                    <ArrowRight className="w-6 h-6 text-primary flex-shrink-0" />
+                    <span>Run Analysis<br/>(Right Panel)</span>
+                </div>
+            </div>
+        )
+    },
+    {
+        icon: Wrench,
+        title: "Explore the Toolbox",
+        description: "Access powerful standalone utilities like the Secure Code Executor, AI Quiz Generator, and Academic Integrity Checker from the top navigation bar.",
+        visual: <OnboardingVisual icon={Wrench} label="Located in Top Navigation" subLabel="Click the 'Tools' Button" />
+    },
+    {
+        icon: GraduationCap,
+        title: "Create Your Study Plan",
+        description: "Based on your chats, iMentor can suggest personalized study plans. Visit the 'Study Plan' page to generate a step-by-step curriculum for any goal.",
+        visual: <OnboardingVisual icon={GraduationCap} label="Located in Top Navigation" subLabel="Click the 'Study Plan' Button" />
+    },
+    {
+        icon: PartyPopper,
+        title: "You're All Set!",
+        description: "You've mastered the basics. Now it's time to start your personalized learning journey. Let's begin!",
+        visual: <div className="text-6xl animate-pulse">🚀</div>
+    }
+];
+
+const OnboardingFlow = ({ onComplete }) => {
+    const [step, setStep] = useState(0);
+
+    const handleNext = () => setStep(prev => Math.min(prev + 1, ONBOARDING_STEPS.length - 1));
+    const handlePrev = () => setStep(prev => Math.max(prev - 1, 0));
+    
+    const handleFinish = async () => {
+        try {
+            await api.completeOnboarding();
+            toast.success("Welcome aboard!");
+            onComplete();
+        } catch (error) {
+            toast.error("Could not save onboarding status, but you can proceed.");
+            onComplete();
+        }
+    };
+    
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'ArrowRight') handleNext();
+            if (e.key === 'ArrowLeft') handlePrev();
+            if (e.key === 'Escape') handleFinish();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    const currentStepData = ONBOARDING_STEPS[step];
+
+    return (
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4"
+        >
+            <div className="w-full max-w-2xl">
+                <OnboardingProgress current={step + 1} total={ONBOARDING_STEPS.length} />
+                <AnimatePresence mode="wait">
+                    <OnboardingCard
+                        key={step}
+                        icon={currentStepData.icon}
+                        title={currentStepData.title}
+                        description={currentStepData.description}
+                        visual={currentStepData.visual}
+                        isFinalStep={step === ONBOARDING_STEPS.length - 1}
+                        onNext={handleNext}
+                        onPrev={handlePrev}
+                        onSkip={handleFinish}
+                        onFinish={handleFinish}
+                        isFirstStep={step === 0}
+                    />
+                </AnimatePresence>
+            </div>
+        </motion.div>
+    );
+};
+
+export default OnboardingFlow;
+```
+
+`frontend/src/components/onboarding/OnboardingProgress.jsx`
+
+```javascript
+// frontend/src/components/onboarding/OnboardingProgress.jsx
+import React from 'react';
+import { motion } from 'framer-motion';
+
+const OnboardingProgress = ({ current, total }) => {
+    const progressPercentage = (current / total) * 100;
+
+    return (
+        <div className="mb-4 text-center">
+            <p className="text-sm font-medium text-gray-300 mb-2">
+                Step {current} of {total}
+            </p>
+            <div className="w-full bg-slate-700/50 rounded-full h-1.5">
+                <motion.div
+                    className="bg-primary h-1.5 rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{ width: `${progressPercentage}%` }}
+                    transition={{ ease: "easeInOut", duration: 0.5 }}
+                />
+            </div>
+        </div>
+    );
+};
+
+export default OnboardingProgress;
+```
+
+`frontend/src/components/onboarding/OnboardingVisual.jsx`
+
+```javascript
+// frontend/src/components/onboarding/OnboardingVisual.jsx
+import React from 'react';
+
+const OnboardingVisual = ({ icon: Icon, label, subLabel }) => {
+    return (
+        <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+            <div className="p-3 bg-primary/10 rounded-lg">
+                <Icon className="w-8 h-8 text-primary" />
+            </div>
+            <p className="mt-2 font-semibold text-sm text-text-light dark:text-text-dark">{label}</p>
+            {subLabel && <p className="text-xs text-text-muted-light dark:text-text-muted-dark">{subLabel}</p>}
+        </div>
+    );
+};
+
+export default OnboardingVisual;
 ```
 
 `frontend/src/components/profile/ProfileSettingsModal.jsx`
@@ -16396,461 +18285,135 @@ export const useWebSpeech = () => {
 @tailwind utilities;
 
 @layer base {
-
-  html,
-  body,
-  #root {
-    /* Apply to html, body, AND your React root div */
-    @apply h-full overflow-hidden;
-    /* Force full height and no scroll on these */
+  html, body, #root {
+    @apply h-full;
   }
+  
+  /* --- MODIFICATION: Allow scrolling ONLY for the Landing Page body --- */
+  /* The main app at #root will retain its overflow-hidden behavior */
+  html:has(body.landing-page-body) {
+    @apply h-auto;
+  }
+  body.landing-page-body {
+    @apply overflow-y-auto h-auto;
+  }
+  body:not(.landing-page-body) #root {
+     @apply overflow-hidden;
+  }
+  /* --- END MODIFICATION --- */
 
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
-    /* This is fine, affects internal scrolls */
   }
 
   body {
     @apply bg-background-light text-text-light transition-colors duration-300;
     font-family: theme('fontFamily.sans');
-    /* overflow-hidden is now applied via the html, body, #root rule above */
   }
 
   html.dark body {
     @apply bg-background-dark text-text-dark;
   }
-
   html.light body {
     @apply bg-background-light text-text-light;
   }
 
   .custom-scrollbar {
-    @apply scrollbar-thin scrollbar-thumb-secondary dark:scrollbar-thumb-secondary-dark scrollbar-track-surface-light dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full;
+     @apply scrollbar-thin scrollbar-thumb-secondary dark:scrollbar-thumb-secondary-dark scrollbar-track-surface-light dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full;
+  }
+  
+  /* --- NEW: Grid background for Hero Section --- */
+  .bg-grid-slate-300\/\[0\.2\] {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(203 213 225 / 0.2)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
+  }
+  .dark .dark\:bg-grid-slate-700\/\[0\.2\] {
+      background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(51 65 85 / 0.5)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
   }
 
   /* --- Enhanced Prose Styles --- */
-  .prose {
-    @apply max-w-none text-text-light dark:text-text-dark;
-  }
-
-  .prose,
-  .prose-sm {
-
-    /* Headings */
-    h1 {
-      @apply text-2xl sm:text-3xl font-extrabold mb-6 mt-2 text-text-light dark:text-text-dark;
-    }
-
-    h2 {
-      @apply text-xl sm:text-2xl font-bold mb-4 mt-8 border-b border-border-light dark:border-border-dark pb-2;
-    }
-
-    h3 {
-      @apply text-lg sm:text-xl font-semibold mb-3 mt-6;
-    }
-
-    h4 {
-      @apply text-base sm:text-lg font-semibold mb-2 mt-4;
-    }
-
-    /* Paragraphs */
-    p {
-      @apply mb-4 leading-relaxed;
-    }
-
-    /* Links */
-    a {
-      @apply text-primary dark:text-primary-light hover:underline font-medium;
-    }
-
-    pre a,
-    pre code a {
-      @apply text-inherit no-underline hover:text-inherit;
-    }
-
-    /* Lists */
-    ul,
-    ol {
-      @apply pl-5 mb-4 space-y-1;
-    }
-
-    ul {
-      @apply list-disc;
-    }
-
-    ol {
-      @apply list-decimal;
-    }
-
-    li {
-      @apply mb-1;
-    }
-
-    ul ul,
-    ol ol,
-    ul ol,
-    ol ul {
-      @apply pl-5 mt-1 mb-1;
-    }
-
-    li::marker {
-      @apply text-text-muted-light dark:text-text-muted-dark;
-    }
-
-    /* --- GFM Task List Checkboxes - Custom GREEN Styling --- */
-    li:has(> input[type="checkbox"]) {
-      @apply flex items-center;
-      list-style-type: none;
-      margin-left: -1.25rem;
-      /* Adjust as needed for alignment */
-      padding-left: 0;
-    }
-
-    li>input[type="checkbox"] {
-      @apply opacity-0 w-0 h-0 absolute;
-    }
-
-    li:has(> input[type="checkbox"])::before {
-      content: "";
-      @apply inline-block w-4 h-4 border-2 rounded-sm mr-2 align-middle flex-shrink-0;
-      @apply bg-surface-light dark:bg-gray-700;
-      @apply border-border-light dark:border-border-dark;
-      transition: all 0.15s ease-in-out;
-    }
-
-    li:has(> input[type="checkbox"]:checked)::before {
-      @apply bg-green-500 dark:bg-green-600 border-green-500 dark:border-green-600;
-      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
-      background-size: 70% 70%;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-
-    li:has(> input[type="checkbox"]:disabled:not(:checked))::before {
-      @apply opacity-60 cursor-not-allowed;
-      @apply bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500;
-    }
-
-    li:has(> input[type="checkbox"]:checked:disabled)::before {
-      @apply bg-green-500/70 dark:bg-green-600/70 border-green-500/70 dark:border-green-600/70;
-      opacity: 0.75;
-      cursor: not-allowed;
-    }
-
-
-    /* Blockquotes */
-    blockquote {
-      @apply border-l-4 border-primary dark:border-primary-light pl-4 py-2 my-4 italic text-text-muted-light dark:text-text-muted-dark bg-surface-light dark:bg-gray-800/30 rounded-r-md;
-    }
-
-    blockquote p {
-      @apply mb-0;
-    }
-
-    /* Horizontal Rules */
-    hr {
-      @apply my-8 border-t border-border-light dark:border-border-dark;
-    }
-
-    /* Tables */
-    table {
-      @apply w-full my-6 text-sm border-collapse;
-    }
-
-    thead {
-      @apply border-b-2 border-border-light dark:border-border-dark;
-    }
-
-    th {
-      @apply px-4 py-2.5 text-left font-semibold text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700/50;
-      @apply border border-border-light dark:border-border-dark;
-    }
-
-    tbody tr {
-      @apply border-b border-border-light dark:border-border-dark;
-    }
-
-    tbody tr:last-child {
-      @apply border-b-0;
-    }
-
-    tbody tr:nth-child(even) {
-      @apply bg-gray-50 dark:bg-gray-800/20;
-    }
-
-    td {
-      @apply px-4 py-2.5 text-left border-x border-border-light dark:border-border-dark;
-    }
-
-    td code {
-      @apply text-xs;
-    }
-
-    td strong {
-      @apply font-semibold;
-    }
-
-    /* --- Code Styling --- */
-    code:not(pre code) {
-      @apply px-1.5 py-0.5 bg-primary/10 dark:bg-primary-dark/20 text-primary dark:text-primary-light rounded-md text-xs font-mono break-words;
-    }
-
-    code:not(pre code)::before,
-    code:not(pre code)::after {
-      content: '';
-    }
-
-    pre {
-      @apply bg-[#282c34] dark:bg-[#21252b] p-4 rounded-lg shadow-md overflow-x-auto custom-scrollbar my-5;
-    }
-
-    pre code {
-      @apply bg-transparent p-0 font-mono text-sm leading-relaxed;
-      color: #abb2bf;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    strong {
-      @apply font-semibold text-text-light dark:text-text-dark;
-    }
+  .prose { @apply max-w-none text-text-light dark:text-text-dark; }
+  .prose, .prose-sm {
+    h1 { @apply text-2xl sm:text-3xl font-extrabold mb-6 mt-2 text-text-light dark:text-text-dark; }
+    h2 { @apply text-xl sm:text-2xl font-bold mb-4 mt-8 border-b border-border-light dark:border-border-dark pb-2; }
+    h3 { @apply text-lg sm:text-xl font-semibold mb-3 mt-6; }
+    h4 { @apply text-base sm:text-lg font-semibold mb-2 mt-4; }
+    p { @apply mb-4 leading-relaxed; }
+    a { @apply text-primary dark:text-primary-light hover:underline font-medium; }
+    pre a, pre code a { @apply text-inherit no-underline hover:text-inherit; }
+    ul, ol { @apply pl-5 mb-4 space-y-1; }
+    ul { @apply list-disc; }
+    ol { @apply list-decimal; }
+    li { @apply mb-1; }
+    ul ul, ol ol, ul ol, ol ul { @apply pl-5 mt-1 mb-1; }
+    li::marker { @apply text-text-muted-light dark:text-text-muted-dark; }
+    li:has(> input[type="checkbox"]) { @apply flex items-center; list-style-type: none; margin-left: -1.25rem; padding-left: 0; }
+    li > input[type="checkbox"] { @apply opacity-0 w-0 h-0 absolute; }
+    li:has(> input[type="checkbox"])::before { content: ""; @apply inline-block w-4 h-4 border-2 rounded-sm mr-2 align-middle flex-shrink-0; @apply bg-surface-light dark:bg-gray-700; @apply border-border-light dark:border-border-dark; transition: all 0.15s ease-in-out; }
+    li:has(> input[type="checkbox"]:checked)::before { @apply bg-green-500 dark:bg-green-600 border-green-500 dark:border-green-600; background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e"); background-size: 70% 70%; background-position: center; background-repeat: no-repeat; }
+    li:has(> input[type="checkbox"]:disabled:not(:checked))::before { @apply opacity-60 cursor-not-allowed; @apply bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500; }
+    li:has(> input[type="checkbox"]:checked:disabled)::before { @apply bg-green-500/70 dark:bg-green-600/70 border-green-500/70 dark:border-green-600/70; opacity: 0.75; cursor: not-allowed; }
+    blockquote { @apply border-l-4 border-primary dark:border-primary-light pl-4 py-2 my-4 italic text-text-muted-light dark:text-text-muted-dark bg-surface-light dark:bg-gray-800/30 rounded-r-md; }
+    blockquote p { @apply mb-0; }
+    hr { @apply my-8 border-t border-border-light dark:border-border-dark; }
+    table { @apply w-full my-6 text-sm border-collapse; }
+    thead { @apply border-b-2 border-border-light dark:border-border-dark; }
+    th { @apply px-4 py-2.5 text-left font-semibold text-text-light dark:text-text-dark bg-gray-100 dark:bg-gray-700/50; @apply border border-border-light dark:border-border-dark; }
+    tbody tr { @apply border-b border-border-light dark:border-border-dark; }
+    tbody tr:last-child { @apply border-b-0; }
+    tbody tr:nth-child(even) { @apply bg-gray-50 dark:bg-gray-800/20; }
+    td { @apply px-4 py-2.5 text-left border-x border-border-light dark:border-border-dark; }
+    td code { @apply text-xs; }
+    td strong { @apply font-semibold; }
+    code:not(pre code) { @apply px-1.5 py-0.5 bg-primary/10 dark:bg-primary-dark/20 text-primary dark:text-primary-light rounded-md text-xs font-mono break-words; }
+    code:not(pre code)::before, code:not(pre code)::after { content: ''; }
+    pre { @apply bg-[#282c34] dark:bg-[#21252b] p-4 rounded-lg shadow-md overflow-x-auto custom-scrollbar my-5; }
+    pre code { @apply bg-transparent p-0 font-mono text-sm leading-relaxed; color: #abb2bf; white-space: pre-wrap; word-break: break-all; }
+    strong { @apply font-semibold text-text-light dark:text-text-dark; }
   }
 }
 
 @layer components {
-    .btn {
-    @apply font-semibold py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-opacity-75 transition-all duration-150 ease-in-out flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed;
-  }
-
-  html.dark .btn {
-    @apply focus:ring-offset-background-dark;
-  }
-
-  html:not(.dark) .btn {
-    @apply focus:ring-offset-background-light;
-  }
-
-  .btn-primary {
-    @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary;
-  }
-
-  .btn-secondary {
-    @apply btn bg-secondary text-white hover:bg-secondary-dark focus:ring-secondary;
-  }
-
-  .btn-ghost {
-    @apply btn text-text-muted-light dark:text-text-muted-dark hover:bg-gray-500 hover:bg-opacity-10 focus:ring-primary;
-  }
-
-  .input-field {
-    @apply block w-full px-3 py-2 bg-surface-light dark:bg-gray-700 border border-border-light dark:border-border-dark rounded-md text-sm shadow-sm placeholder-text-muted-light dark:placeholder-text-muted-dark focus:outline-none focus:border-primary dark:focus:border-primary-light focus:ring-1 focus:ring-primary dark:focus:ring-primary-light;
-  }
-
-  .form-input,
-  .form-textarea,
-  .form-select,
-  .form-multiselect {
-    @apply input-field;
-  }
-
-  .form-checkbox,
-  .form-radio {
-    @apply rounded shadow-sm border-border-light dark:border-border-dark text-primary focus:ring-primary dark:focus:ring-primary-light;
-    @apply bg-surface-light dark:bg-gray-600;
-  }
-
-  .form-checkbox:disabled,
-  .form-radio:disabled {
-    @apply opacity-70 bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600;
-  }
-
-  .card-base {
-    @apply border rounded-panel shadow-panel;
-    @apply bg-surface-light dark:bg-surface-dark border-border-light dark:border-border-dark;
-  }
-
-  .card-header-base {
-    @apply px-4 py-3 text-sm font-semibold border-b;
-    @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark;
-  }
-
-  .panel-resize-handle {
-      @apply relative bg-transparent;
-  }
-  
-  .panel-resize-handle::after {
-    content: '';
-    @apply absolute inset-0 transition-colors duration-200;
-  }
-
-  .panel-resize-handle[data-active='true']::after {
-    @apply bg-primary/50;
-  }
-  
-  /* --- THIS IS THE CORRECTED SHIMMER CODE --- */
-  .shimmer-container {
-    @apply relative overflow-hidden;
-  }
-
-  /* REPLACE the existing .shimmer-container::after block with this one */
-
-.shimmer-container::after {
-  content: '';
-  @apply absolute top-0 left-0 w-full h-full;
-  
-  /* The visual gradient for the shimmer */
-  background: linear-gradient(
-    90deg,
-    transparent 20%,
-    rgba(0, 0, 0, 0.1) 50%, 
-    transparent 80%
-  );
-
-  /* THIS IS THE FIX: Use the Tailwind utility class for the animation */
-  @apply animate-shimmerSweep; 
+  .btn { @apply font-semibold py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-opacity-75 transition-all duration-150 ease-in-out flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed; }
+  html.dark .btn { @apply focus:ring-offset-background-dark; }
+  html:not(.dark) .btn { @apply focus:ring-offset-background-light; }
+  .btn-primary { @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary; }
+  .btn-secondary { @apply btn bg-secondary text-white hover:bg-secondary-dark focus:ring-secondary; }
+  .btn-ghost { @apply btn text-text-muted-light dark:text-text-muted-dark hover:bg-gray-500 hover:bg-opacity-10 focus:ring-primary; }
+  .input-field { @apply block w-full px-3 py-2 bg-surface-light dark:bg-gray-700 border border-border-light dark:border-border-dark rounded-md text-sm shadow-sm placeholder-text-muted-light dark:placeholder-text-muted-dark focus:outline-none focus:border-primary dark:focus:border-primary-light focus:ring-1 focus:ring-primary dark:focus:ring-primary-light; }
+  .form-input, .form-textarea, .form-select, .form-multiselect { @apply input-field; }
+  .form-checkbox, .form-radio { @apply rounded shadow-sm border-border-light dark:border-border-dark text-primary focus:ring-primary dark:focus:ring-primary-light; @apply bg-surface-light dark:bg-gray-600; }
+  .form-checkbox:disabled, .form-radio:disabled { @apply opacity-70 bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600; }
+  .card-base { @apply border rounded-panel shadow-panel; @apply bg-surface-light dark:bg-surface-dark border-border-light dark:border-border-dark; }
+  .card-header-base { @apply px-4 py-3 text-sm font-semibold border-b; @apply text-text-light dark:text-text-dark border-border-light dark:border-border-dark; }
+  .panel-resize-handle { @apply relative bg-transparent; }
+  .panel-resize-handle::after { content: ''; @apply absolute inset-0 transition-colors duration-200; }
+  .panel-resize-handle[data-active='true']::after { @apply bg-primary/50; }
+  .shimmer-container { @apply relative overflow-hidden; }
+  .shimmer-container::after { content: ''; @apply absolute top-0 left-0 w-full h-full; background: linear-gradient(90deg, transparent 20%, rgba(0, 0, 0, 0.1) 50%, transparent 80%); @apply animate-shimmerSweep; }
+  html.dark .shimmer-container::after { background: linear-gradient(90deg, transparent 20%, rgba(255, 255, 255, 0.15) 50%, transparent 80%); }
+  .code-block-copy-button { @apply absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200; @apply opacity-0 group-hover:opacity-100; }
+  .code-block-copy-button:hover { @apply bg-gray-600/90 text-white; }
+  html.light .code-block-copy-button { @apply bg-gray-200/80 text-text-muted-light; }
+  html.light .code-block-copy-button:hover { @apply bg-gray-300/90 text-text-light; }
+  .prose pre { @apply relative; }
+  @property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+  .animated-border-button { @apply relative z-0 inline-flex items-center justify-center overflow-hidden rounded-full; background: conic-gradient(from var(--angle), #FFA000, #FF4500, #FFA000); animation: spin-border 4s linear infinite; padding: 2px; }
+  .animated-border-button > span { @apply block rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold px-5 py-2.5; background: none; }
+  .animated-border-button:hover > span { @apply from-orange-600 to-red-600; }
 }
-
-  /* CORRECTED: Dark mode shimmer with rgba */
-  html.dark .shimmer-container::after {
-    background: linear-gradient(
-      90deg,
-      transparent 20%,
-      rgba(255, 255, 255, 0.15) 50%,
-      transparent 80%
-    );
-  }
-
-
-.code-block-copy-button {
-  @apply absolute top-1 right-1 p-1.5 rounded-md cursor-pointer text-text-muted-dark bg-gray-700/80 backdrop-blur-sm transition-opacity duration-200;
-  @apply opacity-0 group-hover:opacity-100; /* Will be triggered by parent .prose pre:hover */
-}
-
-.code-block-copy-button:hover {
-  @apply bg-gray-600/90 text-white;
-}
-
-html.light .code-block-copy-button {
-  @apply bg-gray-200/80 text-text-muted-light;
-}
-
-html.light .code-block-copy-button:hover {
-  @apply bg-gray-300/90 text-text-light;
-}
-
-.prose pre {
-  @apply relative;
-}
-
-@property --angle {
-    syntax: '<angle>';
-    initial-value: 0deg;
-    inherits: false;
-}
-
-.animated-border-button {
-  @apply relative z-0 inline-flex items-center justify-center overflow-hidden rounded-full;
-  background: conic-gradient(from var(--angle), #FFA000, #FF4500, #FFA000);
-  animation: spin-border 4s linear infinite; 
-  padding: 2px; 
-}
-
-.animated-border-button > span {
-  @apply block rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold px-5 py-2.5; /* Match padding to button content */
-  background: none;
-}
-
-.animated-border-button:hover > span {
-  @apply from-orange-600 to-red-600; 
-}
-}
-
-
-
-
 
 @layer utilities {
-  @keyframes spin-border {
-    0% { --angle: 0deg; }
-    100% { --angle: 360deg; }
-  }
-
-  /* Keyframes for the twinkling/shining effect on text and icons */
-  @keyframes twinkle-effect {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-      text-shadow: 0 0 8px currentColor, 0 0 10px currentColor;
-    }
-    50% {
-      opacity: 0.85;
-      transform: scale(0.98);
-      text-shadow: 0 0 12px currentColor, 0 0 16px currentColor;
-    }
-  }
-  
-  /* Utility class to apply the twinkling animation */
-  .twinkling-text {
-    animation: twinkle-effect 4s ease-in-out infinite;
-  }
-  
-  /* Register --angle as a property for smooth animation */
-  @property --angle {
-    syntax: '<angle>';
-    initial-value: 0deg;
-    inherits: false;
-  }
-
-  /* Keyframes for the sweeping underline effect */
-  @keyframes sweep-underline {
-    from { transform: translateX(-101%); }
-    to { transform: translateX(101%); }
-  }
-
-  /* Utility class for the animated underline */
-  .animated-underline {
-    position: relative;
-    display: inline-block;
-    padding-bottom: 4px;
-    overflow: hidden;
-  }
-
-  .animated-underline::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(
-      90deg, 
-      transparent,
-      theme('colors.orange.500'),
-      theme('colors.red.500'),
-      theme('colors.amber.400'),
-      transparent
-    );
-    animation: sweep-underline 4s linear infinite;
-  }
-
-  /* Keyframes for the fiery "Hot" tag effect */
-  @keyframes fire-flicker {
-    0%, 100% {
-      transform: scale(1, 1);
-      box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400');
-    }
-    50% {
-      transform: scale(1.05, 1.05);
-      box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7);
-    }
-  }
-
-  /* Utility class for the fire animation */
-  .fire-tag-animation {
-    animation: fire-flicker 2.5s ease-in-out infinite;
-  }
+  @keyframes spin-border { 0% { --angle: 0deg; } 100% { --angle: 360deg; } }
+  @keyframes twinkle-effect { 0%, 100% { opacity: 1; transform: scale(1); text-shadow: 0 0 8px currentColor, 0 0 10px currentColor; } 50% { opacity: 0.85; transform: scale(0.98); text-shadow: 0 0 12px currentColor, 0 0 16px currentColor; } }
+  .twinkling-text { animation: twinkle-effect 4s ease-in-out infinite; }
+  @property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+  @keyframes sweep-underline { from { transform: translateX(-101%); } to { transform: translateX(101%); } }
+  .animated-underline { position: relative; display: inline-block; padding-bottom: 4px; overflow: hidden; }
+  .animated-underline::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, theme('colors.orange.500'), theme('colors.red.500'), theme('colors.amber.400'), transparent); animation: sweep-underline 4s linear infinite; }
+  @keyframes fire-flicker { 0%, 100% { transform: scale(1, 1); box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400'); } 50% { transform: scale(1.05, 1.05); box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7); } }
+  .fire-tag-animation { animation: fire-flicker 2.5s ease-in-out infinite; }
 }
 ```
 
@@ -17024,6 +18587,322 @@ export const getUsersAndChats = () => makeAdminApiRequest('get', '/users-with-ch
 `frontend/src/services/api.js`
 
 ```javascript
+// // frontend/src/services/api.js
+// import axios from "axios";
+// import toast from "react-hot-toast";
+
+// const apiClient = axios.create({
+//   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api",
+// });
+
+// apiClient.interceptors.request.use(
+//   (config) => {
+//     const token = localStorage.getItem("authToken");
+//     if (token) {
+//       config.headers.Authorization = `Bearer ${token}`;
+//     }
+//     return config;
+//   },
+//   (error) => {
+//     return Promise.reject(error);
+//   }
+// );
+
+// apiClient.interceptors.response.use(
+//   (response) => response,
+//   (error) => {
+//     if (error.response && error.response.status === 401) {
+//       console.error("API Interceptor: Received 401 Unauthorized. Token might be invalid or expired.");
+//     }
+//     return Promise.reject(error);
+//   }
+// );
+
+// function parseAnalysisOutput(rawOutput) {
+//     if (!rawOutput || typeof rawOutput !== 'string') {
+//         return { content: '', thinking: '' };
+//     }
+//     const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+//     let thinkingText = '';
+//     let mainContent = rawOutput;
+
+//     if (thinkingMatch && thinkingMatch[1]) {
+//         thinkingText = thinkingMatch[1].trim();
+//         mainContent = rawOutput.replace(/<thinking>[\s\S]*?<\/thinking>\s*/i, '').trim();
+//     }
+//     return { content: mainContent, thinking: thinkingText };
+// }
+
+// const api = {
+//   login: async (credentials) => {
+//     const response = await apiClient.post("/auth/signin", credentials);
+//     return response.data;
+//   },
+//   signup: async (userData) => {
+//     const response = await apiClient.post("/auth/signup", userData);
+//     return response.data;
+//   },
+//   getMe: async () => {
+//     const response = await apiClient.get("/auth/me");
+//     return response.data;
+//   },
+//   sendMessage: async (payload) => {
+//     const response = await apiClient.post("/chat/message", payload);
+//     return response.data;
+//   },
+//   getChatHistory: async (sessionId) => {
+//     const response = await apiClient.get(`/chat/session/${sessionId}`);
+//     return response.data;
+//   },
+//   getChatSessions: async () => {
+//     const response = await apiClient.get("/chat/sessions");
+//     return response.data;
+//   },
+//   startNewSession: async (previousSessionId, skipAnalysis = false) => {
+//     const response = await apiClient.post("/chat/history", {
+//       previousSessionId,
+//       skipAnalysis
+//     });
+//     return response.data;
+//   },
+//   deleteChatSession: async (sessionId) => {
+//     const response = await apiClient.delete(`/chat/session/${sessionId}`);
+//     return response.data;
+//   },
+//   uploadFile: async (formData, onUploadProgress) => {
+//     const response = await apiClient.post("/upload", formData, {
+//       headers: { "Content-Type": "multipart/form-data" },
+//       onUploadProgress,
+//     });
+//     return response.data;
+//   },
+//   // getFiles: async () => {
+//   //   const response = await apiClient.get("/files");
+//   //   return response.data;
+//   // },
+//   // deleteFile: async (serverFilename) => {
+//   //   const response = await apiClient.delete(`/files/${serverFilename}`);
+//   //   return response.data;
+//   // },
+//   getKnowledgeSources: async () => {
+//     const response = await apiClient.get("/knowledge-sources");
+//     return response.data;
+//   },
+//   deleteKnowledgeSource: async (sourceId) => {
+//     const response = await apiClient.delete(`/knowledge-sources/${sourceId}`);
+//     return response.data;
+//   },
+//   addUrlSource: async (url) => {
+//     const response = await apiClient.post("/knowledge-sources", {
+//       type: "url",
+//       content: url,
+//     });
+//     return response.data; // Returns the initial source object with "processing" status
+//   },
+//   updateUserLLMConfig: async (configData) => {
+//     console.log("[Frontend API] Sending LLM config update:", configData);
+//     const response = await apiClient.put("/llm/config", configData);
+//     return response.data;
+//   },
+//   getOrchestratorStatus: async () => {
+//     try {
+//       const response = await apiClient.get("/network/ip");
+//       return {
+//         status: "ok",
+//         message: `Backend Online at ${response.data.ips[0]}`,
+//       };
+//     } catch (e) {
+//       return { status: "error", message: "Backend Unreachable" };
+//     }
+//   },
+//   getUserProfile: async () => {
+//     const response = await apiClient.get("/user/profile");
+//     return response.data;
+//   },
+//   updateUserProfile: async (profileData) => {
+//     const response = await apiClient.put("/user/profile", profileData);
+//     return response.data;
+//   },
+//   getSubjects: async () => {
+//     const response = await apiClient.get("/subjects");
+//     return response.data;
+//   },
+//   requestAnalysis: async (payload) => {
+//     const { filename, analysis_type } = payload;
+//     if (!filename || !analysis_type) {
+//       throw new Error("Filename and analysis type are required.");
+//     }
+//     const toastId = toast.loading(
+//       `Generating ${analysis_type} for "${filename}"...`
+//     );
+//     try {
+//       const response = await apiClient.get(
+//         `/analysis/${encodeURIComponent(filename)}`
+//       );
+//       const fullAnalysisObject = response.data;
+//       const rawOutput = fullAnalysisObject[analysis_type];
+//       if (
+//         !rawOutput ||
+//         typeof rawOutput !== "string" ||
+//         rawOutput.trim() === ""
+//       ) {
+//         toast.success(`No stored ${analysis_type} found for "${filename}".`, {
+//           id: toastId,
+//         });
+//         return {
+//           content: `Notice: Analysis for '${analysis_type}' has not been generated yet or was empty.`,
+//           thinking: "No analysis data found in the database for this type.",
+//         };
+//       }
+//       const { content, thinking } = parseAnalysisOutput(rawOutput);
+//       toast.success(
+//         `Successfully generated ${analysis_type} for "${filename}".`,
+//         { id: toastId }
+//       );
+//       return { content, thinking };
+//     } catch (error) {
+//       const errorMessage =
+//         error.response?.data?.message || error.message || "Unknown error";
+//       toast.error(`Error generating ${analysis_type}: ${errorMessage}`, {
+//         id: toastId,
+//       });
+//       throw error;
+//     }
+//   },
+//   generateDocument: async ({
+//     markdownContent,
+//     docType,
+//     sourceDocumentName,
+//   }) => {
+//     const response = await apiClient.post(
+//       "/generate/document",
+//       { markdownContent, docType, sourceDocumentName },
+//       { responseType: "blob" }
+//     );
+//     const contentDisposition = response.headers["content-disposition"];
+//     let filename = `generated-document.${docType}`;
+//     if (contentDisposition) {
+//       const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+//       if (filenameMatch && filenameMatch.length > 1) {
+//         filename = filenameMatch[1];
+//       }
+//     }
+//     return { fileBlob: response.data, filename: filename };
+//   },
+//   generatePodcast: async ({
+//     analysisContent,
+//     sourceDocumentName,
+//     podcastOptions,
+//   }) => {
+//     const response = await apiClient.post(
+//       "/export/podcast",
+//       { analysisContent, sourceDocumentName, podcastOptions },
+//       { responseType: "blob" }
+//     );
+//     return { audioBlob: response.data, sourceDocumentName };
+//   },
+//   getKnowledgeGraph: async (documentName) => {
+//     const response = await apiClient.get(
+//       `/kg/visualize/${encodeURIComponent(documentName)}`
+//     );
+//     return response.data;
+//   },
+//   getSessionKnowledgeGraph: async (sessionId) => {
+//     const response = await apiClient.get(
+//       `/kg/session/${encodeURIComponent(sessionId)}`
+//     );
+//     return response.data;
+//   },
+//   executeCode: async (payload) => {
+//     const response = await apiClient.post("/tools/execute", payload);
+//     return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+//   },
+//   analyzeCode: async (payload) => {
+//     const response = await apiClient.post("/tools/analyze-code", payload);
+//     return response.data; // Should be { analysis: "..." }
+//   },
+//   generateTestCases: async (payload) => {
+//     const response = await apiClient.post(
+//       "/tools/generate-test-cases",
+//       payload
+//     );
+//     return response.data; // Should be { testCases: [...] }
+//   },
+//   explainError: async (payload) => {
+//     const response = await apiClient.post("/tools/explain-error", payload);
+//     return response.data; // Should be { explanation: "..." }
+//   },
+//   getRecommendations: async (sessionId) => {
+//     const response = await apiClient.get(
+//       `/learning/recommendations/${sessionId}`
+//     );
+//     return response.data; // Should be { recommendations: [...] }
+//   },
+
+//   findDocumentForTopic: async (topic) => {
+//     const response = await apiClient.post("/learning/find-document", { topic });
+//     return response.data; // Should be { documentName: "..." }
+//   },
+//   getLearningPaths: async () => {
+//     const response = await apiClient.get("/learning/paths");
+//     return response.data; // Should be an array of learning path objects
+//   },
+
+//   generateLearningPath: async (goal, context = null) => {
+//     const response = await apiClient.post("/learning/paths/generate", {
+//       goal,
+//       context,
+//     });
+//     return response.data; // Should be the newly created learning path object
+//   },
+
+//   updateModuleStatus: async (pathId, moduleId, status) => {
+//     const response = await apiClient.put(
+//       `/learning/paths/${pathId}/modules/${moduleId}`,
+//       { status }
+//     );
+//     return response.data; // Should be the entire updated learning path object
+//   },
+
+//   generateQuiz: async (file, quizOption) => {
+//     const formData = new FormData();
+//     formData.append("file", file);
+//     formData.append("quizOption", quizOption); // <<< Send the descriptive string
+
+//     const response = await apiClient.post("/tools/generate-quiz", formData, {
+//       headers: {
+//         "Content-Type": "multipart/form-data",
+//       },
+//       timeout: 300000,
+//     });
+//     return response.data; // Should be { quiz: [...] }
+//   },
+//   analyzePrompt: async (promptText) => {
+//     const response = await apiClient.post("/chat/analyze-prompt", {
+//       prompt: promptText,
+//     });
+//     return response.data; // Expects { improvedPrompt, explanation }
+//   },
+//    // --- Academic Integrity Tools ---
+//   submitIntegrityCheck: async ({ text }) => {
+//     const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
+//     return response.data; // Expects { reportId, initialReport }
+//   },
+  
+//   getIntegrityReport: async (reportId) => {
+//     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
+//     return response.data; // Expects the full report object with status updates
+//   },
+//   deleteLearningPath: async (pathId) => {
+//     const response = await apiClient.delete(`/learning/paths/${pathId}`);
+//     return response.data;
+//   },
+// };
+
+// export default api;
+
+
+
 // frontend/src/services/api.js
 import axios from "axios";
 import toast from "react-hot-toast";
@@ -17113,14 +18992,6 @@ const api = {
     });
     return response.data;
   },
-  // getFiles: async () => {
-  //   const response = await apiClient.get("/files");
-  //   return response.data;
-  // },
-  // deleteFile: async (serverFilename) => {
-  //   const response = await apiClient.delete(`/files/${serverFilename}`);
-  //   return response.data;
-  // },
   getKnowledgeSources: async () => {
     const response = await apiClient.get("/knowledge-sources");
     return response.data;
@@ -17134,7 +19005,7 @@ const api = {
       type: "url",
       content: url,
     });
-    return response.data; // Returns the initial source object with "processing" status
+    return response.data;
   },
   updateUserLLMConfig: async (configData) => {
     console.log("[Frontend API] Sending LLM config update:", configData);
@@ -17252,86 +19123,82 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+    return response.data;
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
-    return response.data; // Should be { analysis: "..." }
+    return response.data;
   },
   generateTestCases: async (payload) => {
     const response = await apiClient.post(
       "/tools/generate-test-cases",
       payload
     );
-    return response.data; // Should be { testCases: [...] }
+    return response.data;
   },
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
-    return response.data; // Should be { explanation: "..." }
+    return response.data;
   },
   getRecommendations: async (sessionId) => {
     const response = await apiClient.get(
       `/learning/recommendations/${sessionId}`
     );
-    return response.data; // Should be { recommendations: [...] }
+    return response.data;
   },
-
   findDocumentForTopic: async (topic) => {
     const response = await apiClient.post("/learning/find-document", { topic });
-    return response.data; // Should be { documentName: "..." }
+    return response.data;
   },
   getLearningPaths: async () => {
     const response = await apiClient.get("/learning/paths");
-    return response.data; // Should be an array of learning path objects
+    return response.data;
   },
-
   generateLearningPath: async (goal, context = null) => {
     const response = await apiClient.post("/learning/paths/generate", {
       goal,
       context,
     });
-    return response.data; // Should be the newly created learning path object
+    return response.data;
   },
-
   updateModuleStatus: async (pathId, moduleId, status) => {
     const response = await apiClient.put(
       `/learning/paths/${pathId}/modules/${moduleId}`,
       { status }
     );
-    return response.data; // Should be the entire updated learning path object
+    return response.data;
   },
-
+  deleteLearningPath: async (pathId) => {
+    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+    return response.data;
+  },
   generateQuiz: async (file, quizOption) => {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("quizOption", quizOption); // <<< Send the descriptive string
-
+    formData.append("quizOption", quizOption);
     const response = await apiClient.post("/tools/generate-quiz", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      headers: { "Content-Type": "multipart/form-data" },
       timeout: 300000,
     });
-    return response.data; // Should be { quiz: [...] }
+    return response.data;
   },
   analyzePrompt: async (promptText) => {
     const response = await apiClient.post("/chat/analyze-prompt", {
       prompt: promptText,
     });
-    return response.data; // Expects { improvedPrompt, explanation }
+    return response.data;
   },
-   // --- Academic Integrity Tools ---
   submitIntegrityCheck: async ({ text }) => {
     const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
-    return response.data; // Expects { reportId, initialReport }
+    return response.data;
   },
-  
   getIntegrityReport: async (reportId) => {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
-    return response.data; // Expects the full report object with status updates
+    return response.data;
   },
-  deleteLearningPath: async (pathId) => {
-    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+  // --- THIS IS THE NEW FUNCTION ---
+  completeOnboarding: async () => {
+    const response = await apiClient.put("/user/profile/onboarding-complete");
     return response.data;
   },
 };
@@ -17574,6 +19441,24 @@ export default defineConfig({
   }
 })
 
+```
+
+`server/.env`
+
+```
+PORT=5001
+MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
+JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
+PROMPT_COACH_GEMINI_MODEL=gemini-2.5-pro
+PROMPT_COACH_OLLAMA_MODEL=qwen2.5:14b-instruct
+PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
+OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
+OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
+ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
+REDIS_URL="redis://localhost:6379"
+FIXED_ADMIN_USERNAME=admin@admin.com
+FIXED_ADMIN_PASSWORD=admin123
 ```
 
 `server/config/db.js`
@@ -19833,12 +21718,167 @@ module.exports = LearningPath;
 `server/models/User.js`
 
 ```javascript
+// // server/models/User.js
+// const mongoose = require("mongoose");
+// const bcrypt = require("bcryptjs");
+// const { encrypt } = require("../utils/crypto");
+
+// // server/models/User.js
+
+// const ProfileSchema = new mongoose.Schema(
+//   {
+//     name: { type: String, default: "", trim: true },
+//     college: { type: String, default: "", trim: true },
+//     universityNumber: { type: String, default: "", trim: true },
+//     degreeType: { type: String, default: "", trim: true },
+//     branch: { type: String, default: "", trim: true },
+//     year: { type: String, default: "", trim: true },
+//     learningStyle: {
+//       type: String,
+//       enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
+//       default: 'Not Specified'
+//     },
+//     currentGoals: {
+//       type: String,
+//       default: '',
+//       trim: true,
+//       maxlength: 500 // Prevent excessively long inputs
+//     },
+//     performanceMetrics: {
+//       type: Map,
+//       of: Number, // Stores topic proficiency, e.g., { "Calculus": 0.8 }
+//       default: () => new Map()
+//     }
+//     // --- NEW FIELDS END HERE ---
+//   },
+//   { _id: false }
+// );
+
+// const UserSchema = new mongoose.Schema({
+//   email: {
+//     type: String,
+//     required: [true, "Please provide an email"],
+//     unique: true,
+//     trim: true,
+//     lowercase: true,
+//     match: [
+//       /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
+//       "Please provide a valid email address",
+//     ],
+//   },
+//   username: {
+//     type: String,
+//     required: [true, "A unique username is required"],
+//     unique: true,
+//     trim: true,
+//   },
+//   password: {
+//     type: String,
+//     required: [true, "Please provide a password"],
+//     minlength: 6,
+//     select: false,
+//   },
+//   profile: {
+//     type: ProfileSchema,
+//     default: () => ({}),
+//   },
+//   apiKeyRequestStatus: {
+//     type: String,
+//     enum: ["none", "pending", "approved", "rejected"],
+//     default: "none",
+//   },
+//   encryptedApiKey: {
+//     type: String,
+//     select: false,
+//   },
+//   preferredLlmProvider: {
+//     type: String,
+//     enum: ["gemini", "ollama"],
+//     default: "gemini",
+//   },
+//   ollamaUrl: {
+//     type: String,
+//     trim: true,
+//     default: "",
+//   },
+//   ollamaModel: {
+//     type: String,
+//     default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
+//   },
+//   // uploadedDocuments: [
+//   //   {
+//   //     filename: { type: String },
+//   //     text: { type: String, default: "" },
+//   //     analysis: {
+//   //       faq: { type: String, default: "" },
+//   //       topics: { type: String, default: "" },
+//   //       mindmap: { type: String, default: "" },
+//   //     },
+//   //     ragStatus: { type: String, default: "pending" },
+//   //     analysisStatus: { type: String, default: "pending" },
+//   //     analysisTimestamp: { type: Date },
+//   //     kgStatus: { type: String, default: "pending" },
+//   //     kgNodesCount: { type: Number, default: 0 },
+//   //     kgEdgesCount: { type: Number, default: 0 },
+//   //     kgTimestamp: { type: Date },
+//   //     uploadedAt: { type: Date, default: Date.now },
+//   //   },
+//   // ],
+//   learningPaths: [{ 
+//     type: mongoose.Schema.Types.ObjectId, 
+//     ref: 'LearningPath' 
+//   }],
+//   createdAt: {
+//     type: Date,
+//     default: Date.now,
+//   },
+// });
+
+// UserSchema.pre("save", async function (next) {
+//   if (this.isModified("password")) {
+//     const salt = await bcrypt.genSalt(10);
+//     this.password = await bcrypt.hash(this.password, salt);
+//   }
+//   if (this.isModified("encryptedApiKey") && this.encryptedApiKey) {
+//     try {
+//       this.encryptedApiKey = encrypt(this.encryptedApiKey);
+//     } catch (encError) {
+//       console.error("Error encrypting API key during user save:", encError);
+//       return next(new Error("Failed to encrypt API key."));
+//     }
+//   } else if (this.isModified("encryptedApiKey") && !this.encryptedApiKey) {
+//     this.encryptedApiKey = null;
+//   }
+//   next();
+// });
+
+// UserSchema.methods.comparePassword = async function (candidatePassword) {
+//   if (!this.password) return false;
+//   return await bcrypt.compare(candidatePassword, this.password);
+// };
+
+// UserSchema.statics.findByCredentials = async function (email, password) {
+//   const user = await this.findOne({ email }).select("+password");
+//   if (!user) {
+//     return null;
+//   }
+//   const isMatch = await user.comparePassword(password);
+//   if (!isMatch) {
+//     return null;
+//   }
+//   return user;
+// };
+
+// const User = mongoose.model("User", UserSchema);
+// module.exports = User;
+
+
+
+
 // server/models/User.js
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const { encrypt } = require("../utils/crypto");
-
-// server/models/User.js
 
 const ProfileSchema = new mongoose.Schema(
   {
@@ -19857,14 +21897,13 @@ const ProfileSchema = new mongoose.Schema(
       type: String,
       default: '',
       trim: true,
-      maxlength: 500 // Prevent excessively long inputs
+      maxlength: 500
     },
     performanceMetrics: {
       type: Map,
-      of: Number, // Stores topic proficiency, e.g., { "Calculus": 0.8 }
+      of: Number,
       default: () => new Map()
     }
-    // --- NEW FIELDS END HERE ---
   },
   { _id: false }
 );
@@ -19897,6 +21936,10 @@ const UserSchema = new mongoose.Schema({
     type: ProfileSchema,
     default: () => ({}),
   },
+  hasCompletedOnboarding: {
+    type: Boolean,
+    default: false,
+  },
   apiKeyRequestStatus: {
     type: String,
     enum: ["none", "pending", "approved", "rejected"],
@@ -19920,25 +21963,6 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
   },
-  // uploadedDocuments: [
-  //   {
-  //     filename: { type: String },
-  //     text: { type: String, default: "" },
-  //     analysis: {
-  //       faq: { type: String, default: "" },
-  //       topics: { type: String, default: "" },
-  //       mindmap: { type: String, default: "" },
-  //     },
-  //     ragStatus: { type: String, default: "pending" },
-  //     analysisStatus: { type: String, default: "pending" },
-  //     analysisTimestamp: { type: Date },
-  //     kgStatus: { type: String, default: "pending" },
-  //     kgNodesCount: { type: Number, default: 0 },
-  //     kgEdgesCount: { type: Number, default: 0 },
-  //     kgTimestamp: { type: Date },
-  //     uploadedAt: { type: Date, default: Date.now },
-  //   },
-  // ],
   learningPaths: [{ 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'LearningPath' 
@@ -19986,7 +22010,6 @@ UserSchema.statics.findByCredentials = async function (email, password) {
 
 const User = mongoose.model("User", UserSchema);
 module.exports = User;
-
 ```
 
 `server/protocols/contextProtocols.js`
@@ -24211,6 +26234,8 @@ playwright
 moviepy
 Werkzeug
 aiohttp
+textstat
+
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -25210,6 +27235,156 @@ module.exports = router;
 `server/routes/auth.js`
 
 ```javascript
+// // server/routes/auth.js
+// const express = require('express');
+// const jwt = require('jsonwebtoken');
+// const { v4: uuidv4 } = require('uuid');
+// const User = require('../models/User');
+// const { authMiddleware } = require('../middleware/authMiddleware');
+// require('dotenv').config();
+
+// const router = express.Router();
+// const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
+
+// // --- @route   POST /api/auth/signup ---
+// // server/routes/auth.js
+
+// router.post('/signup', async (req, res) => {
+//   // 1. Destructure the full payload from the multi-step form
+//   const {
+//     email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
+//     name, college, universityNumber, degreeType, branch, year,
+//     learningStyle, currentGoals
+//   } = req.body;
+
+//   // 2. Comprehensive Validation for the entire payload
+//   if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
+//     return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
+//   }
+//   if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
+//     return res.status(400).json({ message: 'Please provide a valid email address.' });
+//   }
+//   if (password.length < 6) {
+//     return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+//   }
+//   if (preferredLlmProvider === 'gemini' && !requestAdminKey && (!apiKey || apiKey.trim() === '')) {
+//     return res.status(400).json({ message: 'A Gemini API Key is required unless you request one from the admin.' });
+//   }
+//   if (preferredLlmProvider === 'ollama' && (!ollamaUrl || ollamaUrl.trim() === '')) {
+//     return res.status(400).json({ message: 'An Ollama URL is required when Ollama is selected.' });
+//   }
+
+//   try {
+//     const existingUser = await User.findOne({ email });
+//     if (existingUser) {
+//       return res.status(400).json({ message: 'An account with this email already exists.' });
+//     }
+
+//     // 3. Create the new User with the complete profile object
+//     const newUser = new User({
+//       email,
+//       username: email.split('@')[0],
+//       password,
+//       preferredLlmProvider: preferredLlmProvider || 'gemini',
+//       apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
+//       encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
+//       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
+//       profile: {
+//         name, college, universityNumber, degreeType, branch, year,
+//         learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
+//       }
+//     });
+
+//     await newUser.save();
+
+//     const payload = {
+//       userId: newUser._id,
+//       email: newUser.email,
+//       username: newUser.username,
+//     };
+//     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+//     res.status(201).json({
+//       token,
+//       _id: newUser._id,
+//       email: newUser.email,
+//       username: newUser.username,
+//       sessionId: uuidv4(),
+//       message: "User registered successfully",
+//     });
+
+//   } catch (error) {
+//     console.error('Signup Error:', error);
+//     if (error.code === 11000 || error.message.includes('duplicate key error collection')) {
+//         return res.status(400).json({ message: 'An account with this email or username already exists.' });
+//     }
+//     if (error.name === 'ValidationError') {
+//         const messages = Object.values(error.errors).map(val => val.message);
+//         return res.status(400).json({ message: messages.join(', ') });
+//     }
+//     res.status(500).json({ message: 'Server error during signup.' });
+//   }
+// });
+
+// // --- @route   POST /api/auth/signin ---
+// router.post('/signin', async (req, res) => {
+//   const { email, password } = req.body;
+
+//   if (!email || !password) {
+//     return res.status(400).json({ message: 'Please provide email and password.' });
+//   }
+
+//   try {
+//     const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
+//     const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
+
+//     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+//         console.log("Admin login successful via special auth check.");
+//         return res.status(200).json({
+//             isAdminLogin: true,
+//             message: 'Admin login successful',
+//         });
+//     }
+
+//     const user = await User.findByCredentials(email, password);
+//     if (!user) {
+//       return res.status(401).json({ message: 'Invalid email address or password.' });
+//     }
+
+//     const payload = { userId: user._id, email: user.email };
+//     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+//     res.status(200).json({
+//       token,
+//       _id: user._id,
+//       email: user.email,
+//       username: user.username,
+//       sessionId: uuidv4(),
+//       message: "Login successful",
+//     });
+//   } catch (error) {
+//     console.error('Signin Error:', error);
+//     res.status(500).json({ message: 'Server error during signin.' });
+//   }
+// });
+
+// // --- @route   GET /api/auth/me ---
+// router.get('/me', authMiddleware, async (req, res) => {
+//   if (!req.user) {
+//     return res.status(401).json({ message: 'Not authorized.' });
+//   }
+//   res.status(200).json({
+//     _id: req.user._id,
+//     email: req.user.email,
+//     username: req.user.username,
+//   });
+// });
+
+// module.exports = router;
+
+
+
+
 // server/routes/auth.js
 const express = require('express');
 const jwt = require('jsonwebtoken');
@@ -25221,18 +27396,13 @@ require('dotenv').config();
 const router = express.Router();
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
-// --- @route   POST /api/auth/signup ---
-// server/routes/auth.js
-
 router.post('/signup', async (req, res) => {
-  // 1. Destructure the full payload from the multi-step form
   const {
     email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
     name, college, universityNumber, degreeType, branch, year,
     learningStyle, currentGoals
   } = req.body;
 
-  // 2. Comprehensive Validation for the entire payload
   if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
     return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
   }
@@ -25255,7 +27425,6 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // 3. Create the new User with the complete profile object
     const newUser = new User({
       email,
       username: email.split('@')[0],
@@ -25266,7 +27435,7 @@ router.post('/signup', async (req, res) => {
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
       profile: {
         name, college, universityNumber, degreeType, branch, year,
-        learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
+        learningStyle, currentGoals: currentGoals || ''
       }
     });
 
@@ -25286,6 +27455,7 @@ router.post('/signup', async (req, res) => {
       username: newUser.username,
       sessionId: uuidv4(),
       message: "User registered successfully",
+      isNewUser: true
     });
 
   } catch (error) {
@@ -25301,7 +27471,6 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// --- @route   POST /api/auth/signin ---
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
 
@@ -25336,6 +27505,11 @@ router.post('/signin', async (req, res) => {
       username: user.username,
       sessionId: uuidv4(),
       message: "Login successful",
+      // --- THIS IS THE FIX ---
+      // Explicitly find the user again *without* `select('+password')`
+      // to ensure virtuals and all fields are present, including our onboarding flag.
+      hasCompletedOnboarding: user.hasCompletedOnboarding 
+      // --- END OF FIX ---
     });
   } catch (error) {
     console.error('Signin Error:', error);
@@ -25343,7 +27517,6 @@ router.post('/signin', async (req, res) => {
   }
 });
 
-// --- @route   GET /api/auth/me ---
 router.get('/me', authMiddleware, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Not authorized.' });
@@ -27833,26 +30006,110 @@ module.exports = router;
 `server/routes/user.js`
 
 ```javascript
+// // server/routes/user.js
+// const express = require('express');
+// const router = express.Router();
+// const User = require('../models/User');
+// const { redisClient } = require('../config/redisClient');
+
+// // Note: The main 'authMiddleware' will be applied in server.js before this router is used,
+// // so we don't need to add it to each route here. req.user will be available.
+
+// // @route   GET /api/user/profile
+// // @desc    Get the current user's profile data
+// // @access  Private
+// router.get('/profile', async (req, res) => {
+//     try {
+//         const user = await User.findById(req.user._id).select('profile');
+//         if (!user) {
+//             return res.status(404).json({ message: 'User not found.' });
+//         }
+//         // Return the profile object, or an empty object if it doesn't exist
+//         res.json(user.profile || {});
+//     } catch (error) {
+//         console.error('Error fetching user profile:', error);
+//         res.status(500).json({ message: 'Server error while fetching profile.' });
+//     }
+// });
+
+// // @route   PUT /api/user/profile
+// // @desc    Update the current user's profile data
+// // @access  Private
+// router.put('/profile', async (req, res) => {
+//     // 1. Destructure all possible profile fields, including the new ones
+//     const { name, college, universityNumber, degreeType, branch, year, learningStyle, currentGoals } = req.body;
+
+//     // 2. Update validation to include the new required fields
+//     if (!name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
+//         return res.status(400).json({ message: 'All profile fields are required.' });
+//     }
+
+//     try {
+//         const user = await User.findById(req.user._id);
+//         if (!user) {
+//             return res.status(404).json({ message: 'User not found.' });
+//         }
+
+//         // 3. Update the profile sub-document with all fields
+//         // This ensures a complete and consistent profile object is always saved.
+//         user.profile = {
+//             name,
+//             college,
+//             universityNumber,
+//             degreeType,
+//             branch,
+//             year,
+//             learningStyle,
+//             currentGoals: currentGoals || ''
+//         };
+//         // The performanceMetrics field is intentionally not updated here, as it's managed by the system.
+
+//         await user.save();
+        
+//         if (redisClient && redisClient.isOpen) {
+//             const cacheKey = `user:${req.user._id}`;
+//             await redisClient.del(cacheKey);
+//             console.log(`[Cache Invalidation] Deleted cache for user ${req.user._id} due to profile update.`);
+//         }
+//         res.json({
+//             message: 'Profile updated successfully!',
+//             profile: user.profile
+//         });
+
+//     } catch (error) {
+//         console.error('Error updating user profile:', error);
+//         res.status(500).json({ message: 'Server error while updating profile.' });
+//     }
+// });
+
+
+// module.exports = router;
+
+
+
+
 // server/routes/user.js
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { redisClient } = require('../config/redisClient');
 
-// Note: The main 'authMiddleware' will be applied in server.js before this router is used,
-// so we don't need to add it to each route here. req.user will be available.
-
 // @route   GET /api/user/profile
 // @desc    Get the current user's profile data
 // @access  Private
 router.get('/profile', async (req, res) => {
     try {
-        const user = await User.findById(req.user._id).select('profile');
+        // --- FIX: Select the top-level `hasCompletedOnboarding` field
+        const user = await User.findById(req.user._id).select('profile hasCompletedOnboarding');
         if (!user) {
             return res.status(404).json({ message: 'User not found.' });
         }
-        // Return the profile object, or an empty object if it doesn't exist
-        res.json(user.profile || {});
+
+        const profileData = user.profile ? user.profile.toObject() : {};
+        // Combine the profile object and the separate onboarding flag for the response
+        profileData.hasCompletedOnboarding = user.hasCompletedOnboarding;
+        
+        res.json(profileData);
     } catch (error) {
         console.error('Error fetching user profile:', error);
         res.status(500).json({ message: 'Server error while fetching profile.' });
@@ -27863,10 +30120,8 @@ router.get('/profile', async (req, res) => {
 // @desc    Update the current user's profile data
 // @access  Private
 router.put('/profile', async (req, res) => {
-    // 1. Destructure all possible profile fields, including the new ones
     const { name, college, universityNumber, degreeType, branch, year, learningStyle, currentGoals } = req.body;
 
-    // 2. Update validation to include the new required fields
     if (!name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
         return res.status(400).json({ message: 'All profile fields are required.' });
     }
@@ -27876,20 +30131,11 @@ router.put('/profile', async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: 'User not found.' });
         }
-
-        // 3. Update the profile sub-document with all fields
-        // This ensures a complete and consistent profile object is always saved.
+        
         user.profile = {
-            name,
-            college,
-            universityNumber,
-            degreeType,
-            branch,
-            year,
-            learningStyle,
-            currentGoals: currentGoals || ''
+            name, college, universityNumber, degreeType, branch, year,
+            learningStyle, currentGoals: currentGoals || ''
         };
-        // The performanceMetrics field is intentionally not updated here, as it's managed by the system.
 
         await user.save();
         
@@ -27909,6 +30155,27 @@ router.put('/profile', async (req, res) => {
     }
 });
 
+// @route   PUT /api/user/profile/onboarding-complete
+// @desc    Mark the user's onboarding as complete
+// @access  Private
+router.put('/onboarding-complete', async (req, res) => {
+    try {
+        // --- FIX: Use User.updateOne to correctly target the top-level field ---
+        const result = await User.updateOne(
+            { _id: req.user._id },
+            { $set: { hasCompletedOnboarding: true } }
+        );
+        
+        if (result.matchedCount === 0) {
+             return res.status(404).json({ message: 'User not found to update.' });
+        }
+        
+        res.status(200).json({ message: 'Onboarding status updated successfully.' });
+    } catch (error) {
+        console.error('Error updating onboarding status:', error);
+        res.status(500).json({ message: 'Server error while updating onboarding status.' });
+    }
+});
 
 module.exports = router;
 ```

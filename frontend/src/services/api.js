@@ -87,14 +87,6 @@ const api = {
     });
     return response.data;
   },
-  // getFiles: async () => {
-  //   const response = await apiClient.get("/files");
-  //   return response.data;
-  // },
-  // deleteFile: async (serverFilename) => {
-  //   const response = await apiClient.delete(`/files/${serverFilename}`);
-  //   return response.data;
-  // },
   getKnowledgeSources: async () => {
     const response = await apiClient.get("/knowledge-sources");
     return response.data;
@@ -108,7 +100,7 @@ const api = {
       type: "url",
       content: url,
     });
-    return response.data; // Returns the initial source object with "processing" status
+    return response.data;
   },
   updateUserLLMConfig: async (configData) => {
     console.log("[Frontend API] Sending LLM config update:", configData);
@@ -226,86 +218,82 @@ const api = {
   },
   executeCode: async (payload) => {
     const response = await apiClient.post("/tools/execute", payload);
-    return response.data; // The data should be { results: [...] } or { compilationError: "..." }
+    return response.data;
   },
   analyzeCode: async (payload) => {
     const response = await apiClient.post("/tools/analyze-code", payload);
-    return response.data; // Should be { analysis: "..." }
+    return response.data;
   },
   generateTestCases: async (payload) => {
     const response = await apiClient.post(
       "/tools/generate-test-cases",
       payload
     );
-    return response.data; // Should be { testCases: [...] }
+    return response.data;
   },
   explainError: async (payload) => {
     const response = await apiClient.post("/tools/explain-error", payload);
-    return response.data; // Should be { explanation: "..." }
+    return response.data;
   },
   getRecommendations: async (sessionId) => {
     const response = await apiClient.get(
       `/learning/recommendations/${sessionId}`
     );
-    return response.data; // Should be { recommendations: [...] }
+    return response.data;
   },
-
   findDocumentForTopic: async (topic) => {
     const response = await apiClient.post("/learning/find-document", { topic });
-    return response.data; // Should be { documentName: "..." }
+    return response.data;
   },
   getLearningPaths: async () => {
     const response = await apiClient.get("/learning/paths");
-    return response.data; // Should be an array of learning path objects
+    return response.data;
   },
-
   generateLearningPath: async (goal, context = null) => {
     const response = await apiClient.post("/learning/paths/generate", {
       goal,
       context,
     });
-    return response.data; // Should be the newly created learning path object
+    return response.data;
   },
-
   updateModuleStatus: async (pathId, moduleId, status) => {
     const response = await apiClient.put(
       `/learning/paths/${pathId}/modules/${moduleId}`,
       { status }
     );
-    return response.data; // Should be the entire updated learning path object
+    return response.data;
   },
-
+  deleteLearningPath: async (pathId) => {
+    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+    return response.data;
+  },
   generateQuiz: async (file, quizOption) => {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("quizOption", quizOption); // <<< Send the descriptive string
-
+    formData.append("quizOption", quizOption);
     const response = await apiClient.post("/tools/generate-quiz", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      headers: { "Content-Type": "multipart/form-data" },
       timeout: 300000,
     });
-    return response.data; // Should be { quiz: [...] }
+    return response.data;
   },
   analyzePrompt: async (promptText) => {
     const response = await apiClient.post("/chat/analyze-prompt", {
       prompt: promptText,
     });
-    return response.data; // Expects { improvedPrompt, explanation }
+    return response.data;
   },
-   // --- Academic Integrity Tools ---
   submitIntegrityCheck: async ({ text }) => {
     const response = await apiClient.post("/tools/analyze-integrity/submit", { text });
-    return response.data; // Expects { reportId, initialReport }
+    return response.data;
   },
-  
   getIntegrityReport: async (reportId) => {
     const response = await apiClient.get(`/tools/analyze-integrity/report/${reportId}`);
-    return response.data; // Expects the full report object with status updates
+    return response.data;
   },
-  deleteLearningPath: async (pathId) => {
-    const response = await apiClient.delete(`/learning/paths/${pathId}`);
+  // --- THIS IS THE NEW FUNCTION ---
+  completeOnboarding: async () => {
+    const response = await apiClient.put("/user/profile/onboarding-complete");
     return response.data;
   },
 };

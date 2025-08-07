@@ -9,18 +9,13 @@ require('dotenv').config();
 const router = express.Router();
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
-// --- @route   POST /api/auth/signup ---
-// server/routes/auth.js
-
 router.post('/signup', async (req, res) => {
-  // 1. Destructure the full payload from the multi-step form
   const {
     email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
     name, college, universityNumber, degreeType, branch, year,
     learningStyle, currentGoals
   } = req.body;
 
-  // 2. Comprehensive Validation for the entire payload
   if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
     return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
   }
@@ -43,7 +38,6 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // 3. Create the new User with the complete profile object
     const newUser = new User({
       email,
       username: email.split('@')[0],
@@ -54,7 +48,7 @@ router.post('/signup', async (req, res) => {
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
       profile: {
         name, college, universityNumber, degreeType, branch, year,
-        learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
+        learningStyle, currentGoals: currentGoals || ''
       }
     });
 
@@ -74,6 +68,7 @@ router.post('/signup', async (req, res) => {
       username: newUser.username,
       sessionId: uuidv4(),
       message: "User registered successfully",
+      isNewUser: true
     });
 
   } catch (error) {
@@ -89,7 +84,6 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// --- @route   POST /api/auth/signin ---
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
 
@@ -117,6 +111,9 @@ router.post('/signin', async (req, res) => {
     const payload = { userId: user._id, email: user.email };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
+    // --- THIS IS THE FIX ---
+    // The static `findByCredentials` method was updated to return the full user object
+    // so we can now access `hasCompletedOnboarding` directly here.
     res.status(200).json({
       token,
       _id: user._id,
@@ -124,14 +121,15 @@ router.post('/signin', async (req, res) => {
       username: user.username,
       sessionId: uuidv4(),
       message: "Login successful",
+      hasCompletedOnboarding: user.hasCompletedOnboarding 
     });
+    // --- END OF FIX ---
   } catch (error) {
     console.error('Signin Error:', error);
     res.status(500).json({ message: 'Server error during signin.' });
   }
 });
 
-// --- @route   GET /api/auth/me ---
 router.get('/me', authMiddleware, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Not authorized.' });
