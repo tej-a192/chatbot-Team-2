@@ -1,7 +1,9 @@
 // frontend/src/components/tools/IntegrityReportPanel.jsx
 import React from 'react';
-import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale, BookOpen } from 'lucide-react';
-import ReadabilityMetrics from './ReadabilityMetrics'; // <-- NEW IMPORT
+import { Loader2, AlertTriangle, ShieldCheck, CheckCircle, Percent, Lightbulb, Scale, BookOpen, Wand2 } from 'lucide-react'; // Import Wand2
+import ReadabilityMetrics from './ReadabilityMetrics';
+import Button from '../core/Button'; // Import Button
+
 
 const Section = ({ title, icon: Icon, children }) => (
     <div className="border border-border-light dark:border-border-dark rounded-lg overflow-hidden">
@@ -12,9 +14,10 @@ const Section = ({ title, icon: Icon, children }) => (
     </div>
 );
 
-const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, onFindingSelect }) => {
+const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, onFindingSelect, onApplySuggestion }) => { // Add onApplySuggestion prop
     
     if (isLoading) {
+        
         const stepInfo = steps[currentStep];
         return (
             <div className="h-full flex flex-col justify-center items-center text-center p-4">
@@ -73,27 +76,45 @@ const IntegrityReportPanel = ({ report, isLoading, error, steps, currentStep, on
                 
                 {/* Bias Section */}
                 <Section title="Bias & Inclusivity" icon={Scale}>
-                    {/* --- THIS IS THE FIX --- */}
-                    {/* We must first check if 'bias' is an array before trying to map it. */}
                     {Array.isArray(bias) ? (
                         bias.length === 0 ? (
                             <p className="flex items-center gap-2 text-green-600"><CheckCircle size={16}/> No potential issues found.</p>
                         ) : (
                             <ul className="space-y-3">
                                 {bias.map((item, i) => (
-                                    <li key={i} className="p-2 bg-yellow-400/10 rounded-md cursor-pointer hover:bg-yellow-400/20" onClick={() => onFindingSelect(item)}>
-                                        <p><strong>Found:</strong> "{item.text}"</p>
-                                        <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
-                                        <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                    // --- START OF CHANGES FOR THIS COMPONENT ---
+                                    <li key={i} className="p-3 bg-yellow-400/10 rounded-md">
+                                        <div 
+                                            className="cursor-pointer hover:bg-yellow-400/20 -m-1 p-1 rounded" 
+                                            onClick={() => onFindingSelect(item)}
+                                            title="Click to highlight in editor"
+                                        >
+                                            <p><strong>Found:</strong> "{item.text}"</p>
+                                            <p><strong>Suggestion:</strong> "{item.suggestion}"</p>
+                                            <p className="text-xs mt-1 text-text-muted-light dark:text-text-muted-dark"><strong>Reason:</strong> {item.reason}</p>
+                                        </div>
+                                        <div className="mt-2 text-right">
+                                            <Button 
+                                                size="sm" 
+                                                variant="outline" 
+                                                className="!text-xs !py-1 !px-2"
+                                                leftIcon={<Wand2 size={12} />}
+                                                onClick={(e) => {
+                                                    e.stopPropagation(); // Prevent the li's onClick from firing
+                                                    onApplySuggestion(item);
+                                                }}
+                                            >
+                                                Apply Suggestion
+                                            </Button>
+                                        </div>
                                     </li>
+                                    // --- END OF CHANGES FOR THIS COMPONENT ---
                                 ))}
                             </ul>
                         )
                     ) : (
-                        // If bias is not an array, it's our error object.
                         <p className="text-red-500">{bias?.message || "An error occurred during the bias check."}</p>
                     )}
-                    {/* --- END OF FIX --- */}
                 </Section>
 
                 {/* --- NEW Readability Section --- */}

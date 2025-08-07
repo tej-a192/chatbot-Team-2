@@ -138,6 +138,37 @@ const AcademicIntegrityPage = () => {
         }
     }, [selectedFinding]);
 
+const handleApplySuggestion = (finding) => {
+        const { text: originalText, suggestion } = finding;
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        const model = editor.getModel();
+        if (!model) return;
+
+        // Find the first occurrence of the biased text
+        const matches = model.findMatches(originalText, true, false, true, null, true);
+
+        if (matches.length > 0) {
+            const range = matches[0].range;
+            
+            // Create an "edit" operation to replace the text
+            const op = { range: range, text: suggestion };
+            
+            // Execute the edit and clear the selection/highlight
+            editor.executeEdits('bias-fix', [op]);
+            editor.setSelection(range); // Optional: select the newly inserted text
+            
+            // Clear the highlight decoration
+            decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
+            setSelectedFinding(null); // Clear the selected finding state
+            
+            toast.success('Suggestion applied!');
+        } else {
+            toast.error(`Could not find the text "${originalText}" to replace. It may have already been changed.`);
+        }
+    };
+
     // --- THIS IS THE CORRECTED FUNCTION ---
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
@@ -232,13 +263,14 @@ const AcademicIntegrityPage = () => {
                     <PanelResizeHandle className="w-2 panel-resize-handle" />
                     <Panel defaultSize={50} minSize={30}>
                         <div className="p-2 h-full">
-                            <IntegrityReportPanel
+                           <IntegrityReportPanel
                                 report={report}
                                 isLoading={isLoading}
                                 error={error}
                                 steps={ANALYSIS_STEPS}
                                 currentStep={currentStep}
                                 onFindingSelect={setSelectedFinding}
+                                onApplySuggestion={handleApplySuggestion}
                             />
                         </div>
                     </Panel>
