@@ -142,12 +142,12 @@ router.post('/message', async (req, res) => {
             streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
             const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+            delete aiMessageForDb.criticalThinkingCues;
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
+                { upsert: true, new: true }
             );
 
             if (totResult.finalAnswer) {
@@ -162,8 +162,8 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
             );
 
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            
+            // --- THIS IS THE FIX ---
+            // Prepare the full response object, including any potential action
             const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: agentResponse.finalAnswer }],
@@ -172,9 +172,29 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
+                action: agentResponse.action || null // Include the action
             };
-            
+
+            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
+            if (aiMessageForClient.action) {
+                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+                
+                // Save both user message and the AI's action message to the database
+                await ChatHistory.findOneAndUpdate(
+                    { sessionId: sessionId, userId: userId },
+                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
+                    { upsert: true, new: true }
+                );
+                
+                // Return the response with the action, stopping execution here.
+                return res.status(200).json({ reply: aiMessageForClient });
+            }
+            // --- END OF FIX ---
+
+            // If there was NO action, proceed with the normal flow
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
+
             const aiMessageForDb = { ...aiMessageForClient };
             delete aiMessageForDb.criticalThinkingCues;
 
@@ -186,7 +206,10 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
         }
 
     } catch (error) {
@@ -201,7 +224,6 @@ router.post('/message', async (req, res) => {
         }
     }
 });
-
 
 
 router.post('/history', async (req, res) => {
