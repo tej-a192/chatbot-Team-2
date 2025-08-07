@@ -74,3 +74,8 @@ export const approveApiKeyRequest = (userId) => makeAdminApiRequest('post', '/ke
 export const rejectApiKeyRequest = (userId) => makeAdminApiRequest('post', '/key-requests/reject', { userId });
 
 export const getUsersAndChats = () => makeAdminApiRequest('get', '/users-with-chats');
+
+export const getLlmConfigs = () => makeAdminApiRequest('get', '/llms');
+export const createLlmConfig = (data) => makeAdminApiRequest('post', '/llms', data);
+export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/${id}`, data);
+export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);

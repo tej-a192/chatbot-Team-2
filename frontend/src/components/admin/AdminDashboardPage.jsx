@@ -9,7 +9,9 @@ import Modal from '../core/Modal.jsx';
 import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle } from 'lucide-react';
+import LLMConfigManager from './LLMConfigManager.jsx';
+
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -86,6 +88,7 @@ function AdminDashboardPage() {
     const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
+    const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
 
     const adminLogoutHandler = () => {
         setIsAdminSessionActive(false);
@@ -195,6 +198,7 @@ function AdminDashboardPage() {
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>
             </header>
@@ -275,6 +279,9 @@ function AdminDashboardPage() {
                 {isInitialLoading ? (
                      <div className="flex justify-center items-center p-8"> <Loader2 size={24} className="animate-spin text-primary inline-block mr-2" /> Loading User Chat Data... </div>
                 ) : ( <UserChatManager usersWithChats={usersWithChats} /> )}
+            </Modal>
+            <Modal isOpen={isLlmModalOpen} onClose={() => setIsLlmModalOpen(false)} title="LLM Configuration Management" size="4xl">
+                <LLMConfigManager />
             </Modal>
         </div>
     );
