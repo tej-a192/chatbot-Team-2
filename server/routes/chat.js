@@ -12,6 +12,8 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
+const { selectLLM } = require('../services/llmRouterService');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog');
 const router = express.Router();
 
 
@@ -39,6 +41,146 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
+
+router.post('/message', async (req, res) => {
+    const {
+        query, sessionId, useWebSearch, useAcademicSearch,
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
+    } = req.body;
+    
+    const userId = req.user._id;
+
+    if (!query || typeof query !== 'string' || query.trim() === '') {
+        return res.status(400).json({ message: 'Query message text required.' });
+    }
+    if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: 'Session ID required.' });
+    }
+
+    const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, CriticalThinking=${criticalThinkingEnabled}, Query: "${query.substring(0, 50)}..."`);
+    const startTime = Date.now();
+
+    try {
+        const [chatSession, user] = await Promise.all([
+            ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
+            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
+        ]);
+
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const chatContext = { userId, subject: documentContextName, chatHistory: historyFromDb };
+        const { chosenModel, logic: routerLogic } = await selectLLM(query.trim(), chatContext);
+
+        const llmConfig = {
+            llmProvider: chosenModel.provider,
+            geminiModel: chosenModel.provider === 'gemini' ? chosenModel.modelId : null,
+            ollamaModel: chosenModel.provider === 'ollama' ? (chosenModel.modelId.includes('/') ? chosenModel.modelId.split('/')[1] : chosenModel.modelId) : null,
+            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+            ollamaUrl: user?.ollamaUrl
+        };
+        
+        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
+        const historyForLlm = [];
+
+        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
+            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] });
+            historyForLlm.push({ role: 'model', parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] });
+        }
+        
+        const formattedDbMessages = historyFromDb.map(msg => ({ role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' })) }));
+        historyForLlm.push(...formattedDbMessages);
+        
+        const requestContext = {
+            documentContextName, criticalThinkingEnabled, filter,
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
+        };
+
+        let agentResponse;
+        if (criticalThinkingEnabled) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+            
+            const accumulatedThoughts = [];
+            const interceptingStreamCallback = (eventData) => {
+                if (eventData.type === 'thought') accumulatedThoughts.push(eventData.content);
+                streamEvent(res, eventData);
+            };
+            
+            const totResult = await processQueryWithToT_Streaming(query.trim(), historyForLlm, requestContext, interceptingStreamCallback);
+            const cues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
+            streamEvent(res, { type: 'final_answer', content: agentResponse });
+            res.end();
+        } else {
+            agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
+            
+            const aiMessageForClient = {
+                sender: 'bot', role: 'model',
+                parts: [{ text: agentResponse.finalAnswer }],
+                text: agentResponse.finalAnswer,
+                timestamp: new Date(),
+                thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [],
+                source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null
+            };
+
+            if (aiMessageForClient.action) {
+                 await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } }, { upsert: true });
+                 return res.status(200).json({ reply: aiMessageForClient });
+            }
+            
+            const cues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            aiMessageForClient.criticalThinkingCues = cues;
+            agentResponse = aiMessageForClient; // This ensures agentResponse for logging has the timestamp etc.
+
+            res.status(200).json({ reply: agentResponse });
+        }
+        
+        const endTime = Date.now();
+        const aiMessageForDb = { ...agentResponse, sender: 'bot', role: 'model', text: agentResponse.finalAnswer, parts: [{ text: agentResponse.finalAnswer }], timestamp: new Date() };
+        delete aiMessageForDb.criticalThinkingCues;
+
+        await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
+        
+        const logEntry = new LLMPerformanceLog({
+            userId, 
+            sessionId, 
+            query: query.trim(), 
+            chosenModelId: chosenModel.modelId,
+            routerLogic: routerLogic,
+            responseTimeMs: endTime - startTime
+        });
+        await logEntry.save();
+        console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
+
+        if (agentResponse.finalAnswer) {
+            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+        }
+
+    } catch (error) {
+        console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
+        const clientMessage = error.message || "Failed to get response from AI service.";
+        
+        if (res.headersSent && !res.writableEnded) {
+            streamEvent(res, { type: 'error', content: clientMessage });
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(error.status || 500).json({ message: clientMessage });
+        }
+    }
+});
+
+
+/*
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -64,17 +206,21 @@ router.post('/message', async (req, res) => {
             User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
         ]);
 
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const chatContext = { 
+            userId, 
+            subject: documentContextName, // The subject selected in the UI
+            chatHistory: historyFromDb 
+        };
+        const chosenLLM = await selectLLM(query.trim(), chatContext);
 
         const llmConfig = {
-            llmProvider,
-            ollamaModel,
+            llmProvider: chosenLLM.provider,
+            ollamaModel: chosenLLM.provider === 'ollama' ? chosenLLM.modelId.split('/')[1] : null,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
             ollamaUrl: user?.ollamaUrl
         };
 
-        const historyFromDb = chatSession ? chatSession.messages : [];
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
         const historyForLlm = [];
 
@@ -121,10 +267,13 @@ router.post('/message', async (req, res) => {
                     streamEvent(res, eventData);
                 }
             };
+            const startTime = Date.now();
 
             const totResult = await processQueryWithToT_Streaming(
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
+
+            const endTime = Date.now();
 
             const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
 
@@ -207,9 +356,21 @@ router.post('/message', async (req, res) => {
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
             
+            const logEntry = new LLMPerformanceLog({
+                userId,
+                sessionId,
+                query: query.trim(),
+                chosenModelId: chosenLLM.modelId, // Assuming chosenLLM is in scope
+                routerLogic: 'heuristic_code_detection', // This would be passed back from the router service
+                responseTimeMs: endTime - startTime,
+            });
+            await logEntry.save();
+            console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
+
             if (agentResponse.finalAnswer) {
                 extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
             }
+
         }
 
     } catch (error) {
@@ -224,7 +385,7 @@ router.post('/message', async (req, res) => {
         }
     }
 });
-
+*/
 
 router.post('/history', async (req, res) => {
     const { previousSessionId, skipAnalysis } = req.body;
