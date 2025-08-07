@@ -102,6 +102,7 @@ router.post('/message', async (req, res) => {
 
         let agentResponse;
         if (criticalThinkingEnabled) {
+            // --- Logic for STREAMING response ---
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
@@ -114,57 +115,77 @@ router.post('/message', async (req, res) => {
             };
             
             const totResult = await processQueryWithToT_Streaming(query.trim(), historyForLlm, requestContext, interceptingStreamCallback);
+            const endTime = Date.now();
             const cues = await generateCues(totResult.finalAnswer, llmConfig);
 
             agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
+            
+            // 1. Create Log Entry
+            const logEntry = new LLMPerformanceLog({
+                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+
+            // 2. Inject logId into the response object
+            agentResponse.logId = logEntry._id;
+            
+            // 3. Send final event and close stream
             streamEvent(res, { type: 'final_answer', content: agentResponse });
             res.end();
+
         } else {
+            // --- Logic for STANDARD JSON response ---
             agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
+            const endTime = Date.now();
             
+            // 1. Create Log Entry
+            const logEntry = new LLMPerformanceLog({
+                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+
+            // 2. Build the final message object for the client, injecting the logId
             const aiMessageForClient = {
                 sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }],
-                text: agentResponse.finalAnswer,
-                timestamp: new Date(),
-                thinking: agentResponse.thinking || null,
-                references: agentResponse.references || [],
-                source_pipeline: agentResponse.sourcePipeline,
-                action: agentResponse.action || null
+                parts: [{ text: agentResponse.finalAnswer }], text: agentResponse.finalAnswer,
+                timestamp: new Date(), thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [], source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null,
+                logId: logEntry._id 
             };
 
+            // 3. Handle action or send the final response
             if (aiMessageForClient.action) {
-                 await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } }, { upsert: true });
+                 const messageForDb = { ...aiMessageForClient };
+                 delete messageForDb.sender; delete messageForDb.text; delete messageForDb.action;
+                 await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, messageForDb] } } }, { upsert: true });
                  return res.status(200).json({ reply: aiMessageForClient });
             }
             
             const cues = await generateCues(agentResponse.finalAnswer, llmConfig);
             aiMessageForClient.criticalThinkingCues = cues;
-            agentResponse = aiMessageForClient; // This ensures agentResponse for logging has the timestamp etc.
+            agentResponse = aiMessageForClient; 
 
             res.status(200).json({ reply: agentResponse });
         }
         
-        const endTime = Date.now();
+        // --- DB & KG LOGIC (COMMON TO BOTH SUCCESSFUL PATHS) ---
         const aiMessageForDb = { ...agentResponse, sender: 'bot', role: 'model', text: agentResponse.finalAnswer, parts: [{ text: agentResponse.finalAnswer }], timestamp: new Date() };
         delete aiMessageForDb.criticalThinkingCues;
+        delete aiMessageForDb.sender;
+        delete aiMessageForDb.text;
+        delete aiMessageForDb.action;
 
         await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
         
-        const logEntry = new LLMPerformanceLog({
-            userId, 
-            sessionId, 
-            query: query.trim(), 
-            chosenModelId: chosenModel.modelId,
-            routerLogic: routerLogic,
-            responseTimeMs: endTime - startTime
-        });
-        await logEntry.save();
         console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
 
         if (agentResponse.finalAnswer) {
             extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
         }
+
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
@@ -178,7 +199,6 @@ router.post('/message', async (req, res) => {
         }
     }
 });
-
 
 /*
 router.post('/message', async (req, res) => {
@@ -502,10 +522,21 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    try {
+     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
         if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
-        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+
+        const messagesForFrontend = (session.messages || []).map(msg => ({
+            id: msg._id || uuidv4(),
+            sender: msg.role === 'model' ? 'bot' : 'user',
+            text: msg.parts?.[0]?.text || '',
+            thinking: msg.thinking,
+            references: msg.references,
+            timestamp: msg.timestamp,
+            source_pipeline: msg.source_pipeline,
+            logId: msg.logId || null
+        }));
+        
         res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
         console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);

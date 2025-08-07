@@ -29,6 +29,11 @@ const ChatHistorySchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    logId: { 
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'LLMPerformanceLog', default: null 
+    },
+
     createdAt: {
         type: Date,
         default: Date.now,
@@ -37,7 +42,7 @@ const ChatHistorySchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     }
-});
+}, { _id: true });
 
 ChatHistorySchema.pre('save', function (next) {
     if (this.isModified()) {

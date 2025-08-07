@@ -37,6 +37,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const feedbackRoutes = require('./routes/feedback');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -85,6 +86,7 @@ app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
+app.use('/api/feedback', feedbackRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);
