@@ -102,7 +102,7 @@ async function processAgenticRequest(
       finalAnswer: `I'm starting the generation for your ${doc_type.toUpperCase()} on "${topic}". The download should begin automatically in a moment.`,
       thinking: `User requested document generation. Tool call: ${JSON.stringify(
         toolCall
-      )}. I will now send a command to the frontend to trigger the download.`,
+      )}.`,
       references: [],
       sourcePipeline: `agent-generate_document`,
       action: {

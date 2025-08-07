@@ -17801,6 +17801,13 @@ const api = {
       { responseType: "blob" } // CRITICAL: This tells axios to expect a file
     );
 
+    if (response.data.type === 'application/json') {
+        const errorText = await response.data.text();
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || "An unknown error occurred during generation from topic.");
+    }
+
+
     // Extract filename from the 'Content-Disposition' header
     const contentDisposition = response.headers["content-disposition"];
     let filename = `generated-document.${docType}`; // a fallback
@@ -24764,13 +24771,21 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 # ==============================================================================
 
 DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
-You are a professional content creator and subject matter expert. Your task is to generate a full, detailed, multi-page document in Markdown format about the given TOPIC. You must use your own internal knowledge. The final output must be a single block of well-structured Markdown text.
+You are a professional content creator and subject matter expert. Your task is to generate a comprehensive, multi-page document in Markdown format based entirely on your internal knowledge of the given TOPIC. The content should be informative, well-structured, and suitable for academic or professional readers. The final output must be a single, clean block of Markdown text.
 
 **INSTRUCTIONS:**
-1.  **Main Title:** Start the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
-2.  **Structure:** Create a logical structure with clear H2 and H3 headings for different sections.
-3.  **Content Generation:** For each section, write detailed, professional paragraphs.
-4.  **Markdown Usage:** Use bullet points, bold text, and clear paragraphs to structure the content effectively.
+1.  **Main Title:** Begin the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
+2.  **Structured Sections:** Organize the content with meaningful H2 and H3 headings to reflect a clear, logical flow of ideas.
+3.  **Content Depth:** Write multi-paragraph sections that demonstrate deep understanding. Where appropriate, include examples, comparisons, or analogies.
+4.  **Markdown Formatting:** Use Markdown effectively, including:
+    - **Bold** text for key concepts
+    - *Italics* for emphasis or terminology
+    - - Bullet points or numbered lists for clarity
+    - Proper line spacing and readable structure
+
+**QUALITY REQUIREMENTS:**
+- Target word count: **1500–3000+ words** across multiple sections
+- Ensure the tone is **authoritative**, the structure is **cohesive**, and the information is **accurate and self-contained**
 
 ---
 **TOPIC:**
@@ -24780,29 +24795,33 @@ You are a professional content creator and subject matter expert. Your task is t
 **FINAL DOCUMENT MARKDOWN:**
 """
 
+
 PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
-You are a professional presentation designer and subject matter expert. Your task is to generate a full, detailed, 6-8 slide presentation on the given TOPIC using your internal knowledge. Your output MUST be a single, valid JSON array, where each object represents a slide.
+You are a professional presentation designer and subject matter expert. Your task is to create a well-structured and visually engaging 6–8 slide presentation on the given TOPIC using your internal knowledge. The output must be a single, valid JSON array. Each object in the array represents a slide.
 
-**JSON Object Schema for each slide:**
-{{
-  "slide_title": "A concise and engaging title for the slide.",
-  "slide_content": "Detailed, professional paragraph(s) and/or bullet points on the topic. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
-  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition."
-}}
+Each slide must follow this format:
+{
+    "slide_title": "A short and relevant title for the slide.",
+    "slide_content": "Slide content written using Markdown formatting. Use **bold**, *italics*, - bullet points, and short paragraphs as needed. Ensure clarity and readability.",
+    "image_prompt": "A descriptive and creative prompt for an AI image generator. Mention the subject, style, mood, and layout of the image to match the slide content."
+}
 
-**INSTRUCTIONS:**
-1.  **Create Slides:** Generate 6-8 slide objects in the JSON array, covering the topic logically.
-2.  **Generate Content:** Write the content for each slide.
-3.  **Create Image Prompts:** For each slide, generate a unique and descriptive `image_prompt`.
-4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
+Instructions:
+use fonr of 12pt and each slide contains 5 bullet points
+1. Generate 6 to 8 slides that flow logically from introduction to conclusion.
+2. Ensure each slide focuses on a single idea or subtopic.
+3. Provide informative, presentation-ready content in each slide.
+4. Write a unique and well-matched image_prompt for every slide.
+5. Return only the final output: a clean, valid JSON array with no extra text.
 
 ---
-**TOPIC:**
+TOPIC:
 {topic}
 ---
 
-**FINAL PRESENTATION JSON ARRAY:**
+FINAL PRESENTATION JSON ARRAY:
 """
+
 ```
 
 `server/rag_service/quiz_utils.py`
@@ -26305,12 +26324,12 @@ router.post('/message', async (req, res) => {
             streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
             const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues; // Remove cues for DB
+            delete aiMessageForDb.criticalThinkingCues;
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
                 { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true } // <<< FIX #1: Changed upsert to true for robustness
+                { upsert: true, new: true }
             );
 
             if (totResult.finalAnswer) {
@@ -26325,8 +26344,8 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
             );
 
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            
+            // --- THIS IS THE FIX ---
+            // Prepare the full response object, including any potential action
             const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: agentResponse.finalAnswer }],
@@ -26335,9 +26354,29 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
+                action: agentResponse.action || null // Include the action
             };
-            
+
+            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
+            if (aiMessageForClient.action) {
+                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+                
+                // Save both user message and the AI's action message to the database
+                await ChatHistory.findOneAndUpdate(
+                    { sessionId: sessionId, userId: userId },
+                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
+                    { upsert: true, new: true }
+                );
+                
+                // Return the response with the action, stopping execution here.
+                return res.status(200).json({ reply: aiMessageForClient });
+            }
+            // --- END OF FIX ---
+
+            // If there was NO action, proceed with the normal flow
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
+
             const aiMessageForDb = { ...aiMessageForClient };
             delete aiMessageForDb.criticalThinkingCues;
 
@@ -26349,7 +26388,10 @@ router.post('/message', async (req, res) => {
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
         }
 
     } catch (error) {
@@ -26364,7 +26406,6 @@ router.post('/message', async (req, res) => {
         }
     }
 });
-
 
 
 router.post('/history', async (req, res) => {
@@ -27039,329 +27080,14 @@ exports.generateDocumentFromTopic = async (req, res) => {
 `server/routes/generationRoutes.js`
 
 ```javascript
-// // server/routes/generation.js
-// const express = require('express');
-// const axios = require('axios');
-// const router = express.Router();
-
-// // This route is protected by authMiddleware applied in server.js
-
-// // @route   POST /api/generate/document
-// // @desc    Generate a document (PPTX or DOCX) by proxying to the Python service.
-// // @access  Private
-// router.post('/document', async (req, res) => {
-//     const { markdownContent, docType } = req.body;
-
-//     if (!markdownContent || !docType) {
-//         return res.status(400).json({ message: 'markdownContent and docType are required.' });
-//     }
-
-//     const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-//     if (!pythonServiceUrl) {
-//         console.error("[Generation Route] PYTHON_RAG_SERVICE_URL is not set.");
-//         return res.status(500).json({ message: "Document generation service is not configured." });
-//     }
-
-//     const generationUrl = `${pythonServiceUrl}/generate_document`;
-//     console.log(`[Generation Route] Forwarding request to Python service: ${generationUrl}`);
-
-//     try {
-//         const pythonResponse = await axios.post(generationUrl, {
-//             markdownContent,
-//             docType
-//         }, { timeout: 60000 }); // 1 minute timeout for generation
-
-//         if (pythonResponse.data && pythonResponse.data.success) {
-//             const filename = pythonResponse.data.filename;
-//             // Construct the full download URL for the client
-//             const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
-            
-//             res.status(200).json({
-//                 success: true,
-//                 downloadUrl: downloadUrl,
-//                 filename: filename
-//             });
-//         } else {
-//             throw new Error(pythonResponse.data.error || "Unknown error from generation service.");
-//         }
-//     } catch (error) {
-//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
-//         console.error(`[Generation Route] Error calling Python service: ${errorMsg}`);
-//         res.status(500).json({ message: errorMsg });
-//     }
-// });
-
-// module.exports = router;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// // server/routes/generation.js
-// const express = require('express');
-// const axios = require('axios');
-// const router = express.Router();
-// const User = require('../models/User'); // <-- Import User model
-
-// // This route is protected by authMiddleware applied in server.js
-
-// // @route   POST /api/generate/document
-// // @desc    Generate a document (PPTX or DOCX) by proxying to the Python service.
-// // @access  Private
-// router.post('/document', async (req, res) => {
-//     // --- MODIFIED: Destructure new fields ---
-//     const { markdownContent, docType, sourceDocumentName } = req.body;
-//     const userId = req.user._id;
-
-//     if (!markdownContent || !docType || !sourceDocumentName) {
-//         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
-//     }
-
-//     try {
-//         // --- NEW: Fetch the full text of the source document ---
-//         const user = await User.findById(userId).select('uploadedDocuments');
-//         if (!user) {
-//             return res.status(404).json({ message: 'User not found.' });
-//         }
-//         const sourceDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-//         if (!sourceDocument || !sourceDocument.text) {
-//             return res.status(404).json({ message: `Source document '${sourceDocumentName}' or its text content not found.` });
-//         }
-//         const sourceDocumentText = sourceDocument.text;
-//         // --- END NEW ---
-
-//         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-//         if (!pythonServiceUrl) {
-//             console.error("[Generation Route] PYTHON_RAG_SERVICE_URL is not set.");
-//             return res.status(500).json({ message: "Document generation service is not configured." });
-//         }
-
-//         const generationUrl = `${pythonServiceUrl}/generate_document`;
-//         console.log(`[Generation Route] Forwarding request to Python service: ${generationUrl}`);
-
-//         const pythonResponse = await axios.post(generationUrl, {
-//             markdownContent, // This is the outline (e.g., FAQ, Key Topics)
-//             docType,
-//             sourceDocumentText // Pass the full text for context
-//         }, { timeout: 300000 }); // Increased timeout to 5 minutes for LLM generation
-
-//         if (pythonResponse.data && pythonResponse.data.success) {
-//             const filename = pythonResponse.data.filename;
-//             const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
-            
-//             res.status(200).json({
-//                 success: true,
-//                 downloadUrl: downloadUrl,
-//                 filename: filename
-//             });
-//         } else {
-//             throw new Error(pythonResponse.data.error || "Unknown error from generation service.");
-//         }
-//     } catch (error) {
-//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
-//         console.error(`[Generation Route] Error: ${errorMsg}`);
-//         res.status(500).json({ message: errorMsg });
-//     }
-// });
-
-// module.exports = router;
-
-
-
-
-
-
-
-
-
-
-// // server/routes/generation.js
-// const express = require('express');
-// const axios = require('axios');
-// const router = express.Router();
-// const User = require('../models/User');
-// const AdminDocument = require('../models/AdminDocument'); // <-- Import AdminDocument model
-
-// // This route is protected by authMiddleware applied in server.js
-
-// // @route   POST /api/generate/document
-// // @desc    Generate a document (PPTX or DOCX) by proxying to the Python service.
-// // @access  Private
-// router.post('/document', async (req, res) => {
-//     const { markdownContent, docType, sourceDocumentName } = req.body;
-//     const userId = req.user._id;
-
-//     if (!markdownContent || !docType || !sourceDocumentName) {
-//         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
-//     }
-
-//     try {
-//         let sourceDocumentText = null;
-
-//         // --- NEW UNIFIED DOCUMENT RETRIEVAL LOGIC ---
-//         // 1. First, try to find the document in the user's personal documents.
-//         const user = await User.findById(userId).select('uploadedDocuments');
-//         if (user) {
-//             const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-//             if (userDocument && userDocument.text) {
-//                 sourceDocumentText = userDocument.text;
-//                 console.log(`[Generation Route] Found source text in user's documents for: ${sourceDocumentName}`);
-//             }
-//         }
-
-//         // 2. If not found in user's docs, try to find it in the Admin documents.
-//         if (!sourceDocumentText) {
-//             console.log(`[Generation Route] Not found in user docs. Checking admin 'Subjects' for: ${sourceDocumentName}`);
-//             const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
-//             if (adminDocument && adminDocument.text) {
-//                 sourceDocumentText = adminDocument.text;
-//                 console.log(`[Generation Route] Found source text in admin documents for: ${sourceDocumentName}`);
-//             }
-//         }
-//         // --- END UNIFIED LOGIC ---
-        
-//         // 3. If still not found after checking both, return an error.
-//         if (!sourceDocumentText) {
-//             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
-//         }
-
-//         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-//         if (!pythonServiceUrl) {
-//             console.error("[Generation Route] PYTHON_RAG_SERVICE_URL is not set.");
-//             return res.status(500).json({ message: "Document generation service is not configured." });
-//         }
-
-//         const generationUrl = `${pythonServiceUrl}/generate_document`;
-//         console.log(`[Generation Route] Forwarding request to Python service: ${generationUrl}`);
-
-//         const pythonResponse = await axios.post(generationUrl, {
-//             markdownContent,
-//             docType,
-//             sourceDocumentText // Pass the full text from whichever source it was found
-//         }, { timeout: 300000 });
-
-//         if (pythonResponse.data && pythonResponse.data.success) {
-//             const filename = pythonResponse.data.filename;
-//             const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
-            
-//             res.status(200).json({
-//                 success: true,
-//                 downloadUrl: downloadUrl,
-//                 filename: filename
-//             });
-//         } else {
-//             throw new Error(pythonResponse.data.error || "Unknown error from generation service.");
-//         }
-//     } catch (error) {
-//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
-//         console.error(`[Generation Route] Error: ${errorMsg}`);
-//         res.status(500).json({ message: errorMsg });
-//     }
-// });
-
-// module.exports = router;
-
-
-
-
-
-
-
-
-
-// // server/routes/generation.js
-// const express = require('express');
-// const axios = require('axios');
-// const router = express.Router();
-// const User = require('../models/User');
-// const AdminDocument = require('../models/AdminDocument');
-
-// router.post('/document', async (req, res) => {
-//     const { markdownContent, docType, sourceDocumentName } = req.body;
-//     const userId = req.user._id;
-
-//     if (!markdownContent || !docType || !sourceDocumentName) {
-//         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
-//     }
-
-//     try {
-//         let sourceDocumentText = null;
-
-//         const user = await User.findById(userId).select('uploadedDocuments');
-//         if (user) {
-//             const userDocument = user.uploadedDocuments.find(doc => doc.filename === sourceDocumentName);
-//             if (userDocument && userDocument.text) {
-//                 sourceDocumentText = userDocument.text;
-//             }
-//         }
-
-//         if (!sourceDocumentText) {
-//             const adminDocument = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text');
-//             if (adminDocument && adminDocument.text) {
-//                 sourceDocumentText = adminDocument.text;
-//             }
-//         }
-        
-//         if (!sourceDocumentText) {
-//             return res.status(404).json({ message: `Source document '${sourceDocumentName}' not found.` });
-//         }
-
-//         const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
-//         if (!pythonServiceUrl) {
-//             return res.status(500).json({ message: "Document generation service is not configured." });
-//         }
-
-//         const generationUrl = `${pythonServiceUrl}/generate_document`;
-        
-//         // 1. Ask Python to generate the document and get the filename
-//         const genResponse = await axios.post(generationUrl, {
-//             markdownContent, docType, sourceDocumentText
-//         }, { timeout: 300000 });
-
-//         if (!genResponse.data || !genResponse.data.success) {
-//             throw new Error(genResponse.data.error || "Python service failed to generate the document.");
-//         }
-
-//         const filename = genResponse.data.filename;
-//         const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
-
-//         // 2. Fetch the generated document from Python as a stream (blob)
-//         console.log(`[Generation Route] Fetching generated file from Python: ${downloadUrl}`);
-//         const fileResponse = await axios.get(downloadUrl, {
-//             responseType: 'stream'
-//         });
-
-//         // 3. Stream the file directly back to the client
-//         res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-//         res.setHeader('Content-Type', fileResponse.headers['content-type']);
-//         fileResponse.data.pipe(res);
-
-//     } catch (error) {
-//         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
-//         console.error(`[Generation Route] Error: ${errorMsg}`);
-//         res.status(500).json({ message: errorMsg });
-//     }
-// });
-
-// module.exports = router;
-
-// server/routes/generation.js
+// server/routes/generationRoutes.js
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const User = require('../models/User'); // Still needed for API key
+const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
-const KnowledgeSource = require('../models/KnowledgeSource'); // <-- Import KnowledgeSource
-const { decrypt } = require('../utils/crypto'); // For user API key
+const KnowledgeSource = require('../models/KnowledgeSource');
+const { decrypt } = require('../utils/crypto');
 
 router.post('/document', async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
@@ -27375,7 +27101,6 @@ router.post('/document', async (req, res) => {
         let sourceDocumentText = null;
         let apiKeyForRequest = null;
 
-        // 1. Check user-specific KnowledgeSource and get API key
         const user = await User.findById(userId).select('+encryptedApiKey');
         const userSource = await KnowledgeSource.findOne({ userId, title: sourceDocumentName }).select('textContent').lean();
         
@@ -27385,7 +27110,6 @@ router.post('/document', async (req, res) => {
                 apiKeyForRequest = decrypt(user.encryptedApiKey);
             }
         } else {
-            // 2. Fallback to AdminDocument and use server key
             const adminDoc = await AdminDocument.findOne({ originalName: sourceDocumentName }).select('text').lean();
             if (adminDoc?.text) {
                 sourceDocumentText = adminDoc.text;
@@ -27407,41 +27131,35 @@ router.post('/document', async (req, res) => {
         
         const generationUrl = `${pythonServiceUrl}/generate_document`;
         
-        // Ask Python to generate the document
-        const genResponse = await axios.post(generationUrl, {
+        const pythonResponse = await axios.post(generationUrl, {
             markdownContent, docType, sourceDocumentText, api_key: apiKeyForRequest
-        }, { timeout: 300000 });
+        }, { 
+            responseType: 'stream',
+            timeout: 600000 
+        });
 
-        if (!genResponse.data || !genResponse.data.success) {
-            throw new Error(genResponse.data.error || "Python service failed to generate the document.");
-        }
+        res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
+        res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        
+        // Add error handling to the stream
+        pythonResponse.data.on('error', (err) => {
+            console.error(`[Node Generation] Stream error proxying from Python for doc '${sourceDocumentName}':`, err.message);
+            if (!res.headersSent) {
+                res.status(502).json({ message: `Error connecting to the document generation service: ${err.message}` });
+            }
+        });
 
-        const filename = genResponse.data.filename;
-        const downloadUrl = `${pythonServiceUrl}/download_document/${filename}`;
-
-        // Fetch the generated document as a stream and pipe it to the client
-        const fileResponse = await axios.get(downloadUrl, { responseType: 'stream' });
-
-        res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-        res.setHeader('Content-Type', fileResponse.headers['content-type']);
-        fileResponse.data.pipe(res);
+        pythonResponse.data.pipe(res);
 
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
         console.error(`[Generation Route] Error: ${errorMsg}`);
-        res.status(error.response?.status || 500).json({ message: errorMsg });
+        if (!res.headersSent) {
+            res.status(error.response?.status || 500).json({ message: errorMsg });
+        }
     }
 });
 
-
-
-
-// ==============================================================================
-// === VVV THIS IS THE ENTIRELY NEW ROUTE YOU NEED TO ADD VVV ===
-// ==============================================================================
-// @route   POST /api/generate/document/from-topic
-// @desc    Generates a document from scratch based on a topic and proxies the download.
-// @access  Private (authMiddleware is applied in server.js)
 router.post('/document/from-topic', async (req, res) => {
     const { topic, docType } = req.body;
     const userId = req.user._id;
@@ -27452,7 +27170,6 @@ router.post('/document/from-topic', async (req, res) => {
 
     try {
         const user = await User.findById(userId).select('+encryptedApiKey');
-        // Use the user's key if available, otherwise fall back to the server's global key
         const apiKeyForRequest = user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : process.env.GEMINI_API_KEY;
 
         if (!apiKeyForRequest) {
@@ -27467,36 +27184,41 @@ router.post('/document/from-topic', async (req, res) => {
         const generationUrl = `${pythonServiceUrl}/generate_document_from_topic`;
         console.log(`[Node Generation] Proxying request for topic '${topic}' to Python service: ${generationUrl}`);
 
-        // Fetch the generated document from the Python service as a stream
         const pythonResponse = await axios.post(generationUrl, {
             topic,
             docType,
             api_key: apiKeyForRequest
         }, { 
             responseType: 'stream',
-            timeout: 600000 // 10 minute timeout for LLM generation and file creation
+            timeout: 600000 
         });
 
-        // Pipe the file stream directly back to the client.
-        // The 'Content-Disposition' header from Python tells the browser the filename.
         res.setHeader('Content-Disposition', pythonResponse.headers['content-disposition']);
         res.setHeader('Content-Type', pythonResponse.headers['content-type']);
+        
+        // --- THIS IS THE FIX ---
+        // We attach an error handler directly to the stream from Python.
+        // This will catch connection errors (like ECONNREFUSED) that the try/catch block misses.
+        pythonResponse.data.on('error', (err) => {
+            console.error(`[Node Generation] Stream error proxying from Python for topic '${topic}':`, err.message);
+            // If we haven't already sent headers (like the file headers), we can send a JSON error.
+            if (!res.headersSent) {
+                res.status(502).json({ message: `Error connecting to the generation service: ${err.message}` });
+            }
+        });
+        
+        // Pipe the data to the client response
         pythonResponse.data.pipe(res);
+        // --- END OF FIX ---
 
     } catch (error) {
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document from topic.";
         console.error(`[Node Generation] Error for topic '${topic}':`, errorMsg);
-        // If headers haven't been sent yet, we can send a JSON error.
-        // Otherwise, the connection will just terminate, which is acceptable for a failed stream.
         if (!res.headersSent) {
             res.status(error.response?.status || 500).json({ message: errorMsg });
         }
     }
 });
-// ==============================================================================
-// === ^^^ END OF THE NEW ROUTE ^^^ ===
-// ==============================================================================
-
 
 module.exports = router;
 ```
@@ -29180,7 +28902,7 @@ async function processAgenticRequest(
       finalAnswer: `I'm starting the generation for your ${doc_type.toUpperCase()} on "${topic}". The download should begin automatically in a moment.`,
       thinking: `User requested document generation. Tool call: ${JSON.stringify(
         toolCall
-      )}. I will now send a command to the frontend to trigger the download.`,
+      )}.`,
       references: [],
       sourcePipeline: `agent-generate_document`,
       action: {
@@ -31066,7 +30788,7 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
 
     if (!isComplex) {
         // Step 1: Stream the initial classification thought. This gives immediate feedback.
-        streamAndStoreThought(`**Analyzing Query**\nQuery classified as straightforward. Bypassing complex planning to generate a direct response.\n\n`);
+        streamAndStoreThought(`**Analyzing Query**\nQuery is simple. No need of Complex thinking process my Love 😊.\n\n`);
         
         // Step 2: Get the direct response. This now includes the LLM's own thinking process.
         const directResponse = await processAgenticRequest(
@@ -31095,7 +30817,7 @@ async function processQueryWithToT_Streaming(query, chatHistory, requestContext,
     }
 
 
-    streamAndStoreThought("**Starting Complex Reasoning**\nQuery detected as complex. Initiating multi-step Tree of Thought process.\n\n");
+    streamAndStoreThought("**Starting Complex Reasoning**\nQuery detected as complex. Initiating multi-step thought process.\n\n**Hang on, We are doing our best to give the best outcome**\n\n\n");
     
     const plans = await generatePlans(query, requestContext);
     streamAndStoreThought(`**Planning Stage**\nGenerated ${plans.length} potential plans. Now evaluating the best approach.\n\n`);
