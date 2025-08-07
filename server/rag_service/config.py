@@ -35,7 +35,11 @@ def setup_logging():
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or your preferred Gemini model
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+TURNITIN_API_URL = os.getenv('TURNITIN_API_URL')
+TURNITIN_API_KEY = os.getenv('TURNITIN_API_KEY')
+TURNITIN_API_SECRET = os.getenv('TURNITIN_API_SECRET')
+
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:8768")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
@@ -137,6 +141,40 @@ try:
     LANGCHAIN_SPLITTER_AVAILABLE = True
 except ImportError: LANGCHAIN_SPLITTER_AVAILABLE, RecursiveCharacterTextSplitter = False, None
 
+
+
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE, yt_dlp = False, None
+    
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE, whisper = False, None
+    
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE, sync_playwright = False, None
+    
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE, BeautifulSoup = False, None
+    
+try:
+    import ffmpeg
+    FFMPEG_PYTHON_AVAILABLE = True
+except ImportError:
+    FFMPEG_PYTHON_AVAILABLE, ffmpeg = False, None
+
+
+    
 # ─── Optional: Preload SpaCy & Embedding Model ───────
 nlp_spacy_core, SPACY_MODEL_LOADED = None, False
 try:
@@ -153,3 +191,13 @@ try:
     EMBEDDING_MODEL_LOADED = True
 except Exception as e:
     logger.warning(f"Failed to load Sentence Transformer model '{DOCUMENT_EMBEDDING_MODEL_NAME}': {e}")
+
+whisper_model, WHISPER_MODEL_LOADED = None, False
+try:
+    import whisper
+    # Using 'base' model is a good balance. Could be configured via .env in the future.
+    whisper_model = whisper.load_model("base")
+    WHISPER_MODEL_LOADED = True
+    logger.info("Successfully pre-loaded Whisper 'base' model.")
+except Exception as e:
+    logger.warning(f"Failed to pre-load Whisper model: {e}. Transcription will fail.")

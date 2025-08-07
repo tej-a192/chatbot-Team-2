@@ -10,23 +10,28 @@ const router = express.Router();
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
 // --- @route   POST /api/auth/signup ---
-router.post('/signup', async (req, res) => {
-  // 1. Destructure all possible fields from the request body
-  const { email, password, apiKey, ollamaUrl, preferredLlmProvider } = req.body;
+// server/routes/auth.js
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
+router.post('/signup', async (req, res) => {
+  // 1. Destructure the full payload from the multi-step form
+  const {
+    email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
+    name, college, universityNumber, degreeType, branch, year,
+    learningStyle, currentGoals
+  } = req.body;
+
+  // 2. Comprehensive Validation for the entire payload
+  if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
+    return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
   }
   if (!/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
     return res.status(400).json({ message: 'Please provide a valid email address.' });
   }
   if (password.length < 6) {
-     return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
   }
-
-  // 2. Validate provider-specific fields
-  if (preferredLlmProvider === 'gemini' && (!apiKey || apiKey.trim() === '')) {
-    return res.status(400).json({ message: 'A Gemini API Key is required when Gemini is selected.' });
+  if (preferredLlmProvider === 'gemini' && !requestAdminKey && (!apiKey || apiKey.trim() === '')) {
+    return res.status(400).json({ message: 'A Gemini API Key is required unless you request one from the admin.' });
   }
   if (preferredLlmProvider === 'ollama' && (!ollamaUrl || ollamaUrl.trim() === '')) {
     return res.status(400).json({ message: 'An Ollama URL is required when Ollama is selected.' });
@@ -38,32 +43,43 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // 3. Create a new user with conditional logic for credentials
+    // 3. Create the new User with the complete profile object
     const newUser = new User({
       email,
-      password, // Password will be hashed by the pre-save hook
+      username: email.split('@')[0],
+      password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
-      // Only save the credential that matches the chosen provider
-      encryptedApiKey: (preferredLlmProvider === 'gemini') ? apiKey : null,
+      apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
+      encryptedApiKey: requestAdminKey ? null : (preferredLlmProvider === 'gemini' ? apiKey : null),
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
+      profile: {
+        name, college, universityNumber, degreeType, branch, year,
+        learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
+      }
     });
-    
+
     await newUser.save();
 
-    const payload = { userId: newUser._id, email: newUser.email };
+    const payload = {
+      userId: newUser._id,
+      email: newUser.email,
+      username: newUser.username,
+    };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
     res.status(201).json({
       token,
       _id: newUser._id,
       email: newUser.email,
+      username: newUser.username,
       sessionId: uuidv4(),
-      message: 'User registered successfully',
+      message: "User registered successfully",
     });
+
   } catch (error) {
     console.error('Signup Error:', error);
     if (error.code === 11000 || error.message.includes('duplicate key error collection')) {
-        return res.status(400).json({ message: 'An account with this email already exists.' });
+        return res.status(400).json({ message: 'An account with this email or username already exists.' });
     }
     if (error.name === 'ValidationError') {
         const messages = Object.values(error.errors).map(val => val.message);
@@ -105,8 +121,9 @@ router.post('/signin', async (req, res) => {
       token,
       _id: user._id,
       email: user.email,
+      username: user.username,
       sessionId: uuidv4(),
-      message: 'Login successful',
+      message: "Login successful",
     });
   } catch (error) {
     console.error('Signin Error:', error);
@@ -122,6 +139,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   res.status(200).json({
     _id: req.user._id,
     email: req.user.email,
+    username: req.user.username,
   });
 });
 

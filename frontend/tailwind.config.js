@@ -35,6 +35,14 @@ export default {
         pulseDots: {
           '0%, 100%': { opacity: '0.3', transform: 'scale(0.8)' },
           '50%': { opacity: '1', transform: 'scale(1)' },
+        },
+        shimmerSweep: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
+        },
+        'spin-border': {
+          '0%': { '--angle': '0deg' },
+          '100%': { '--angle': '360deg' },
         }
       },
       animation: {
@@ -43,6 +51,8 @@ export default {
         pulseDot1: 'pulseDots 1.4s infinite 0s ease-in-out',
         pulseDot2: 'pulseDots 1.4s infinite 0.2s ease-in-out',
         pulseDot3: 'pulseDots 1.4s infinite 0.4s ease-in-out',
+        shimmerSweep: 'shimmerSweep 1.5s linear infinite',
+        'spin-border': 'spin-border 4s linear infinite',
       }
     },
   },

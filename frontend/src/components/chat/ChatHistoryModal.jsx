@@ -163,5 +163,4 @@ function ChatHistoryModal({ isOpen, onClose, onSelectSession }) {
         </Modal>
     );
 }
-
 export default ChatHistoryModal;

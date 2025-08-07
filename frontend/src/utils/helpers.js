@@ -1,4 +1,20 @@
 // Debounce function: Limits the rate at which a function can fire.
+import { marked } from 'marked';
+
+export const getPlainTextFromMarkdown = (markdown) => {
+  if (!markdown) return '';
+  try {
+    const html = marked.parse(markdown);
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    // .textContent correctly extracts text and preserves line breaks from block elements
+    return tempDiv.textContent || '';
+  } catch (error) {
+    console.error("Error converting markdown to plain text:", error);
+    return markdown; // Fallback to raw markdown on error
+  }
+};
+
 
 export const debounce = (func, delay) => {
     let timeoutId;
@@ -61,7 +77,7 @@ export const escapeHtml = (unsafe) => {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, '"')
+         .replace(/"/g, `"`)
          .replace(/'/g, "'");
 };
 

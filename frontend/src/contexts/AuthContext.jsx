@@ -23,8 +23,8 @@ export const AuthProvider = ({ children }) => {
     const processAuthData = useCallback((authApiResponse) => {
         if (authApiResponse && authApiResponse.token && authApiResponse._id && authApiResponse.email) {
             setToken(authApiResponse.token);
-            setUser({ id: authApiResponse._id, email: authApiResponse.email });
-            console.log("AuthContext: User and Token set.", { email: authApiResponse.email });
+            setUser({ id: authApiResponse._id, email: authApiResponse.email, username: authApiResponse.username });
+             console.log("AuthContext: User and Token set.", { email: authApiResponse.email, username: authApiResponse.username });
             return authApiResponse; 
         } else {
             setToken(null);
@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }) => {
                 try {
                     const userDataFromMe = await api.getMe();
                     if (userDataFromMe && userDataFromMe._id && userDataFromMe.email) {
-                        setUser({ id: userDataFromMe._id, email: userDataFromMe.email });
+                        setUser({ id: userDataFromMe._id, email: userDataFromMe.email, username: userDataFromMe.username });
                     } else {
                         setToken(null);
                         setUser(null);
@@ -61,15 +61,10 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         try {
             const data = await api.login(credentials);
-            // --- THIS IS THE FIX ---
-            // If the response is a special case for admin login,
-            // bypass the standard token processing and return it directly.
             if (data && data.isAdminLogin) {
                 return data;
             }
-            // Otherwise, process it as a regular user with a JWT token.
             return processAuthData(data);
-            // --- END OF FIX ---
         } catch (error) {
             setToken(null); 
             setUser(null);
@@ -83,7 +78,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(true);
         try {
             const data = await api.signup(signupData);
-            return processAuthData(data); // Signup always returns a regular user
+            return processAuthData(data); 
         } catch (error) {
             setToken(null);
             setUser(null);

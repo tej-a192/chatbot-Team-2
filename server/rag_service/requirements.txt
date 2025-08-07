@@ -1,40 +1,40 @@
-
-# server/rag_service/requirements.txt
-
-# --- Core and Web ---
 flask
-python-dotenv
 requests
-pydub
-
-# --- Document Parsing ---
-pdfplumber
-PyMuPDF
-pypdf
-python-docx
-python-pptx
-
-# --- AI & NLP ---
-google-generativeai
 langchain
-langchain-community
 langchain-huggingface
-ollama
-sentencepiece
+pypdf
+PyPDF2
+python-docx
+python-dotenv
+ollama # Keep if using Ollama embeddings
+python-pptx
+uuid
+langchain-community
+pdfplumber
+fitz # PyMuPDF for PDF parsing
+pytesseract
+nltk
+spacy-layout
+pandas
+numpy
+typing
+pytesseract # OCR
+pillow
+qdrant-client
+neo4j
 sentence_transformers
 spacy
-transformers
-
-# --- Vector & Graph Databases ---
-neo4j
-qdrant-client
-
-# --- Search & Utility ---
-arxiv
-duckduckgo-search
 opencv-python
-pytesseract
-soundfile
-
-# --- Final, Simple, and Free TTS ---
+ddgs
+python-pptx
+python-docx
+reportlab
+google-generativeai
 gTTS
+yt-dlp
+openai-whisper
+beautifulsoup4
+playwright
+moviepy
+Werkzeug
+aiohttp

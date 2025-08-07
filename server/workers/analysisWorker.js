@@ -1,11 +1,10 @@
-
-
 // server/workers/analysisWorker.js
 const { workerData, parentPort } = require('worker_threads');
 const mongoose = require('mongoose');
 const path = require('path');
 
-const User = require('../models/User');
+// --- THIS IS THE NEW MODEL ---
+const KnowledgeSource = require('../models/KnowledgeSource');
 const connectDB = require('../config/db');
 const geminiService = require('../services/geminiService');
 const ollamaService = require('../services/ollamaService');
@@ -13,15 +12,15 @@ const { ANALYSIS_PROMPTS } = require('../config/promptTemplates');
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-async function performFullAnalysis(userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
-    const logPrefix = `[Analysis Worker ${process.pid}, Doc: ${originalName}]`;
+async function performFullAnalysis(sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl) {
+    const logPrefix = `[AnalysisWorker ${process.pid}, SourceID: ${sourceId}]`;
     console.log(`${logPrefix} Starting analysis. Using provider: ${llmProvider}`);
 
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
     if (llmProvider === 'gemini' && !apiKey) {
-        const errorMessage = "Error: Analysis failed because no valid user Gemini API key was provided to the worker.";
+        const errorMessage = "Error: Analysis failed because no valid Gemini API key was provided to the worker.";
         console.error(`${logPrefix} ${errorMessage}`);
         return { 
             success: false, 
@@ -31,14 +30,15 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
-            console.log(`${logPrefix} Generating ${type} for '${originalName}'.`);
+            console.log(`${logPrefix} Generating ${type}...`);
             const historyForLLM = [{ role: 'user', parts: [{ text: "Perform the requested analysis based on the system instruction provided." }] }];
             
             const llmOptions = { 
                 apiKey,
                 ollamaUrl,
                 model: ollamaModel,
-                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_CHAT
+                // Using a larger token limit for analysis tasks
+                maxOutputTokens: ollamaService.DEFAULT_MAX_OUTPUT_TOKENS_OLLAMA_KG 
             };
 
             const generatedText = llmProvider === 'ollama'
@@ -76,22 +76,24 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
         }
     });
     
-    const finalAnalysisStatus = allIndividualAnalysesSuccessful ? "completed" : "failed_partial";
     try {
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
+        // --- REFACTORED DB UPDATE ---
+        // Now updates the KnowledgeSource document directly.
+        await KnowledgeSource.updateOne(
+            { _id: sourceId },
             {
                 $set: {
-                    "uploadedDocuments.$.analysis.faq": analysisResults.faq,
-                    "uploadedDocuments.$.analysis.topics": analysisResults.topics,
-                    "uploadedDocuments.$.analysis.mindmap": analysisResults.mindmap,
-                    "uploadedDocuments.$.analysisStatus": finalAnalysisStatus,
-                    "uploadedDocuments.$.analysisTimestamp": new Date()
+                    "analysis.faq": analysisResults.faq,
+                    "analysis.topics": analysisResults.topics,
+                    "analysis.mindmap": analysisResults.mindmap,
+                    "status": allIndividualAnalysesSuccessful ? "completed" : "failed",
+                    "failureReason": allIndividualAnalysesSuccessful ? "" : "One or more analysis steps failed."
                 }
             }
         );
-        console.log(`${logPrefix} Analysis results (Status: ${finalAnalysisStatus}) stored in DB.`);
+        console.log(`${logPrefix} Analysis results stored in DB.`);
         return { success: allIndividualAnalysesSuccessful, message: `Analysis ${allIndividualAnalysesSuccessful ? 'completed' : 'completed with some failures'}.` };
+        // --- END REFACTOR ---
     } catch (dbError) {
         console.error(`${logPrefix} DB Error storing analysis results:`, dbError);
         return { success: false, message: `DB Error storing analysis: ${dbError.message}` };
@@ -99,64 +101,44 @@ async function performFullAnalysis(userId, originalName, textForAnalysis, llmPro
 }
 
 async function run() {
-    const { userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
+    const { sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl } = workerData;
     let dbConnected = false;
-    let overallTaskSuccess = false;
-    let finalMessageToParent = "Analysis worker encountered an issue.";
 
     try {
-        if (!process.env.MONGO_URI || !userId || !originalName) {
-            throw new Error("Worker started with incomplete data (MONGO_URI, userId, or originalName missing).");
+        if (!process.env.MONGO_URI || !sourceId) {
+            throw new Error("Worker started with incomplete data (MONGO_URI or sourceId missing).");
         }
         
         await connectDB(process.env.MONGO_URI);
         dbConnected = true;
 
-        await User.updateOne(
-            { _id: userId, "uploadedDocuments.filename": originalName },
-            { $set: { "uploadedDocuments.$.analysisStatus": "processing" } }
-        );
-
         if (!textForAnalysis || textForAnalysis.trim() === '') {
-            await User.updateOne(
-                { _id: userId, "uploadedDocuments.filename": originalName },
-                { $set: { "uploadedDocuments.$.analysisStatus": "skipped_no_text", "uploadedDocuments.$.analysisTimestamp": new Date() } }
-            );
-            overallTaskSuccess = true;
-            finalMessageToParent = "Analysis skipped: No text provided.";
+            await KnowledgeSource.updateOne({ _id: sourceId }, {
+                $set: { status: "failed", failureReason: "Analysis skipped: No text content was extracted." }
+            });
         } else {
-            const result = await performFullAnalysis(
-                userId, originalName, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
+            await performFullAnalysis(
+                sourceId, textForAnalysis, llmProvider, ollamaModel, apiKey, ollamaUrl
             );
-            overallTaskSuccess = result.success;
-            finalMessageToParent = result.message;
-        }
-
-        if (parentPort) {
-            parentPort.postMessage({ success: overallTaskSuccess, originalName, message: finalMessageToParent });
         }
 
     } catch (error) {
-        console.error(`[Analysis Worker] Critical error for '${originalName}':`, error);
-        finalMessageToParent = error.message;
-        if (dbConnected && userId && originalName) {
+        console.error(`[Analysis Worker] Critical error for sourceId '${sourceId}':`, error);
+        if (dbConnected && sourceId) {
             try {
-                await User.updateOne(
-                    { _id: userId, "uploadedDocuments.filename": originalName },
-                    { $set: { "uploadedDocuments.$.analysisStatus": "failed_critical" } }
+                await KnowledgeSource.updateOne(
+                    { _id: sourceId },
+                    { $set: { status: "failed", failureReason: `Critical worker error: ${error.message}` } }
                 );
             } catch (dbUpdateError) {
                 console.error(`[Analysis Worker] Failed to update status to 'failed_critical':`, dbUpdateError);
             }
         }
-        if (parentPort) {
-            parentPort.postMessage({ success: false, originalName, error: finalMessageToParent });
-        }
     } finally {
         if (dbConnected) {
             await mongoose.disconnect();
         }
-        console.log(`[Analysis Worker] Finished task for ${originalName}. Success: ${overallTaskSuccess}`);
+        console.log(`[Analysis Worker] Finished task for sourceId ${sourceId}.`);
     }
 }
 
