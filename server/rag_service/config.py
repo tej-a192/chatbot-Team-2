@@ -2,6 +2,7 @@
 import os
 import logging
 from dotenv import load_dotenv
+from pythonjsonlogger import jsonlogger
 
 # --- Load .env from the parent 'server' directory ---
 # This ensures that both Node.js and Python use the same .env file
@@ -17,19 +18,32 @@ LOGGING_LEVEL      = getattr(logging, LOGGING_LEVEL_NAME, logging.INFO)
 LOGGING_FORMAT     = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
 
 def setup_logging():
-    """Configure logging across the app."""
+    """Configure logging to output structured JSON."""
     root_logger = logging.getLogger()
-    if not root_logger.handlers:  # prevent duplicate handlers
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(LOGGING_FORMAT)
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
-        root_logger.setLevel(LOGGING_LEVEL)
+    # Prevent duplicate handlers if this function is called multiple times
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            root_logger.removeHandler(handler)
 
+    # Use a custom formatter that adds service name and other details
+    # The format string defines the keys in the final JSON log
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s'
+    )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+    root_logger.setLevel(LOGGING_LEVEL)
+    
+    # Suppress overly verbose logs from third-party libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("faiss.loader").setLevel(logging.WARNING)
-    logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
+    
+    # Use __name__ to get the current module's logger
+    logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME} with JSON format.")
+
 
 # --- API Keys and Service URLs ---
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')

@@ -9,6 +9,7 @@ const fs = require("fs");
 const axios = require("axios");
 const mongoose = require("mongoose");
 
+
 // --- Custom Modules & Middleware ---
 const connectDB = require("./config/db");
 const { getLocalIPs } = require("./utils/networkUtils");
@@ -37,6 +38,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const logger = require('./utils/logger');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -85,19 +87,26 @@ app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
+
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
-  console.error("Unhandled Error:", err.stack || err);
+  logger.error("Unhandled Error:", { 
+      message: err.message, 
+      stack: err.stack,
+      status: err.status,
+      url: req.originalUrl,
+      method: req.method
+  });
+
   const statusCode = err.status || 500;
   const message = err.message || "An internal server error occurred.";
   if (!res.headersSent) {
     res.status(statusCode).json({ message });
   }
 });
-
 // --- Server Startup Logic ---
 async function startServer() {
-  console.log("\n--- Starting Server Initialization ---");
+  logger.info("--- Starting Server Initialization ---");
   try {
     await ensureServerDirectories();
     await connectDB(mongoUri);
@@ -106,19 +115,19 @@ async function startServer() {
     await connectRedis();
 
     const server = app.listen(port, "0.0.0.0", () => {
-      console.log("\n=== Node.js Server Ready ===");
-      console.log(`🚀 Server listening on port ${port}`);
+      logger.info("=== Node.js Server Ready ===");
+      logger.info(`🚀 Server listening on port ${port}`);
       getLocalIPs().forEach((ip) => {
-        console.log(`   - http://${ip}:${port}`);
+        logger.info(`   - http://${ip}:${port}`);
       });
-      console.log("============================\n");
+      logger.info("============================");
     });
 
     const gracefulShutdown = (signal) => {
-      console.log(`\n${signal} received. Shutting down...`);
+      logger.info(`${signal} received. Shutting down...`);
       server.close(() => {
         mongoose.connection.close(false, () => {
-          console.log("MongoDB connection closed.");
+          logger.info("MongoDB connection closed.");
           process.exit(0);
         });
       });
@@ -126,7 +135,7 @@ async function startServer() {
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   } catch (error) {
-    console.error("!!! Failed to start Node.js server:", error.message);
+    logger.error("!!! Failed to start Node.js server:", { message: error.message, stack: error.stack });
     process.exit(1);
   }
 }
@@ -144,20 +153,20 @@ async function ensureServerDirectories() {
 }
 async function checkRagService(url) {
   if (!url) {
-    console.warn("! Python RAG service URL not configured.");
+    logger.warn("Python RAG service URL not configured.");
     return;
   }
   try {
     const response = await axios.get(`${url}/health`, { timeout: 7000 });
     if (response.data.status === "ok") {
-      console.log("✓ Python RAG service is available.");
+      logger.info("✓ Python RAG service is available.");
     } else {
-      console.warn(
+      logger.warn(
         `! Python RAG service responded but is not healthy. Status: ${response.data.status}`
       );
     }
   } catch (error) {
-    console.warn("! Python RAG service is not reachable.");
+    logger.warn("! Python RAG service is not reachable.");
   }
 }
 

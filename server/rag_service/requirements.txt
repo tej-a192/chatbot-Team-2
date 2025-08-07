@@ -40,3 +40,4 @@ aiohttp
 textstat
 TTS
 pydub
+python-json-logger
