@@ -12,8 +12,47 @@ const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
 const LLMConfiguration = require('../models/LLMConfiguration'); 
 const { encrypt } = require('../utils/crypto');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog'); 
 
 const router = express.Router();
+
+
+/* ====== Model feedback routes ======= */
+
+// @route   GET /api/admin/feedback-stats
+// @desc    Get aggregated feedback stats for each model
+router.get('/feedback-stats', async (req, res) => {
+    try {
+        const stats = await LLMPerformanceLog.aggregate([
+            {
+                $group: {
+                    _id: '$chosenModelId', // Group by the model's ID
+                    positive: { $sum: { $cond: [{ $eq: ['$userFeedback', 'positive'] }, 1, 0] } },
+                    negative: { $sum: { $cond: [{ $eq: ['$userFeedback', 'negative'] }, 1, 0] } },
+                    none: { $sum: { $cond: [{ $eq: ['$userFeedback', 'none'] }, 1, 0] } },
+                    total: { $sum: 1 }
+                }
+            },
+            {
+                $project: { // Reshape the output
+                    modelId: '$_id',
+                    feedback: {
+                        positive: '$positive',
+                        negative: '$negative',
+                        none: '$none'
+                    },
+                    totalResponses: '$total',
+                    _id: 0
+                }
+            }
+        ]);
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching feedback stats:', error);
+        res.status(500).json({ message: 'Server error while fetching feedback stats.' });
+    }
+});
+/* ====== END Model feedback routes ===== */
 
 /* ====== LLM Management Routes ====== */
 

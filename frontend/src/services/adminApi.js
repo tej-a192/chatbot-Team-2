@@ -79,3 +79,5 @@ export const getLlmConfigs = () => makeAdminApiRequest('get', '/llms');
 export const createLlmConfig = (data) => makeAdminApiRequest('post', '/llms', data);
 export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/${id}`, data);
 export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);
+
+export const getFeedbackStats = () => makeAdminApiRequest('get', '/feedback-stats');

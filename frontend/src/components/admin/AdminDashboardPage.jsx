@@ -10,6 +10,7 @@ import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
 import LLMConfigManager from './LLMConfigManager.jsx';
+import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
 
 import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -89,6 +90,7 @@ function AdminDashboardPage() {
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
     const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+    
 
     const adminLogoutHandler = () => {
         setIsAdminSessionActive(false);
@@ -204,6 +206,10 @@ function AdminDashboardPage() {
             </header>
 
             <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
+
+            <div className="mt-6">
+                <ModelFeedbackStats />
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
