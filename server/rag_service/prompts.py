@@ -204,13 +204,21 @@ You are an impartial fact-checker and synthesizer. You have been given a specifi
 # ==============================================================================
 
 DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
-You are a professional content creator and subject matter expert. Your task is to generate a full, detailed, multi-page document in Markdown format about the given TOPIC. You must use your own internal knowledge. The final output must be a single block of well-structured Markdown text.
+You are a professional content creator and subject matter expert. Your task is to generate a comprehensive, multi-page document in Markdown format based entirely on your internal knowledge of the given TOPIC. The content should be informative, well-structured, and suitable for academic or professional readers. The final output must be a single, clean block of Markdown text.
 
 **INSTRUCTIONS:**
-1.  **Main Title:** Start the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
-2.  **Structure:** Create a logical structure with clear H2 and H3 headings for different sections.
-3.  **Content Generation:** For each section, write detailed, professional paragraphs.
-4.  **Markdown Usage:** Use bullet points, bold text, and clear paragraphs to structure the content effectively.
+1.  **Main Title:** Begin the document with a main title using H1 syntax (e.g., '# An In-Depth Look at {topic}').
+2.  **Structured Sections:** Organize the content with meaningful H2 and H3 headings to reflect a clear, logical flow of ideas.
+3.  **Content Depth:** Write multi-paragraph sections that demonstrate deep understanding. Where appropriate, include examples, comparisons, or analogies.
+4.  **Markdown Formatting:** Use Markdown effectively, including:
+    - **Bold** text for key concepts
+    - *Italics* for emphasis or terminology
+    - - Bullet points or numbered lists for clarity
+    - Proper line spacing and readable structure
+
+**QUALITY REQUIREMENTS:**
+- Target word count: **1500–3000+ words** across multiple sections
+- Ensure the tone is **authoritative**, the structure is **cohesive**, and the information is **accurate and self-contained**
 
 ---
 **TOPIC:**
@@ -220,26 +228,29 @@ You are a professional content creator and subject matter expert. Your task is t
 **FINAL DOCUMENT MARKDOWN:**
 """
 
+
 PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE = """
-You are a professional presentation designer and subject matter expert. Your task is to generate a full, detailed, 6-8 slide presentation on the given TOPIC using your internal knowledge. Your output MUST be a single, valid JSON array, where each object represents a slide.
+You are a professional presentation designer and subject matter expert. Your task is to create a well-structured and visually engaging 6–8 slide presentation on the given TOPIC using your internal knowledge. The output must be a single, valid JSON array. Each object in the array represents a slide.
 
-**JSON Object Schema for each slide:**
-{{
-  "slide_title": "A concise and engaging title for the slide.",
-  "slide_content": "Detailed, professional paragraph(s) and/or bullet points on the topic. Use Markdown for formatting (e.g., **bold**, *italics*, - bullet points).",
-  "image_prompt": "A highly descriptive, creative prompt for an AI text-to-image model (like DALL-E) to generate a relevant and visually appealing image for this specific slide. Describe the style, subject, and composition."
-}}
+Each slide must follow this format:
+{
+    "slide_title": "A short and relevant title for the slide.",
+    "slide_content": "Slide content written using Markdown formatting. Use **bold**, *italics*, - bullet points, and short paragraphs as needed. Ensure clarity and readability.",
+    "image_prompt": "A descriptive and creative prompt for an AI image generator. Mention the subject, style, mood, and layout of the image to match the slide content."
+}
 
-**INSTRUCTIONS:**
-1.  **Create Slides:** Generate 6-8 slide objects in the JSON array, covering the topic logically.
-2.  **Generate Content:** Write the content for each slide.
-3.  **Create Image Prompts:** For each slide, generate a unique and descriptive `image_prompt`.
-4.  **JSON Format:** Ensure the final output is a single, clean JSON array with no other text before or after it.
+Instructions:
+use fonr of 12pt and each slide contains 5 bullet points
+1. Generate 6 to 8 slides that flow logically from introduction to conclusion.
+2. Ensure each slide focuses on a single idea or subtopic.
+3. Provide informative, presentation-ready content in each slide.
+4. Write a unique and well-matched image_prompt for every slide.
+5. Return only the final output: a clean, valid JSON array with no extra text.
 
 ---
-**TOPIC:**
+TOPIC:
 {topic}
 ---
 
-**FINAL PRESENTATION JSON ARRAY:**
+FINAL PRESENTATION JSON ARRAY:
 """
