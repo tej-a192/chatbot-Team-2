@@ -37,6 +37,7 @@ const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 const feedbackRoutes = require('./routes/feedback');
+const finetuningRoutes = require('./routes/finetuning');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -68,6 +69,7 @@ app.use("/api/auth", authRoutes);
 // Apply the fixed admin auth middleware to the single MASTER admin router.
 // This ensures all routes defined in ./routes/admin/* are protected correctly.
 app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
+app.use('/api/admin/finetuning', fixedAdminAuthMiddleware, finetuningRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);

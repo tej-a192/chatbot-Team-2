@@ -93,3 +93,9 @@ export const finalizeUpload = (datasetMetadata) => makeAdminApiRequest('post', '
 export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get', `/datasets/${datasetId}/download-url`);
 
 export const deleteDataset = (datasetId) => makeAdminApiRequest('delete', `/datasets/${datasetId}`);
+
+export const startFineTuningJob = (payload) => {
+    // This function is now using the robust makeAdminApiRequest helper.
+    // The endpoint is relative to /api/admin, so we just need /finetuning/start
+    return makeAdminApiRequest('post', '/finetuning/start', payload);
+};
