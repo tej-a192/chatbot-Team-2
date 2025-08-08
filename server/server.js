@@ -17,6 +17,7 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
+const { ipFilterMiddleware } = require("./middleware/ipFilterMiddleware");
 const { connectRedis } = require("./config/redisClient");
 
 // --- Route Imports ---

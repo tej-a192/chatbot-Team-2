@@ -17,7 +17,8 @@ import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
+import threading
+import fine_tuner
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
@@ -808,7 +809,42 @@ def generate_document_from_topic_route():
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
+@app.route('/finetune', methods=['POST'])
+def finetune_route():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+    
+    dataset_path = data.get('dataset_path')
+    model_name_to_update = data.get('model_name_to_update')
+    job_id = data.get('jobId') # <-- GET THE JOB ID FROM NODE.JS
 
+    if not all([dataset_path, model_name_to_update, job_id]):
+        return create_error_response("Missing 'dataset_path', 'model_name_to_update', or 'jobId'", 400)
+
+    logger.info(f"Received fine-tuning request. Job ID: {job_id}. Model to update: {model_name_to_update}.")
+
+    # Define the target function for the background thread
+    def fine_tuning_task():
+        try:
+            # Pass all three required arguments to the runner
+            fine_tuner.run_fine_tuning(dataset_path, model_name_to_update, job_id)
+        except Exception as e:
+            logger.error(f"Background fine-tuning job {job_id} failed catastrophically: {e}", exc_info=True)
+            # The error is already reported back to Node.js inside the runner
+    
+    # Run the fine_tuner.run_fine_tuning function in a separate, non-blocking thread
+    thread = threading.Thread(target=fine_tuning_task)
+    thread.daemon = True # Allows the main app to exit even if threads are running
+    thread.start()
+
+    # Immediately respond to the Node.js service
+    return jsonify({
+        "message": "Fine-tuning job has been successfully queued and is running in the background.",
+        "jobId": job_id,
+        "model_tag": model_name_to_update
+    }), 202 # 202 Accepted indicates the request is accepted but processing is not complete
+# --- END MODIFICATION ---
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])

@@ -367,7 +367,7 @@ const api = {
     const response = await apiClient.post(`/feedback/${logId}`, { feedback });
     return response.data;
   },
-
+  
 };
 
 

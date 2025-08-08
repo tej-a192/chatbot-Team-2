@@ -8,8 +8,7 @@ const LLMConfigurationSchema = new mongoose.Schema({
   description: { type: String, description: "Internal notes on the model's strengths." },
   isDefault: { type: Boolean, default: false, description: "Fallback model if no specific model is chosen." },
   // Strengths for the router to use in its decision-making
-  strengths: [{ type: String, enum: ['reasoning', 'chat', 'code', 'technical', 'creative', 'summarization'] }],
-  // If it's a fine-tuned model, this links it to a subject (FOR FEATURE P2.8)
+  strengths: [{ type: String, enum: ['reasoning', 'chat', 'code', 'technical', 'creative', 'summarization', 'large_context', 'multilingual'] }],  // If it's a fine-tuned model, this links it to a subject (FOR FEATURE P2.8)
   subjectFocus: { type: String, default: null, index: true }, 
 });
 

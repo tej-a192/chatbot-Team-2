@@ -8046,13 +8046,15 @@ export default ApiKeyRequestManager;
 
 ```javascript
 // frontend/src/components/admin/DatasetManager.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as adminApi from '../../services/adminApi.js';
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { UploadCloud, File, Download, Loader2, AlertTriangle } from 'lucide-react';
+import { UploadCloud, File, Download, Loader2, AlertTriangle, Trash2, Database, Tag, GitBranch } from 'lucide-react';
 import Button from '../core/Button.jsx';
+import IconButton from '../core/IconButton.jsx';
 import { format } from 'date-fns';
+import { motion } from 'framer-motion';
 
 // Helper to format file size
 const formatFileSize = (bytes) => {
@@ -8073,6 +8075,9 @@ function DatasetManager() {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [downloadingId, setDownloadingId] = useState(null);
+    const [deletingId, setDeletingId] = useState(null);
+    const [dragActive, setDragActive] = useState(false); // For drag-and-drop UI
+    const fileInputRef = useRef(null);
 
     const fetchDatasets = useCallback(async () => {
         setIsLoading(true);
@@ -8092,10 +8097,31 @@ function DatasetManager() {
         fetchDatasets();
     }, [fetchDatasets]);
 
-    const handleFileChange = (e) => {
+    const handleFileSelect = (files) => {
+        if (isUploading || !files || files.length === 0) return;
+        const file = files[0];
+        // Optional: Add file type/size validation here
+        setSelectedFile(file);
+    };
+    
+    const handleDrag = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (isUploading) return;
-        const file = e.target.files?.[0];
-        if (file) setSelectedFile(file);
+        if (e.type === "dragenter" || e.type === "dragover") {
+            setDragActive(true);
+        } else if (e.type === "dragleave") {
+            setDragActive(false);
+        }
+    };
+    
+    const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(false);
+        if (e.dataTransfer.files) {
+            handleFileSelect(e.dataTransfer.files);
+        }
     };
 
     const handleUpload = async () => {
@@ -8109,11 +8135,9 @@ function DatasetManager() {
         const toastId = toast.loading('Preparing secure upload...');
 
         try {
-            // 1. Get pre-signed URL from our backend
             const { url, key } = await adminApi.getPresignedUploadUrl(selectedFile.name, selectedFile.type);
             toast.loading('Uploading file directly to secure storage...', { id: toastId });
 
-            // 2. Upload the file directly to S3 using the pre-signed URL
             await axios.put(url, selectedFile, {
                 headers: { 'Content-Type': selectedFile.type },
                 onUploadProgress: (progressEvent) => {
@@ -8123,18 +8147,12 @@ function DatasetManager() {
             });
             toast.loading('Finalizing upload...', { id: toastId });
 
-            // 3. Finalize the upload by sending metadata to our backend
             await adminApi.finalizeUpload({
-                originalName: selectedFile.name,
-                s3Key: key,
-                category: category.trim(),
-                version: version.trim(),
-                fileType: selectedFile.type,
-                size: selectedFile.size,
+                originalName: selectedFile.name, s3Key: key, category: category.trim(),
+                version: version.trim(), fileType: selectedFile.type, size: selectedFile.size,
             });
 
             toast.success('Dataset uploaded successfully!', { id: toastId });
-            // Reset form and refresh list
             setSelectedFile(null);
             setCategory('');
             setVersion('');
@@ -8154,7 +8172,6 @@ function DatasetManager() {
         const toastId = toast.loading('Preparing secure download...');
         try {
             const { url } = await adminApi.getPresignedDownloadUrl(datasetId);
-            // The browser will handle the download via this secure, temporary link
             window.location.href = url;
             toast.success('Download will begin shortly!', { id: toastId });
         } catch (err) {
@@ -8165,62 +8182,134 @@ function DatasetManager() {
         }
     };
 
+    const handleDelete = async (dataset) => {
+        if (!window.confirm(`Are you sure you want to permanently delete "${dataset.originalName}" (v${dataset.version})? This action cannot be undone.`)) return;
+        setDeletingId(dataset._id);
+        const toastId = toast.loading(`Deleting '${dataset.originalName}'...`);
+        try {
+            await adminApi.deleteDataset(dataset._id);
+            toast.success(`'${dataset.originalName}' deleted successfully.`, { id: toastId });
+            fetchDatasets();
+        } catch (err) {
+            const errorMsg = err.response?.data?.message || err.message || 'Delete failed.';
+            toast.error(errorMsg, { id: toastId });
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
     return (
         <div className="space-y-6">
-            {/* Upload Form Section */}
+            {/* --- ENHANCED Upload Form Section --- */}
             <div className="card-base p-4">
-                <h3 className="text-lg font-semibold mb-3">Upload New Dataset</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <input type="file" onChange={handleFileChange} className="input-field col-span-3" disabled={isUploading} />
-                    <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category (e.g., Physics)" className="input-field" disabled={isUploading} />
-                    <input type="text" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Version (e.g., 1.0.0)" className="input-field" disabled={isUploading} />
+                <h3 className="text-lg font-semibold mb-4">Upload New Dataset</h3>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1 text-text-muted-light dark:text-text-muted-dark">1. Select File</label>
+                        <label
+                            htmlFor="dataset-upload-input"
+                            onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                            className={`flex flex-col items-center justify-center w-full h-32 px-4 transition-colors duration-200 ease-in-out bg-surface-light dark:bg-gray-800 border-2 border-dashed rounded-lg cursor-pointer border-border-light dark:border-border-dark hover:border-primary dark:hover:border-primary-light ${dragActive ? "border-primary dark:border-primary-light ring-2 ring-primary/20 dark:ring-primary-light/20 bg-primary/5 dark:bg-primary-dark/10" : ""}`}
+                        >
+                            <div className="flex flex-col items-center justify-center text-center">
+                                <UploadCloud size={32} className={`mb-2 transition-colors ${dragActive ? 'text-primary' : 'text-text-muted-light'}`} />
+                                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">
+                                    <span className="font-semibold text-primary dark:text-primary-light">Click to upload</span> or drag and drop
+                                </p>
+                            </div>
+                            <input ref={fileInputRef} id="dataset-upload-input" type="file" className="hidden" onChange={(e) => handleFileSelect(e.target.files)} disabled={isUploading} />
+                        </label>
+                        {selectedFile && !isUploading && (
+                            <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-between text-sm animate-fadeIn">
+                                <div className="flex items-center gap-2 truncate min-w-0">
+                                    <File size={18} className="text-primary flex-shrink-0" />
+                                    <span className="truncate" title={selectedFile.name}>{selectedFile.name}</span>
+                                    <span className="text-text-muted-light dark:text-text-muted-dark text-xs whitespace-nowrap">({formatFileSize(selectedFile.size)})</span>
+                                </div>
+                                <IconButton icon={Trash2} size="sm" variant="danger" onClick={() => setSelectedFile(null)} title="Remove selection" />
+                            </div>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1 text-text-muted-light dark:text-text-muted-dark">2. Add Details</label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="relative">
+                                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted-light" />
+                                <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category (e.g., Physics)" className="input-field !pl-10" disabled={isUploading} />
+                            </div>
+                            <div className="relative">
+                                <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted-light" />
+                                <input type="text" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Version (e.g., 1.0.0)" className="input-field !pl-10" disabled={isUploading} />
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
                 {isUploading && (
-                    <div className="mt-4">
+                     <div className="mt-4">
                         <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
                             <div className="bg-primary h-2.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
                         </div>
-                        <p className="text-center text-sm mt-1">{uploadProgress}%</p>
+                        <p className="text-center text-sm mt-1 text-text-muted-light dark:text-text-muted-dark">Uploading... {uploadProgress}%</p>
                     </div>
                 )}
-                <Button onClick={handleUpload} isLoading={isUploading} disabled={!selectedFile || isUploading} leftIcon={<UploadCloud size={16} />} className="mt-4 w-full md:w-auto">
+                <Button onClick={handleUpload} isLoading={isUploading} disabled={!selectedFile || !category || !version || isUploading} leftIcon={<UploadCloud size={16} />} className="mt-4 w-full md:w-auto">
                     {isUploading ? 'Uploading...' : 'Upload Dataset'}
                 </Button>
             </div>
 
-            {/* Datasets List Section */}
+            {/* --- ENHANCED Datasets List Section --- */}
             <div className="card-base p-0 sm:p-4">
                 <h3 className="text-lg font-semibold mb-3 px-4 pt-4 sm:px-0 sm:pt-0">Managed Datasets</h3>
-                {isLoading && <div className="p-6 text-center"><Loader2 className="animate-spin inline-block" /></div>}
-                {error && <div className="p-4 text-red-500"><AlertTriangle className="inline mr-2" />{error}</div>}
+                {isLoading && <div className="p-6 text-center"><Loader2 className="animate-spin inline-block text-primary" size={28}/></div>}
+                {error && <div className="p-4 text-red-500 bg-red-500/10 rounded-md"><AlertTriangle className="inline mr-2" />{error}</div>}
                 {!isLoading && !error && datasets.length === 0 && (
-                    <p className="py-6 text-center text-text-muted-light dark:text-text-muted-dark">No datasets have been uploaded yet.</p>
+                    <div className="py-10 text-center text-text-muted-light dark:text-text-muted-dark">
+                        <Database size={40} className="mx-auto opacity-50 mb-2" />
+                        <p>No datasets have been uploaded yet.</p>
+                        <p className="text-xs">Use the form above to add your first dataset.</p>
+                    </div>
                 )}
                 {!isLoading && !error && datasets.length > 0 && (
                     <div className="overflow-x-auto custom-scrollbar">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-50 dark:bg-gray-800">
                                 <tr>
-                                    <th className="px-4 py-2.5 font-medium">Filename</th>
-                                    <th className="px-4 py-2.5 font-medium">Category</th>
-                                    <th className="px-4 py-2.5 font-medium">Version</th>
-                                    <th className="px-4 py-2.5 font-medium">Size</th>
-                                    <th className="px-4 py-2.5 font-medium hidden md:table-cell">Uploaded On</th>
-                                    <th className="px-4 py-2.5 font-medium text-center">Actions</th>
+                                    <th className="px-4 py-2.5 font-semibold">Filename</th>
+                                    <th className="px-4 py-2.5 font-semibold">Category</th>
+                                    <th className="px-4 py-2.5 font-semibold">Version</th>
+                                    <th className="px-4 py-2.5 font-semibold">Size</th>
+                                    <th className="px-4 py-2.5 font-semibold hidden md:table-cell">Uploaded On</th>
+                                    <th className="px-4 py-2.5 font-semibold text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {datasets.map((ds) => (
-                                    <tr key={ds._id} className="border-b border-border-light dark:border-border-dark">
-                                        <td className="px-4 py-2 truncate max-w-xs" title={ds.originalName}><File size={14} className="inline mr-2" />{ds.originalName}</td>
-                                        <td className="px-4 py-2">{ds.category}</td>
-                                        <td className="px-4 py-2 font-mono">{ds.version}</td>
-                                        <td className="px-4 py-2">{formatFileSize(ds.size)}</td>
-                                        <td className="px-4 py-2 hidden md:table-cell">{format(new Date(ds.uploadDate), 'MMM d, yyyy HH:mm')}</td>
-                                        <td className="px-4 py-2 text-center">
-                                            <Button size="sm" variant="outline" onClick={() => handleDownload(ds._id)} isLoading={downloadingId === ds._id} leftIcon={<Download size={14} />}>
-                                                Download
-                                            </Button>
+                                    <tr key={ds._id} className="border-b border-border-light dark:border-border-dark hover:bg-gray-50/50 dark:hover:bg-gray-700/30">
+                                        <td className="px-4 py-3 truncate max-w-xs font-medium" title={ds.originalName}>
+                                            <File size={14} className="inline mr-2 text-primary" />
+                                            {ds.originalName}
+                                        </td>
+                                        <td className="px-4 py-3">{ds.category}</td>
+                                        <td className="px-4 py-3 font-mono text-xs bg-gray-100 dark:bg-gray-700 rounded-full w-fit">{ds.version}</td>
+                                        <td className="px-4 py-3">{formatFileSize(ds.size)}</td>
+                                        <td className="px-4 py-3 hidden md:table-cell">{format(new Date(ds.uploadDate), 'MMM d, yyyy HH:mm')}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <div className="flex justify-center items-center gap-1">
+                                                <Button size="sm" variant="outline" onClick={() => handleDownload(ds._id)} isLoading={downloadingId === ds._id} disabled={!!deletingId} leftIcon={<Download size={14} />}>
+                                                    Download
+                                                </Button>
+                                                <IconButton
+                                                    icon={Trash2}
+                                                    variant="danger"
+                                                    size="sm"
+                                                    onClick={() => handleDelete(ds)}
+                                                    isLoading={deletingId === ds._id}
+                                                    disabled={!!downloadingId}
+                                                    title="Delete Dataset"
+                                                />
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -8390,13 +8479,23 @@ export default LLMConfigManager;
 ```javascript
 // frontend/src/components/admin/ModelFeedbackStats.jsx
 import React, { useState, useEffect, useCallback } from 'react';
+// --- START MODIFICATION: Import startFineTuningJob ---
 import * as adminApi from '../../services/adminApi.js';
+// --- END MODIFICATION ---
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2, AlertTriangle, Wrench } from 'lucide-react';
 import Button from '../core/Button.jsx';
+// --- START MODIFICATION: Import toast ---
+import toast from 'react-hot-toast';
+// --- END MODIFICATION ---
+
 
 const ModelFeedbackStats = () => {
     const [stats, setStats] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    // --- START MODIFICATION: Add fine-tuning loading state ---
+    const [isFineTuning, setIsFineTuning] = useState(false);
+    // --- END MODIFICATION ---
+
 
     const fetchStats = useCallback(async () => {
         setIsLoading(true);
@@ -8413,6 +8512,27 @@ const ModelFeedbackStats = () => {
     useEffect(() => {
         fetchStats();
     }, [fetchStats]);
+
+    // --- START MODIFICATION: Add handler for fine-tuning ---
+    const handleStartFineTuning = async (modelId) => {
+        if (!window.confirm(`Are you sure you want to start a fine-tuning job for the model tagged as '${modelId}'? This will use all positive feedback data.`)) {
+            return;
+        }
+        setIsFineTuning(true);
+        const toastId = toast.loading(`Starting fine-tuning job for ${modelId}...`);
+        try {
+            const response = await adminApi.startFineTuningJob({
+                modelIdToUpdate: 'ollama/ai-tutor-custom:latest' // Hardcoded as per the requirement
+            });
+            toast.success(response.message || 'Fine-tuning job successfully started.', { id: toastId, duration: 5000 });
+        } catch (error) {
+            toast.error(error.message || 'Failed to start fine-tuning job.', { id: toastId });
+        } finally {
+            setIsFineTuning(false);
+        }
+    };
+    // --- END MODIFICATION ---
+
 
     if (isLoading) return <div className="card-base p-4 text-center"><Loader2 className="animate-spin inline-block text-primary" /></div>;
 
@@ -8432,9 +8552,20 @@ const ModelFeedbackStats = () => {
                                 <div title="Negative Feedback"><ThumbsDown className="text-red-500 mx-auto" /><span className="font-bold text-lg">{model.feedback.negative}</span></div>
                                 <div title="No Feedback"><HelpCircle className="text-gray-400 mx-auto" /><span className="font-bold text-lg">{model.feedback.none}</span></div>
                             </div>
-                            <Button size="sm" fullWidth variant="outline" leftIcon={<Wrench size={14}/>} onClick={() => alert('The fine-tuning pipeline (Feature P2.8) is the next step!')}>
+                            {/* --- START MODIFICATION: Update Button functionality --- */}
+                            <Button 
+                                size="sm" 
+                                fullWidth 
+                                variant="outline" 
+                                leftIcon={<Wrench size={14}/>} 
+                                onClick={() => handleStartFineTuning(model.modelId)}
+                                isLoading={isFineTuning}
+                                disabled={isFineTuning || model.feedback.positive < 10} // Example: disable if less than 10 positive feedbacks
+                                title={model.feedback.positive < 10 ? "Need at least 10 positive feedbacks to start a job." : "Start fine-tuning job"}
+                            >
                                 Fine-Tune
                             </Button>
+                            {/* --- END MODIFICATION --- */}
                         </div>
                     ))}
                 </div>
@@ -17984,6 +18115,15 @@ export const getPresignedUploadUrl = (fileName, fileType) => makeAdminApiRequest
 export const finalizeUpload = (datasetMetadata) => makeAdminApiRequest('post', '/datasets/finalize-upload', datasetMetadata);
 
 export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get', `/datasets/${datasetId}/download-url`);
+
+export const deleteDataset = (datasetId) => makeAdminApiRequest('delete', `/datasets/${datasetId}`);
+
+export const startFineTuningJob = (payload) => {
+    // This function is now using the robust makeAdminApiRequest helper.
+    // The endpoint is relative to /api/admin, so we just need /finetuning/start
+    return makeAdminApiRequest('post', '/finetuning/start', payload);
+};
+    
 ```
 
 `frontend/src/services/api.js`
@@ -18358,7 +18498,7 @@ const api = {
     const response = await apiClient.post(`/feedback/${logId}`, { feedback });
     return response.data;
   },
-
+  
 };
 
 
@@ -18632,9 +18772,9 @@ TURNITIN_API_SECRET="your_api_secret"
 
 
 # Add these new variables to your server/.env file
-S3_BUCKET_NAME="your-unique-bucket-name"
-AWS_ACCESS_KEY_ID="YOUR_IAM_USER_ACCESS_KEY_ID"
-AWS_SECRET_ACCESS_KEY="YOUR_IAM_USER_SECRET_ACCESS_KEY"
+S3_BUCKET_NAME="ai-tutor-datasets-rohith"
+AWS_ACCESS_KEY_ID="AKIASU566RVJCWP6Q6XZ"
+AWS_SECRET_ACCESS_KEY="c7NkRqb5KaTpg5ALcY8NtGMsQqt5PI6VkXWfXlXE"
 AWS_REGION="us-east-1" # Or your chosen region
 ```
 
@@ -20741,6 +20881,32 @@ const fixedAdminAuthMiddleware = (req, res, next) => {
 module.exports = { fixedAdminAuthMiddleware };
 ```
 
+`server/middleware/ipFilterMiddleware.js`
+
+```javascript
+const ADMIN_IP_WHITELIST = (process.env.ADMIN_IP_WHITELIST || '127.0.0.1,::1').split(',');
+
+const ipFilterMiddleware = (req, res, next) => {
+    // 'ip' is the most direct, but 'x-forwarded-for' is needed if behind a proxy like Nginx or a load balancer.
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    // Normalize IPv6 localhost addresses
+    const normalizedClientIp = clientIp === '::ffff:127.0.0.1' ? '127.0.0.1' : clientIp;
+
+    if (ADMIN_IP_WHITELIST.includes(normalizedClientIp)) {
+        // IP is in the whitelist, proceed to the next middleware (which is the admin auth)
+        return next();
+    }
+
+    // IP is not in the whitelist, log the attempt and deny access
+    console.warn(`[Security] Denied access to admin route for untrusted IP: ${clientIp}`);
+    return res.status(403).json({ message: 'Forbidden: Access from your IP address is not permitted.' });
+};
+
+module.exports = { ipFilterMiddleware };
+
+```
+
 `server/models/AdminDocument.js`
 
 ```javascript
@@ -20910,6 +21076,27 @@ const Dataset = mongoose.model('Dataset', DatasetSchema);
 module.exports = Dataset;
 ```
 
+`server/models/FineTuningEvent.js`
+
+```javascript
+// server/models/FineTuningEvent.js
+const mongoose = require('mongoose');
+
+const FineTuningEventSchema = new mongoose.Schema({
+  jobId: { type: String, required: true, unique: true },
+  status: { type: String, enum: ['started', 'completed', 'failed'], default: 'started' },
+  modelTagUpdated: { type: String, required: true },
+  datasetPath: { type: String, required: true },
+  datasetSize: { type: Number, required: true },
+  triggeredBy: { type: String, default: 'admin' }, // Could be extended for different users
+  errorMessage: { type: String }, // To store error details on failure
+  startedAt: { type: Date, default: Date.now },
+  completedAt: { type: Date },
+});
+
+module.exports = mongoose.model('FineTuningEvent', FineTuningEventSchema);
+```
+
 `server/models/KnowledgeSource.js`
 
 ```javascript
@@ -21055,8 +21242,7 @@ const LLMConfigurationSchema = new mongoose.Schema({
   description: { type: String, description: "Internal notes on the model's strengths." },
   isDefault: { type: Boolean, default: false, description: "Fallback model if no specific model is chosen." },
   // Strengths for the router to use in its decision-making
-  strengths: [{ type: String, enum: ['reasoning', 'chat', 'code', 'technical', 'creative', 'summarization'] }],
-  // If it's a fine-tuned model, this links it to a subject (FOR FEATURE P2.8)
+  strengths: [{ type: String, enum: ['reasoning', 'chat', 'code', 'technical', 'creative', 'summarization', 'large_context', 'multilingual'] }],  // If it's a fine-tuned model, this links it to a subject (FOR FEATURE P2.8)
   subjectFocus: { type: String, default: null, index: true }, 
 });
 
@@ -21073,10 +21259,11 @@ const LLMPerformanceLogSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   sessionId: { type: String, required: true, index: true },
   query: { type: String, required: true },
+  response: { type: String, required: true }, // <<< ADD THIS LINE
   chosenModelId: { type: String, required: true },
-  routerLogic: { type: String }, // e.g., 'subject_match', 'heuristic', 'default'
+  routerLogic: { type: String },
   responseTimeMs: { type: Number },
-  userFeedback: { type: String, enum: ['positive', 'negative', 'none'], default: 'none' }, // For future UI feedback buttons
+  userFeedback: { type: String, enum: ['positive', 'negative', 'none'], default: 'none' },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -22282,7 +22469,8 @@ import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
-
+import threading
+import fine_tuner
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
@@ -23073,7 +23261,42 @@ def generate_document_from_topic_route():
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
+@app.route('/finetune', methods=['POST'])
+def finetune_route():
+    data = request.get_json()
+    if not data:
+        return create_error_response("Request must be JSON", 400)
+    
+    dataset_path = data.get('dataset_path')
+    model_name_to_update = data.get('model_name_to_update')
+    job_id = data.get('jobId') # <-- GET THE JOB ID FROM NODE.JS
 
+    if not all([dataset_path, model_name_to_update, job_id]):
+        return create_error_response("Missing 'dataset_path', 'model_name_to_update', or 'jobId'", 400)
+
+    logger.info(f"Received fine-tuning request. Job ID: {job_id}. Model to update: {model_name_to_update}.")
+
+    # Define the target function for the background thread
+    def fine_tuning_task():
+        try:
+            # Pass all three required arguments to the runner
+            fine_tuner.run_fine_tuning(dataset_path, model_name_to_update, job_id)
+        except Exception as e:
+            logger.error(f"Background fine-tuning job {job_id} failed catastrophically: {e}", exc_info=True)
+            # The error is already reported back to Node.js inside the runner
+    
+    # Run the fine_tuner.run_fine_tuning function in a separate, non-blocking thread
+    thread = threading.Thread(target=fine_tuning_task)
+    thread.daemon = True # Allows the main app to exit even if threads are running
+    thread.start()
+
+    # Immediately respond to the Node.js service
+    return jsonify({
+        "message": "Fine-tuning job has been successfully queued and is running in the background.",
+        "jobId": job_id,
+        "model_tag": model_name_to_update
+    }), 202 # 202 Accepted indicates the request is accepted but processing is not complete
+# --- END MODIFICATION ---
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -24453,6 +24676,171 @@ def chunk_text(text, file_name, user_id):
         logger.error(f"Error during text splitting for file {file_name}: {e}", exc_info=True)
         return [] # Return empty list on error
 
+```
+
+`server/rag_service/fine_tuner.py`
+
+```python
+# server/rag_service/fine_tuner.py
+import os
+import torch
+import subprocess
+import logging
+import tempfile
+import shutil
+from datetime import datetime
+import requests
+from unsloth import FastLanguageModel
+from transformers import TrainingArguments
+from trl import SFTTrainer
+from datasets import load_dataset
+
+logger = logging.getLogger(__name__)
+
+# --- Configuration ---
+# We always start from a fresh, known-good base model for each fine-tuning run.
+BASE_MODEL = "unsloth/llama-3-8b-Instruct-bnb-4bit" 
+# This is the temporary directory where the trained model will be saved before being imported into Ollama.
+TEMP_MODEL_DIR = "/tmp/ai-tutor-model"
+
+def format_prompts(examples):
+    """
+    Formats the dataset examples into the Llama-3 instruction chat template.
+    This is crucial for the model to understand the data correctly.
+    """
+    instructions = examples["instruction"]
+    outputs = examples["output"]
+    texts = []
+    for instruction, output in zip(instructions, outputs):
+        # This structure is the specific chat template for Llama 3 Instruct models
+        text = f"""<|start_header_id|>user<|end_header_id|>
+
+{instruction}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+{output}<|eot_id|>"""
+        texts.append(text)
+    return {"text": texts}
+
+def report_status_to_nodejs(job_id, status, error_message=None):
+    """Sends the final status of the job back to the Node.js backend."""
+    node_server_url = os.getenv("NODE_SERVER_URL_FOR_CALLBACK", "http://localhost:5001")
+    update_url = f"{node_server_url}/api/admin/finetuning/update-status"
+    
+    payload = {
+        "jobId": job_id,
+        "status": status,
+        "errorMessage": error_message
+    }
+    
+    try:
+        # This is a fire-and-forget request. We don't wait for the response.
+        requests.post(update_url, json=payload, timeout=5)
+        logger.info(f"Reported status '{status}' for job '{job_id}' to Node.js.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"CRITICAL: Failed to report status for job '{job_id}' back to Node.js. Error: {e}")
+
+def run_fine_tuning(dataset_path: str, model_tag_to_update: str, job_id: str):
+    """
+    The main function that orchestrates the entire fine-tuning process.
+    """
+    logger.info(f"--- Starting Fine-Tuning Job {job_id} for model tag: {model_tag_to_update} ---")
+    logger.info(f"Dataset path: {dataset_path}")
+
+    try:
+        # 1. Load the dataset from the path provided by the Node.js orchestrator
+        logger.info(f"Step 1/7: Loading dataset for job {job_id}...")
+        dataset = load_dataset("json", data_files={"train": dataset_path}, split="train")
+
+        # 2. Load the base model and tokenizer using unsloth for high efficiency
+        logger.info(f"Step 2/7: Loading base model '{BASE_MODEL}'...")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=BASE_MODEL,
+            max_seq_length=2048,
+            dtype=None,
+            load_in_4bit=True,
+        )
+
+        # 3. Apply PEFT (LoRA) adapters to the model
+        logger.info(f"Step 3/7: Applying PEFT (LoRA) adapters...")
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=16,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_alpha=16,
+            lora_dropout=0,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            random_state=42,
+            max_seq_length=2048,
+        )
+
+        # 4. Format the dataset using the Llama 3 chat template
+        logger.info("Step 4/7: Formatting dataset...")
+        formatted_dataset = dataset.map(format_prompts, batched=True)
+
+        # 5. Set up and run the training process
+        logger.info("Step 5/7: Configuring and starting the SFT trainer...")
+        trainer = SFTTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            train_dataset=formatted_dataset,
+            dataset_text_field="text",
+            max_seq_length=2048,
+            args=TrainingArguments(
+                per_device_train_batch_size=2,
+                gradient_accumulation_steps=4,
+                warmup_steps=10,
+                num_train_epochs=3,
+                learning_rate=2e-5,
+                fp16=not torch.cuda.is_bf16_supported(),
+                bf16=torch.cuda.is_bf16_supported(),
+                logging_steps=1,
+                optim="adamw_8bit",
+                weight_decay=0.01,
+                lr_scheduler_type="linear",
+                seed=42,
+                output_dir="outputs",
+            ),
+        )
+        trainer.train()
+        logger.info("Training complete.")
+
+        # 6. Save the fine-tuned model to a temporary GGUF file for Ollama
+        logger.info(f"Step 6/7: Saving fine-tuned model to temporary directory: {TEMP_MODEL_DIR}")
+        if os.path.exists(TEMP_MODEL_DIR):
+            shutil.rmtree(TEMP_MODEL_DIR)
+        os.makedirs(TEMP_MODEL_DIR)
+        
+        model.save_pretrained_gguf(TEMP_MODEL_DIR, tokenizer, quantization_method="q4_k_m")
+        
+        # 7. Create a Modelfile and use the `ollama create` command to update the model tag
+        logger.info(f"Step 7/7: Creating Modelfile and updating Ollama model tag '{model_tag_to_update}'...")
+        modelfile_content = f"FROM ./ggml-model-q4_k_m.gguf"
+        modelfile_path = os.path.join(TEMP_MODEL_DIR, "Modelfile")
+        with open(modelfile_path, 'w') as f:
+            f.write(modelfile_content)
+            
+        ollama_command = ["ollama", "create", model_tag_to_update, "-f", modelfile_path]
+        
+        process = subprocess.run(ollama_command, capture_output=True, text=True)
+        
+        if process.returncode != 0:
+            logger.error(f"Ollama create command failed! Stderr: {process.stderr}")
+            raise RuntimeError(f"Ollama create failed: {process.stderr}")
+
+        logger.info(f"Ollama create command successful. Model tag '{model_tag_to_update}' has been updated.")
+        
+        report_status_to_nodejs(job_id, "completed")
+        
+    except Exception as e:
+        logger.error(f"An error occurred during the fine-tuning process for job {job_id}: {e}", exc_info=True)
+        report_status_to_nodejs(job_id, "failed", str(e))
+        raise
+    finally:
+        logger.info(f"Cleaning up temporary model files for job {job_id}.")
+        if os.path.exists(TEMP_MODEL_DIR):
+            shutil.rmtree(TEMP_MODEL_DIR)
+        logger.info(f"--- Fine-Tuning Job {job_id} Finished ---")
 ```
 
 `server/rag_service/integrity_services.py`
@@ -27033,16 +27421,23 @@ router.post('/message', async (req, res) => {
 
             agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
             
-            // 1. Create Log Entry
+            // 1. Create Log Entry AFTER getting the final answer
             const logEntry = new LLMPerformanceLog({
-                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
-                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
             });
             await logEntry.save();
+            // --- END MODIFICATION (Streaming Path) ---
 
             // 2. Inject logId into the response object
             agentResponse.logId = logEntry._id;
             
+            // ... (rest of the streaming logic remains the same)
             // 3. Prepare message for DB and save it ONCE.
             const aiMessageForDb = { 
                 ...agentResponse, 
@@ -27070,16 +27465,24 @@ router.post('/message', async (req, res) => {
 
         } else {
             // --- Logic for STANDARD JSON response ---
+            const startTime = Date.now(); // Moved start time here
             agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
             const endTime = Date.now();
             
-            // 1. Create the Performance Log Entry to get its ID
+            // --- START MODIFICATION (Non-Streaming Path) ---
+            // 1. Create the Performance Log Entry with the response
             const logEntry = new LLMPerformanceLog({
-                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
-                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
             });
             await logEntry.save();
             console.log(`[PerformanceLog] Logged decision for session ${sessionId} with logId: ${logEntry._id}.`);
+            // --- END MODIFICATION (Non-Streaming Path) ---
             
             // 2. Build the FINAL AI message object for both DB and Client
             const finalAiMessage = {
@@ -27136,213 +27539,6 @@ router.post('/message', async (req, res) => {
     }
 });
 
-
-/*
-router.post('/message', async (req, res) => {
-    const {
-        query, sessionId, useWebSearch, useAcademicSearch,
-        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
-        documentContextName, filter
-    } = req.body;
-    
-    const userId = req.user._id;
-
-    if (!query || typeof query !== 'string' || query.trim() === '') {
-        return res.status(400).json({ message: 'Query message text required.' });
-    }
-    if (!sessionId || typeof sessionId !== 'string') {
-        return res.status(400).json({ message: 'Session ID required.' });
-    }
-
-    const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
-    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, CriticalThinking=${criticalThinkingEnabled}, Query: "${query.substring(0, 50)}..."`);
-
-    try {
-        const [chatSession, user] = await Promise.all([
-            ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
-            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
-        ]);
-
-        const historyFromDb = chatSession ? chatSession.messages : [];
-        const chatContext = { 
-            userId, 
-            subject: documentContextName, // The subject selected in the UI
-            chatHistory: historyFromDb 
-        };
-        const chosenLLM = await selectLLM(query.trim(), chatContext);
-
-        const llmConfig = {
-            llmProvider: chosenLLM.provider,
-            ollamaModel: chosenLLM.provider === 'ollama' ? chosenLLM.modelId.split('/')[1] : null,
-            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
-            ollamaUrl: user?.ollamaUrl
-        };
-
-        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        const historyForLlm = [];
-
-        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            historyForLlm.push({ 
-                role: 'user', 
-                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
-            });
-            historyForLlm.push({ 
-                role: 'model', 
-                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
-            });
-        }
-        
-        const formattedDbMessages = historyFromDb.map(msg => ({
-            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
-        }));
-        historyForLlm.push(...formattedDbMessages);
-        
-        const requestContext = {
-            documentContextName, criticalThinkingEnabled, filter,
-            userId: userId.toString(), 
-            systemPrompt: clientProvidedSystemInstruction,
-            isWebSearchEnabled: !!useWebSearch, 
-            isAcademicSearchEnabled: !!useAcademicSearch,
-            ...llmConfig
-        };
-
-        if (criticalThinkingEnabled) {
-            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
-            
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.flushHeaders();
-
-            const accumulatedThoughts = [];
-
-            const interceptingStreamCallback = (eventData) => {
-                if (eventData.type === 'thought' || eventData.type === 'error') {
-                    if (eventData.type === 'thought') {
-                        accumulatedThoughts.push(eventData.content);
-                    }
-                    streamEvent(res, eventData);
-                }
-            };
-            const startTime = Date.now();
-
-            const totResult = await processQueryWithToT_Streaming(
-                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
-            );
-
-            const endTime = Date.now();
-
-            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
-
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: totResult.finalAnswer }],
-                text: totResult.finalAnswer,
-                timestamp: new Date(),
-                thinking: accumulatedThoughts.join(''),
-                references: totResult.references || [],
-                source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-
-            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
-            
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues;
-
-            await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
-            );
-
-            if (totResult.finalAnswer) {
-                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
-            }
-            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
-            res.end();
-        } else {
-            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
-
-            const agentResponse = await processAgenticRequest(
-                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
-            );
-
-            // --- THIS IS THE FIX ---
-            // Prepare the full response object, including any potential action
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }],
-                text: agentResponse.finalAnswer,
-                timestamp: new Date(),
-                thinking: agentResponse.thinking || null,
-                references: agentResponse.references || [],
-                source_pipeline: agentResponse.sourcePipeline,
-                action: agentResponse.action || null // Include the action
-            };
-
-            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
-            if (aiMessageForClient.action) {
-                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
-                
-                // Save both user message and the AI's action message to the database
-                await ChatHistory.findOneAndUpdate(
-                    { sessionId: sessionId, userId: userId },
-                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
-                    { upsert: true, new: true }
-                );
-                
-                // Return the response with the action, stopping execution here.
-                return res.status(200).json({ reply: aiMessageForClient });
-            }
-            // --- END OF FIX ---
-
-            // If there was NO action, proceed with the normal flow
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
-
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues;
-
-            await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
-            );
-
-            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForClient });
-            
-            const logEntry = new LLMPerformanceLog({
-                userId,
-                sessionId,
-                query: query.trim(),
-                chosenModelId: chosenLLM.modelId, // Assuming chosenLLM is in scope
-                routerLogic: 'heuristic_code_detection', // This would be passed back from the router service
-                responseTimeMs: endTime - startTime,
-            });
-            await logEntry.save();
-            console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
-
-            if (agentResponse.finalAnswer) {
-                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
-            }
-
-        }
-
-    } catch (error) {
-        console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
-        const clientMessage = error.message || "Failed to get response from AI service.";
-        
-        if (res.headersSent && !res.writableEnded) {
-            streamEvent(res, { type: 'error', content: clientMessage });
-            res.end();
-        } else if (!res.headersSent) {
-            res.status(error.status || 500).json({ message: clientMessage });
-        }
-    }
-});
-*/
 
 router.post('/history', async (req, res) => {
     const { previousSessionId, skipAnalysis } = req.body;
@@ -27539,7 +27735,7 @@ module.exports = router;
 const express = require('express');
 const router = express.Router();
 const Dataset = require('./../models/Dataset');
-const { getSignedUploadUrl, getSignedDownloadUrl } = require('./../services/s3Service');
+const { getSignedUploadUrl, getSignedDownloadUrl, deleteObjectFromS3 } = require('./../services/s3Service');
 
 // @route   POST /api/admin/datasets/presigned-url
 // @desc    Get a secure, pre-signed URL for uploading a dataset to S3
@@ -27607,6 +27803,37 @@ router.get('/:id/download-url', async (req, res) => {
     } catch (error) {
         console.error('Error generating pre-signed download URL:', error);
         res.status(500).json({ message: 'Could not generate download URL.' });
+    }
+});
+
+// <<< THIS IS THE MODIFIED ROUTE >>>
+// @route   DELETE /api/admin/datasets/:id
+// @desc    Delete a dataset from S3 and MongoDB
+// @access  Admin
+router.delete('/:id', async (req, res) => {
+    try {
+        // 1. Find the dataset metadata in MongoDB
+        const dataset = await Dataset.findById(req.params.id);
+        if (!dataset) {
+            return res.status(404).json({ message: 'Dataset not found.' });
+        }
+
+        // 2. *** NEW VALIDATION STEP ***
+        // Check if there is an S3 key before attempting to delete from S3.
+        if (dataset.s3Key) {
+            console.log(`[Delete Dataset] Deleting object from S3 with key: ${dataset.s3Key}`);
+            await deleteObjectFromS3(dataset.s3Key);
+        } else {
+            console.warn(`[Delete Dataset] s3Key not found for dataset ID ${dataset._id}. Skipping S3 deletion. This is a data cleanup operation.`);
+        }
+
+        // 3. If S3 deletion was successful (or skipped), delete the metadata from MongoDB
+        await Dataset.findByIdAndDelete(req.params.id);
+
+        res.json({ message: `Dataset '${dataset.originalName}' and its metadata were deleted successfully.` });
+    } catch (error) {
+        console.error('Error deleting dataset:', error);
+        res.status(500).json({ message: 'Server error while deleting dataset.' });
     }
 });
 
@@ -28053,6 +28280,93 @@ module.exports = router;
 
 // module.exports = router;
 
+```
+
+`server/routes/finetuning.js`
+
+```javascript
+// server/routes/finetuning.js
+const express = require('express');
+const router = express.Router();
+const fs = require('fs').promises;
+const path = require('path');
+const axios = require('axios');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog');
+
+// Define the shared directory path. Ensure this is accessible by both Node.js and Python containers.
+const SHARED_DATA_DIR = process.env.SHARED_FINETUNING_DATA_DIR || '/srv/finetuning_data';
+
+// @route   POST /api/admin/finetuning/start
+// @desc    Initiates a model fine-tuning job
+// @access  Admin
+router.post('/start', async (req, res) => {
+    const { modelIdToUpdate } = req.body;
+    if (!modelIdToUpdate) {
+        return res.status(400).json({ message: 'modelIdToUpdate is required.' });
+    }
+
+    console.log(`[Finetune Orchestrator] Received request to start job for model: ${modelIdToUpdate}`);
+
+    try {
+        // Step 1: Collect all positive feedback logs
+        console.log('[Finetune Orchestrator] Step 1: Fetching positive feedback data from MongoDB...');
+        const positiveFeedbackLogs = await LLMPerformanceLog.find({ userFeedback: 'positive' })
+            .select('query response -_id') // Select only the query and response, exclude the _id
+            .lean(); // Use .lean() for performance with large datasets
+
+        if (positiveFeedbackLogs.length < 10) { // Safety check
+            return res.status(400).json({ message: `Insufficient data for fine-tuning. Need at least 10 positive feedback entries, found ${positiveFeedbackLogs.length}.` });
+        }
+        console.log(`[Finetune Orchestrator] Found ${positiveFeedbackLogs.length} positive feedback entries.`);
+        
+        // Step 2: Format the dataset
+        const dataset = positiveFeedbackLogs.map(log => ({
+            instruction: log.query,
+            output: log.response
+        }));
+        
+        // Step 3: Save the dataset to the shared folder
+        await fs.mkdir(SHARED_DATA_DIR, { recursive: true });
+        const datasetFilename = `finetuning-dataset-${Date.now()}.json`;
+        const datasetPath = path.join(SHARED_DATA_DIR, datasetFilename);
+
+        console.log(`[Finetune Orchestrator] Step 2: Writing formatted dataset to ${datasetPath}`);
+        await fs.writeFile(datasetPath, JSON.stringify(dataset, null, 2));
+
+        // Step 4: Proxy the request to the Python backend
+        const pythonServiceUrl = process.env.PYTHON_RAG_SERVICE_URL;
+        if (!pythonServiceUrl) {
+            throw new Error("Python fine-tuning service URL is not configured.");
+        }
+        const pythonEndpoint = `${pythonServiceUrl}/finetune`;
+
+        const pythonPayload = {
+            dataset_path: datasetPath, // Pass the full path within the shared volume
+            model_name_to_update: modelIdToUpdate.replace('ollama/', '') // Python service might not need the 'ollama/' prefix
+        };
+
+        console.log(`[Finetune Orchestrator] Step 3: Proxying request to Python service at ${pythonEndpoint} with payload:`, pythonPayload);
+        
+        // We use a non-blocking call here. The Python service will run in the background.
+        axios.post(pythonEndpoint, pythonPayload, { timeout: 5000 })
+            .catch(err => {
+                // We log the error but don't fail the user-facing request, as the job is meant to be async.
+                console.error(`[Finetune Orchestrator] Error sending async request to Python fine-tuning service: ${err.message}`);
+            });
+
+        // Step 5: Respond to the admin immediately
+        res.status(202).json({ 
+            message: `Fine-tuning job accepted. The model '${modelIdToUpdate}' will be updated in the background.`,
+            datasetSize: dataset.length
+        });
+
+    } catch (error) {
+        console.error(`[Finetune Orchestrator] An error occurred: ${error.message}`);
+        res.status(500).json({ message: 'Server error during fine-tuning orchestration.' });
+    }
+});
+
+module.exports = router;
 ```
 
 `server/routes/generationController.js`
@@ -29713,6 +30027,144 @@ router.put('/profile', async (req, res) => {
 module.exports = router;
 ```
 
+`server/scripts/seedLLMs.js`
+
+```javascript
+// server/scripts/seedLLMs.js
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const path = require('path');
+
+// Load environment variables from the root of the 'server' directory
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+
+// Import the Mongoose model
+const LLMConfiguration = require('../models/LLMConfiguration');
+
+// --- The Seed Data ---
+const llmSeedData = [
+  // 1. Default & General Purpose
+  {
+    modelId: "gemini-1.5-flash-latest",
+    provider: "gemini",
+    displayName: "Gemini 1.5 Flash (Default)",
+    description: "Fast and capable model for general chat, reasoning, and summarization. The best choice for most standard queries.",
+    isDefault: true,
+    strengths: ["chat", "reasoning", "summarization"],
+    subjectFocus: null
+  },
+  // 2. High-Performance Reasoning & Large Context
+  {
+    modelId: "gemini-1.5-pro-latest",
+    provider: "gemini",
+    displayName: "Gemini 1.5 Pro (Deep Reasoning)",
+    description: "A powerful, large-context model (1M tokens) for complex, multi-faceted reasoning and in-depth analysis of large documents.",
+    isDefault: false,
+    strengths: ["reasoning", "creative", "large_context"],
+    subjectFocus: null
+  },
+  // 3. Specialized for Code Generation
+  {
+    modelId: "codellama:13b-instruct",
+    provider: "ollama",
+    displayName: "Ollama Code Llama 13B",
+    description: "A highly specialized open-source model that excels at code generation, debugging, and following technical instructions.",
+    isDefault: false,
+    strengths: ["code"],
+    subjectFocus: null
+  },
+  // 4. Specialized for Technical & Mathematical Tasks
+  {
+    modelId: "deepseek-coder:33b-instruct",
+    provider: "ollama",
+    displayName: "Ollama DeepSeek Coder 33B",
+    description: "A top-tier open-source model renowned for its exceptional performance in coding, mathematics, and complex technical reasoning.",
+    isDefault: false,
+    strengths: ["technical", "code", "reasoning"],
+    subjectFocus: null
+  },
+  // 5. Strong Open-Source All-Rounder
+  {
+    modelId: "llama3:8b-instruct",
+    provider: "ollama",
+    displayName: "Ollama Llama 3 8B",
+    description: "An extremely capable and well-rounded open-source model. Excellent for general chat, creative writing, and instruction following.",
+    isDefault: false,
+    strengths: ["chat", "creative"],
+    subjectFocus: null
+  },
+  // 6. Multilingual Specialist
+  {
+    modelId: "mistral:7b-instruct",
+    provider: "ollama",
+    displayName: "Ollama Mistral 7B",
+    description: "A fast and efficient model known for its strong performance across multiple languages, making it ideal for translation or non-English queries.",
+    isDefault: false,
+    strengths: ["multilingual"],
+    subjectFocus: null
+  },
+  // 7. Placeholder for your first fine-tuned model (for P2.8)
+  {
+    modelId: "fine-tuned/physics-v1-on-qwen2",
+    provider: "fine-tuned",
+    displayName: "Physics Expert (Qwen 2.5 Base)",
+    description: "A model fine-tuned specifically on advanced physics textbooks and research papers.",
+    isDefault: false,
+    strengths: ["technical", "reasoning"],
+    subjectFocus: "Physics"
+  }
+];
+
+/**
+ * Main seeder function
+ */
+const seedLLMConfigurations = async () => {
+  if (!process.env.MONGO_URI) {
+    console.error('MONGO_URI not found in .env file. Aborting.');
+    process.exit(1);
+  }
+
+  try {
+    console.log('Attempting to connect to MongoDB...');
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB connected successfully.');
+
+    // Find which models already exist in the database
+    const existingConfigs = await LLMConfiguration.find().select('modelId').lean();
+    const existingModelIds = new Set(existingConfigs.map(config => config.modelId));
+
+    // Filter out the models that are already in the database
+    const modelsToInsert = llmSeedData.filter(seed => !existingModelIds.has(seed.modelId));
+
+    if (modelsToInsert.length === 0) {
+      console.log('Database is already up-to-date. No new LLM configurations to add.');
+    } else {
+      console.log(`Found ${modelsToInsert.length} new LLM configurations to add.`);
+      
+      // Insert the new models into the database
+      const inserted = await LLMConfiguration.insertMany(modelsToInsert);
+      console.log('Successfully seeded the following models:');
+      inserted.forEach(doc => console.log(`- ${doc.displayName} (${doc.modelId})`));
+    }
+
+    if (existingModelIds.size > 0) {
+        console.log('\nSkipped the following existing models:');
+        existingConfigs.forEach(doc => console.log(`- ${doc.modelId}`));
+    }
+
+  } catch (error) {
+    console.error('An error occurred during the seeding process:', error);
+    process.exit(1);
+  } finally {
+    // Ensure the database connection is always closed
+    await mongoose.disconnect();
+    console.log('\nMongoDB connection closed. Seeder finished.');
+  }
+};
+
+seedLLMConfigurations();
+```
+
 `server/server.js`
 
 ```javascript
@@ -29735,6 +30187,7 @@ const { authMiddleware } = require("./middleware/authMiddleware");
 const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
+const { ipFilterMiddleware } = require("./middleware/ipFilterMiddleware");
 const { connectRedis } = require("./config/redisClient");
 
 // --- Route Imports ---
@@ -29755,6 +30208,7 @@ const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 const feedbackRoutes = require('./routes/feedback');
+const finetuningRoutes = require('./routes/finetuning');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -29786,6 +30240,7 @@ app.use("/api/auth", authRoutes);
 // Apply the fixed admin auth middleware to the single MASTER admin router.
 // This ensures all routes defined in ./routes/admin/* are protected correctly.
 app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
+app.use('/api/admin/finetuning', fixedAdminAuthMiddleware, finetuningRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -30965,41 +31420,81 @@ module.exports = {
 // server/services/llmRouterService.js
 const LLMConfiguration = require('../models/LLMConfiguration');
 
+/**
+ * Intelligently selects the best LLM for a given query and context.
+ * @param {string} query - The user's query text.
+ * @param {object} context - An object containing context like userId, subject, etc.
+ * @returns {Promise<{chosenModel: object, logic: string}>} An object with the selected model's configuration and the reasoning for the choice.
+ */
 async function selectLLM(query, context) {
-  // Context will contain { userId, subject, chatHistory }
-  console.log(`[LLMRouter] Selecting LLM for query: "${query.substring(0, 50)}..."`);  
+  const { subject } = context;
+  const lowerQuery = query.toLowerCase();
+  console.log(`[LLMRouter] Selecting LLM for query: "${lowerQuery.substring(0, 50)}..."`);
 
-  // PRIORITY 1: Subject-specific model
-  if (context.subject) {
-    const fineTunedModel = await LLMConfiguration.findOne({ subjectFocus: context.subject });
+  // PRIORITY 1: Subject-Specific Fine-Tuned Model (for P2.8)
+  // If the user has selected a subject in the UI (e.g., "Physics"), we look for a model specifically fine-tuned for it.
+  if (subject) {
+    const fineTunedModel = await LLMConfiguration.findOne({ subjectFocus: subject });
     if (fineTunedModel) {
-      console.log(`[LLMRouter] Decision: Found specialized model '${fineTunedModel.modelId}' for subject '${context.subject}'.`);
-      return { chosenModel: fineTunedModel, logic: 'subject_match' }; // Return object
+      console.log(`[LLMRouter] Decision: Found specialized model '${fineTunedModel.modelId}' for subject '${subject}'.`);
+      return { chosenModel: fineTunedModel, logic: 'subject_match' };
     }
   }
 
-  // PRIORITY 2: Heuristic-based routing
-  const lowerQuery = query.toLowerCase();
-  if (lowerQuery.includes('code') || lowerQuery.includes('python') || lowerQuery.includes('javascript') || lowerQuery.includes('java')) {
+  // PRIORITY 2: Heuristic-based routing for specific tasks based on query keywords.
+
+  // Logic for highly technical, math, or advanced coding tasks
+  const technicalKeywords = ['calculate', 'derive', 'equation', 'theorem', 'proof', 'algorithm', 'data structure'];
+  if (technicalKeywords.some(keyword => lowerQuery.includes(keyword))) {
+    const techModel = await LLMConfiguration.findOne({ strengths: 'technical' });
+    if (techModel) {
+      console.log(`[LLMRouter] Decision: Query suggests a technical/math task. Using model '${techModel.modelId}'.`);
+      return { chosenModel: techModel, logic: 'heuristic_technical' };
+    }
+  }
+  
+  // Logic for standard coding tasks
+  const codeKeywords = ['code', 'python', 'javascript', 'java', 'script', 'function', 'class', 'debug'];
+  if (codeKeywords.some(keyword => lowerQuery.includes(keyword))) {
      const codeModel = await LLMConfiguration.findOne({ strengths: 'code' });
      if (codeModel) {
         console.log(`[LLMRouter] Decision: Query suggests coding. Using model '${codeModel.modelId}'.`);
-        return { chosenModel: codeModel, logic: 'heuristic_code_detection' }; // Return object
+        return { chosenModel: codeModel, logic: 'heuristic_code' };
+     }
+  }
+
+  // Logic for creative writing tasks
+  const creativeKeywords = ['write a story', 'imagine', 'create a poem', 'act as a character'];
+  if (creativeKeywords.some(keyword => lowerQuery.includes(keyword))) {
+     const creativeModel = await LLMConfiguration.findOne({ strengths: 'creative' });
+     if (creativeModel) {
+        console.log(`[LLMRouter] Decision: Query suggests a creative task. Using model '${creativeModel.modelId}'.`);
+        return { chosenModel: creativeModel, logic: 'heuristic_creative' };
+     }
+  }
+
+  // Logic for multilingual tasks
+  const multilingualKeywords = ['translate', 'in spanish', 'in french', 'in german', 'in japanese'];
+  if (multilingualKeywords.some(keyword => lowerQuery.includes(keyword))) {
+     const multilingualModel = await LLMConfiguration.findOne({ strengths: 'multilingual' });
+     if (multilingualModel) {
+        console.log(`[LLMRouter] Decision: Query suggests a multilingual task. Using model '${multilingualModel.modelId}'.`);
+        return { chosenModel: multilingualModel, logic: 'heuristic_multilingual' };
      }
   }
   
-  // PRIORITY 3: Fallback to the default model
+  // PRIORITY 3: Fallback to the designated default model
   const defaultModel = await LLMConfiguration.findOne({ isDefault: true });
   if (defaultModel) {
-    console.log(`[LLMRouter] Decision: No specific model found. Using default '${defaultModel.modelId}'.`);
-    return { chosenModel: defaultModel, logic: 'default_fallback' }; // Return object
+    console.log(`[LLMRouter] Decision: No specific heuristic met. Using default model '${defaultModel.modelId}'.`);
+    return { chosenModel: defaultModel, logic: 'default_fallback' };
   }
 
-  // ABSOLUTE FALLBACK
-  console.error("[LLMRouter] No default model configured in the database! Falling back to hardcoded default.");
+  // ABSOLUTE FALLBACK: In case the database is misconfigured (e.g., no default model set)
+  console.error("[LLMRouter] CRITICAL: No default model configured in the database! Falling back to hardcoded default.");
   return {
     chosenModel: { modelId: 'gemini-1.5-flash-latest', provider: 'gemini' },
-    logic: 'absolute_fallback' // Return object
+    logic: 'absolute_fallback'
   };
 }
 
@@ -31321,10 +31816,29 @@ async function getSignedDownloadUrl(key, originalName) {
     return url;
 }
 
+// <<< NEW FUNCTION START >>>
+async function deleteObjectFromS3(key) {
+    const params = {
+        Bucket: S3_BUCKET,
+        Key: key,
+    };
+
+    try {
+        await s3.deleteObject(params).promise();
+        console.log(`[S3 Service] Successfully deleted object with key: ${key}`);
+        return { success: true };
+    } catch (error) {
+        console.error(`[S3 Service] Error deleting object with key ${key}:`, error);
+        throw new Error(`Failed to delete file from S3: ${error.message}`);
+    }
+}
+// <<< NEW FUNCTION END >>>
+
 module.exports = {
     getSignedUploadUrl,
     getSignedDownloadUrl,
-};  
+    deleteObjectFromS3, // <<< EXPORT THE NEW FUNCTION
+};
 ```
 
 `server/services/sessionAnalysisService.js`
