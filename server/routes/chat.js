@@ -12,6 +12,7 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
+const logger = require('../utils/logger');
 const router = express.Router();
 
 
@@ -47,6 +48,20 @@ router.post('/message', async (req, res) => {
     } = req.body;
     
     const userId = req.user._id;
+
+    logger.info('User submitted a new query', {
+        eventType: 'USER_QUERY',
+        userId: userId.toString(),
+        sessionId: sessionId,
+        payload: {
+            query: query.substring(0, 200), // Log first 200 chars to prevent overly long logs
+            queryLength: query.length,
+            useWebSearch: !!useWebSearch,
+            useAcademicSearch: !!useAcademicSearch,
+            criticalThinkingEnabled: !!criticalThinkingEnabled,
+            documentContext: documentContextName || 'None'
+        }
+    });
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });

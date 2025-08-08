@@ -2,13 +2,17 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
+
+require('./instrument.js');
+const { register, httpRequestDurationMicroseconds } = require('./utils/metrics');
+const Sentry = require("@sentry/node"); // Sentry must be required
+
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const mongoose = require("mongoose");
-
 
 // --- Custom Modules & Middleware ---
 const connectDB = require("./config/db");
@@ -19,6 +23,7 @@ const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
 const { connectRedis } = require("./config/redisClient");
+const logger = require('./utils/logger');
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -26,7 +31,6 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
-// const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
 const adminApiRoutes = require("./routes/admin");
 const subjectsRoutes = require("./routes/subjects");
@@ -38,7 +42,6 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
-const logger = require('./utils/logger');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -46,13 +49,11 @@ const mongoUri = process.env.MONGO_URI;
 const pythonRagUrl = process.env.PYTHON_RAG_SERVICE_URL;
 
 if (!process.env.JWT_SECRET || !process.env.ENCRYPTION_SECRET) {
-  console.error(
-    "!!! FATAL: JWT_SECRET or ENCRYPTION_SECRET is not set in .env file."
-  );
+  logger.error("!!! FATAL: JWT_SECRET or ENCRYPTION_SECRET is not set in .env file.");
   process.exit(1);
 }
 if (!mongoUri) {
-  console.error("!!! FATAL: MONGO_URI is not set in .env file.");
+  logger.error("!!! FATAL: MONGO_URI is not set in .env file.");
   process.exit(1);
 }
 
@@ -63,11 +64,12 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // --- API Route Mounting ---
 app.get("/", (req, res) => res.send("AI Tutor Backend API is running..."));
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
 app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
-
-// --- Admin Routes ---
-// Apply the fixed admin auth middleware to the single admin router.
 app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
 
 // All subsequent routes are protected by the general JWT authMiddleware
@@ -77,7 +79,6 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
 app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
-// app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/subjects", subjectsRoutes);
 app.use("/api/generate", generationRoutes);
@@ -85,13 +86,16 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
-app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 
-// --- Centralized Error Handling ---
+// --- SENTRY ERROR HANDLER ---
+// This must be registered before any other error middleware and after all controllers
+Sentry.setupExpressErrorHandler(app);
+
+// --- YOUR CUSTOM ERROR HANDLER ---
 app.use((err, req, res, next) => {
-  logger.error("Unhandled Error:", { 
-      message: err.message, 
+  logger.error("Unhandled Error:", {
+      message: err.message,
       stack: err.stack,
       status: err.status,
       url: req.originalUrl,
@@ -104,6 +108,8 @@ app.use((err, req, res, next) => {
     res.status(statusCode).json({ message });
   }
 });
+
+
 // --- Server Startup Logic ---
 async function startServer() {
   logger.info("--- Starting Server Initialization ---");

@@ -41,3 +41,4 @@ textstat
 TTS
 pydub
 python-json-logger
+prometheus-flask-exporter

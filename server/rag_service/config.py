@@ -18,42 +18,58 @@ LOGGING_LEVEL      = getattr(logging, LOGGING_LEVEL_NAME, logging.INFO)
 LOGGING_FORMAT     = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
 
 def setup_logging():
-    """Configure logging to output structured JSON."""
+    """Configure logging to output structured JSON to a central file."""
     root_logger = logging.getLogger()
-    # Prevent duplicate handlers if this function is called multiple times
+    # Prevent duplicate handlers
     if root_logger.handlers:
         for handler in root_logger.handlers:
             root_logger.removeHandler(handler)
 
-    # Use a custom formatter that adds service name and other details
-    # The format string defines the keys in the final JSON log
-    formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s'
-    )
+    # --- THIS IS THE KEY CHANGE ---
+    # Define the log file path relative to this config file
+    # It will place the log file at server/logs/rag_service.log
+    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, 'rag_service.log')
+    # --- END KEY CHANGE ---
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    root_logger.addHandler(handler)
+    # The formatter now includes a 'service' field
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
+    )
+    
+    # Add the service name to all log records from this service
+    root_logger.addFilter(lambda record: setattr(record, 'service', 'ai-tutor-python-rag') or True)
+
+    # 1. Handler for the central log file
+    file_handler = logging.FileHandler(log_file_path)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # 2. Handler for the console (so you can still see logs in the Python terminal)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
     root_logger.setLevel(LOGGING_LEVEL)
     
-    # Suppress overly verbose logs from third-party libraries
+    # Suppress noisy third-party logs
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("faiss.loader").setLevel(logging.WARNING)
+    # ... (rest of the suppressions) ...
     
-    # Use __name__ to get the current module's logger
-    logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME} with JSON format.")
+    logging.getLogger(__name__).info(f"Logging initialized. Outputting to console and {log_file_path}")
+
 
 
 # --- API Keys and Service URLs ---
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or your preferred Gemini model
-
+SENTRY_DSN = os.getenv('SENTRY_DSN')
 TURNITIN_API_URL = os.getenv('TURNITIN_API_URL')
 TURNITIN_API_KEY = os.getenv('TURNITIN_API_KEY')
 TURNITIN_API_SECRET = os.getenv('TURNITIN_API_SECRET')
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:8768")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")

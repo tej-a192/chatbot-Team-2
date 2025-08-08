@@ -1,0 +1,20 @@
+# prometheus/prometheus.yml
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'nodejs_backend'
+    static_configs:
+      - targets: ['host.docker.internal:5001']
+
+  # --- ADD THIS NEW JOB ---
+  - job_name: 'python_rag_service'
+    static_configs:
+      # We use the same 'host.docker.internal' to reach the host machine,
+      # but this time we target port 5000 where the Python service is running.
+      - targets: ['host.docker.internal:5000']

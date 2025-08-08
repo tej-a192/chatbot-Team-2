@@ -17,6 +17,9 @@ import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from prometheus_flask_exporter import PrometheusMetrics
 
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,7 +93,31 @@ except ImportError as e:
     sys.exit(1)
 
 logger = logging.getLogger(__name__)
+
+if config.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=config.SENTRY_DSN,
+        integrations=[
+            FlaskIntegration(),
+        ],
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        traces_sample_rate=1.0,
+        # Set profiles_sample_rate to 1.0 to profile 100%
+        # of sampled transactions.
+        # We recommend adjusting this value in production.
+        profiles_sample_rate=1.0,
+    )
+    logger.info("Sentry initialized successfully for Python RAG service.")
+else:
+    logger.warn("SENTRY_DSN not found in config. Sentry is disabled for Python RAG service.")
+
+
 app = Flask(__name__)
+
+
+metrics = PrometheusMetrics(app)
+logger.info("Prometheus metrics endpoint initialized at /metrics.")
 
 GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
@@ -808,7 +835,13 @@ def generate_document_from_topic_route():
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
-
+# Test for sentry debug
+# url : http://localhost:5000/debug-sentry-python
+# @app.route('/debug-sentry-python', methods=['GET'])
+# def trigger_python_sentry_error():
+#     # This will cause a deliberate ZeroDivisionError
+#     result = 1 / 0
+#     return "This won't be reached."
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
