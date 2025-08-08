@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import Prism from 'prismjs';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
+import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb, ThumbsUp, ThumbsDown } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
@@ -12,6 +12,7 @@ import { renderMathInHtml } from '../../utils/markdownUtils';
 import { getPlainTextFromMarkdown } from '../../utils/helpers.js';
 import DOMPurify from 'dompurify';
 import { useTypingEffect } from '../../hooks/useTypingEffect.js';
+import api from '../../services/api.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -166,9 +167,10 @@ const parseAndRenderMarkdown = (markdownText, messageId) => {
 };
 
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId, logId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [feedbackSent, setFeedbackSent] = useState(null);
     const contentRef = useRef(null);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
     
@@ -185,6 +187,18 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
             return () => clearTimeout(timer);
         }
     }, [isStreaming, mainContent]);
+
+    const handleFeedback = async (feedbackType) => {
+        if (feedbackSent) return; // Prevent multiple submissions
+        setFeedbackSent(feedbackType);
+        try {
+            await api.submitFeedback(logId, feedbackType);
+            toast.success('Thanks for your feedback!');
+        } catch (error) {
+            toast.error('Could not submit feedback.');
+            setFeedbackSent(null); // Allow user to try again
+        }
+    };
 
     const handleCopy = () => {
         if (isCopied) return;
@@ -248,6 +262,27 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                                     </motion.div>
                                 </AnimatePresence>
                             </button>
+
+                            {!isUser && logId && (
+                                <div className="flex items-center gap-0.5 ml-2 border-l border-border-light dark:border-border-dark pl-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    <IconButton
+                                        icon={ThumbsUp}
+                                        onClick={() => handleFeedback('positive')}
+                                        disabled={!!feedbackSent}
+                                        title="Good response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'positive' ? 'text-green-500 bg-green-500/10' : 'hover:text-green-500'}`}
+                                    />
+                                    <IconButton
+                                        icon={ThumbsDown}
+                                        onClick={() => handleFeedback('negative')}
+                                        disabled={!!feedbackSent}
+                                        title="Bad response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'negative' ? 'text-red-500 bg-red-500/10' : 'hover:text-red-500'}`}
+                                    />
+                                </div>
+                            )}
                             <div className="flex items-center gap-2 pl-1 opacity-70">
                                 {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
                                 <span>{formatTimestamp(timestamp)}</span>

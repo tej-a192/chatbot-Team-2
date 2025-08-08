@@ -9,7 +9,11 @@ import Modal from '../core/Modal.jsx';
 import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle } from 'lucide-react';
+import LLMConfigManager from './LLMConfigManager.jsx';
+import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
+import DatasetManager from './DatasetManager.jsx'; // <<< NEW IMPORT
+
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog, Database } from 'lucide-react'; // <<< ADDED Database ICON
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -86,6 +90,9 @@ function AdminDashboardPage() {
     const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
+    const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+    const [isDatasetModalOpen, setIsDatasetModalOpen] = useState(false); // <<< NEW STATE for Dataset Modal
+    
 
     const adminLogoutHandler = () => {
         setIsAdminSessionActive(false);
@@ -188,79 +195,85 @@ function AdminDashboardPage() {
     };
 
     return (
-        <div className="min-h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark p-4 sm:p-6">
-            <header className="flex items-center justify-between mb-6 pb-3 border-b border-border-light dark:border-border-dark">
+        <div className="h-screen flex flex-col bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark">
+            <header className="flex-shrink-0 flex items-center justify-between p-4 sm:p-6 border-b border-border-light dark:border-border-dark">
                 <h1 className="text-2xl font-bold">Professor's Dashboard</h1>
                 <div className="flex items-center gap-2">
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={Database} onClick={() => setIsDatasetModalOpen(true)} title="Dataset Management" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/> {/* <<< NEW BUTTON */}
+                    <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>
             </header>
 
-            <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
+            <main className="flex-1 p-4 sm:p-6 overflow-y-auto custom-scrollbar space-y-6">
+                <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="space-y-6">
-                    <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
+                <ModelFeedbackStats />
 
-                    <div className="card-base p-0 sm:p-4">
-                        <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark px-4 sm:px-0 pt-4 sm:pt-0">Uploaded Subject Documents</h2>
-                        {isInitialLoading && !documents.length && ( <div className="flex items-center justify-center p-6"> <Loader2 size={24} className="animate-spin text-primary mr-2" /> Loading documents... </div> )}
-                        {loadingError && !documents.length && ( <div className="p-3 my-3 mx-4 sm:mx-0 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2"> <AlertTriangle size={18} /> {loadingError} <button onClick={() => fetchAdminData(true)} className="ml-auto text-xs underline hover:text-red-400">Retry</button> </div> )}
-                        {!isInitialLoading && documents.length === 0 && !loadingError && ( <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6 px-4 sm:px-0"> No subject documents uploaded yet. </p> )}
-                        {documents.length > 0 && (
-                            <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-gray-50 dark:bg-gray-800">
-                                        <tr>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium">Original Name</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium hidden md:table-cell">Uploaded</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium">Analysis Status</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium text-center">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {documents.map((doc) => (
-                                            <tr key={doc.serverFilename} className="border-b border-border-light dark:border-border-dark hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                                                <td className="px-3 sm:px-4 py-2 truncate max-w-[150px] sm:max-w-xs" title={doc.originalName}>{doc.originalName}</td>
-                                                <td className="px-3 sm:px-4 py-2 whitespace-nowrap hidden md:table-cell"> {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'MMM d, yyyy HH:mm') : 'N/A'} </td>
-                                                <td className="px-3 sm:px-4 py-2"> {(doc.hasFaq || doc.hasTopics || doc.hasMindmap) ? ( <span className="flex items-center text-green-600 dark:text-green-400 text-xs"><CheckCircle size={14} className="mr-1"/> Generated</span> ) : (doc.analysisUpdatedAt ? <span className="text-gray-500 dark:text-gray-400 text-xs">Empty/Skipped</span> : <span className="text-yellow-500 dark:text-yellow-400 text-xs">Pending</span>)} </td>
-                                                <td className="px-1 sm:px-4 py-2 text-center whitespace-nowrap">
-                                                    <IconButton icon={Eye} title="View Analysis" size="sm" variant="ghost" className="text-primary hover:text-primary-dark mr-0.5 sm:mr-1" onClick={() => handleViewAnalysis(doc)} disabled={isLoadingAnalysis && currentDocForModal?.serverFilename === doc.serverFilename} />
-                                                    <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteDocument(doc.serverFilename, doc.originalName)} />
-                                                </td>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="space-y-6">
+                        <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
+
+                        <div className="card-base p-0 sm:p-4">
+                            <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark px-4 sm:px-0 pt-4 sm:pt-0">Uploaded Subject Documents</h2>
+                            {isInitialLoading && !documents.length && ( <div className="flex items-center justify-center p-6"> <Loader2 size={24} className="animate-spin text-primary mr-2" /> Loading documents... </div> )}
+                            {loadingError && !documents.length && ( <div className="p-3 my-3 mx-4 sm:mx-0 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2"> <AlertTriangle size={18} /> {loadingError} <button onClick={() => fetchAdminData(true)} className="ml-auto text-xs underline hover:text-red-400">Retry</button> </div> )}
+                            {!isInitialLoading && documents.length === 0 && !loadingError && ( <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6 px-4 sm:px-0"> No subject documents uploaded yet. </p> )}
+                            {documents.length > 0 && (
+                                <div className="overflow-x-auto custom-scrollbar">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium">Original Name</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium hidden md:table-cell">Uploaded</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium">Analysis Status</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium text-center">Actions</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                                        </thead>
+                                        <tbody>
+                                            {documents.map((doc) => (
+                                                <tr key={doc.serverFilename} className="border-b border-border-light dark:border-border-dark hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                                                    <td className="px-3 sm:px-4 py-2 truncate max-w-[150px] sm:max-w-xs" title={doc.originalName}>{doc.originalName}</td>
+                                                    <td className="px-3 sm:px-4 py-2 whitespace-nowrap hidden md:table-cell"> {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'MMM d, yyyy HH:mm') : 'N/A'} </td>
+                                                    <td className="px-3 sm:px-4 py-2"> {(doc.hasFaq || doc.hasTopics || doc.hasMindmap) ? ( <span className="flex items-center text-green-600 dark:text-green-400 text-xs"><CheckCircle size={14} className="mr-1"/> Generated</span> ) : (doc.analysisUpdatedAt ? <span className="text-gray-500 dark:text-gray-400 text-xs">Empty/Skipped</span> : <span className="text-yellow-500 dark:text-yellow-400 text-xs">Pending</span>)} </td>
+                                                    <td className="px-1 sm:px-4 py-2 text-center whitespace-nowrap">
+                                                        <IconButton icon={Eye} title="View Analysis" size="sm" variant="ghost" className="text-primary hover:text-primary-dark mr-0.5 sm:mr-1" onClick={() => handleViewAnalysis(doc)} disabled={isLoadingAnalysis && currentDocForModal?.serverFilename === doc.serverFilename} />
+                                                        <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteDocument(doc.serverFilename, doc.originalName)} />
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
 
-                <div className="space-y-6">
-                    <div className="card-base p-4">
-                        <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
-                            <HelpCircle size={20} className="text-accent" /> Content Gap Analysis
-                        </h2>
-                        <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
-                            <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show student questions that the chatbot could not answer from your documents.</p>
-                            <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                    <div className="space-y-6">
+                        <div className="card-base p-4">
+                            <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
+                                <HelpCircle size={20} className="text-accent" /> Content Gap Analysis
+                            </h2>
+                            <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show student questions that the chatbot could not answer from your documents.</p>
+                                <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                            </div>
                         </div>
-                    </div>
-                    <div className="card-base p-4">
-                         <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
-                            <Lightbulb size={20} className="text-accent" /> Frequently Asked Topics
-                        </h2>
-                        <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
-                            <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show a word cloud or list of the most common topics students ask about.</p>
-                            <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                        <div className="card-base p-4">
+                             <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
+                                <Lightbulb size={20} className="text-accent" /> Frequently Asked Topics
+                            </h2>
+                            <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show a word cloud or list of the most common topics students ask about.</p>
+                                <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </main>
 
             {/* Modals */}
             <Modal isOpen={isAnalysisModalOpen} onClose={() => setIsAnalysisModalOpen(false)} title={`Analysis Results: ${currentDocForModal?.originalName || 'Document'}`} size="2xl">
@@ -275,6 +288,13 @@ function AdminDashboardPage() {
                 {isInitialLoading ? (
                      <div className="flex justify-center items-center p-8"> <Loader2 size={24} className="animate-spin text-primary inline-block mr-2" /> Loading User Chat Data... </div>
                 ) : ( <UserChatManager usersWithChats={usersWithChats} /> )}
+            </Modal>
+            <Modal isOpen={isLlmModalOpen} onClose={() => setIsLlmModalOpen(false)} title="LLM Configuration Management" size="4xl">
+                <LLMConfigManager />
+            </Modal>
+            {/* <<< NEW MODAL FOR DATASETS --- */}
+            <Modal isOpen={isDatasetModalOpen} onClose={() => setIsDatasetModalOpen(false)} title="Secure Dataset Management" size="5xl">
+                <DatasetManager />
             </Modal>
         </div>
     );

@@ -32,7 +32,7 @@ const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/admin");
+const adminMasterRouter = require('./routes/index'); 
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generationRoutes");
 const exportRoutes = require("./routes/export");
@@ -42,6 +42,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const feedbackRoutes = require('./routes/feedback');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -70,7 +71,15 @@ app.get('/metrics', async (req, res) => {
 });
 app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
+<<<<<<< HEAD
 app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
+=======
+
+// --- Admin Routes ---
+// Apply the fixed admin auth middleware to the single MASTER admin router.
+// This ensures all routes defined in ./routes/admin/* are protected correctly.
+app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
+>>>>>>> f77e1bc435fc7da7cead52c2c8cb0b6db5dd7d2a
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -93,6 +102,9 @@ app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 Sentry.setupExpressErrorHandler(app);
 
 // --- YOUR CUSTOM ERROR HANDLER ---
+app.use('/api/feedback', feedbackRoutes);
+
+// --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   logger.error("Unhandled Error:", {
       message: err.message,
