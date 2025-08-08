@@ -42,6 +42,7 @@ function doesQuerySuggestRecall(query) {
 }
 
 
+
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -130,7 +131,28 @@ router.post('/message', async (req, res) => {
             // 2. Inject logId into the response object
             agentResponse.logId = logEntry._id;
             
-            // 3. Send final event and close stream
+            // 3. Prepare message for DB and save it ONCE.
+            const aiMessageForDb = { 
+                ...agentResponse, 
+                sender: 'bot', 
+                role: 'model', 
+                text: agentResponse.finalAnswer, 
+                parts: [{ text: agentResponse.finalAnswer }], 
+                timestamp: new Date() 
+            };
+            delete aiMessageForDb.criticalThinkingCues;
+            delete aiMessageForDb.sender;
+            delete aiMessageForDb.text;
+            delete aiMessageForDb.action;
+    
+            await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
+            
+            // 4. Trigger KG extraction
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
+
+            // 5. Send final event and close stream
             streamEvent(res, { type: 'final_answer', content: agentResponse });
             res.end();
 
@@ -139,53 +161,55 @@ router.post('/message', async (req, res) => {
             agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
             const endTime = Date.now();
             
-            // 1. Create Log Entry
+            // 1. Create the Performance Log Entry to get its ID
             const logEntry = new LLMPerformanceLog({
                 userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
                 routerLogic: routerLogic, responseTimeMs: endTime - startTime
             });
             await logEntry.save();
-
-            // 2. Build the final message object for the client, injecting the logId
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }], text: agentResponse.finalAnswer,
-                timestamp: new Date(), thinking: agentResponse.thinking || null,
-                references: agentResponse.references || [], source_pipeline: agentResponse.sourcePipeline,
-                action: agentResponse.action || null,
-                logId: logEntry._id 
-            };
-
-            // 3. Handle action or send the final response
-            if (aiMessageForClient.action) {
-                 const messageForDb = { ...aiMessageForClient };
-                 delete messageForDb.sender; delete messageForDb.text; delete messageForDb.action;
-                 await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, messageForDb] } } }, { upsert: true });
-                 return res.status(200).json({ reply: aiMessageForClient });
-            }
+            console.log(`[PerformanceLog] Logged decision for session ${sessionId} with logId: ${logEntry._id}.`);
             
-            const cues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            aiMessageForClient.criticalThinkingCues = cues;
-            agentResponse = aiMessageForClient; 
+            // 2. Build the FINAL AI message object for both DB and Client
+            const finalAiMessage = {
+                sender: 'bot',
+                role: 'model',
+                text: agentResponse.finalAnswer,
+                parts: [{ text: agentResponse.finalAnswer }],
+                timestamp: new Date(),
+                thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [],
+                source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null,
+                logId: logEntry._id, // Attach the log ID
+                criticalThinkingCues: await generateCues(agentResponse.finalAnswer, llmConfig)
+            };
+            
+            // 3. Create a clean version for the database (without frontend-specific fields)
+            const messageForDb = { ...finalAiMessage };
+            delete messageForDb.sender;
+            delete messageForDb.text;
+            delete messageForDb.criticalThinkingCues;
+            delete messageForDb.action;
+            
+            // 4. Save to Database ONCE
+            await ChatHistory.findOneAndUpdate(
+                { sessionId, userId },
+                { $push: { messages: { $each: [userMessageForDb, messageForDb] } } },
+                { upsert: true }
+            );
 
-            res.status(200).json({ reply: agentResponse });
+            // 5. Send final response to client
+            res.status(200).json({ reply: finalAiMessage });
+            
+            // 6. Trigger background KG extraction
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
         }
         
-        // --- DB & KG LOGIC (COMMON TO BOTH SUCCESSFUL PATHS) ---
-        const aiMessageForDb = { ...agentResponse, sender: 'bot', role: 'model', text: agentResponse.finalAnswer, parts: [{ text: agentResponse.finalAnswer }], timestamp: new Date() };
-        delete aiMessageForDb.criticalThinkingCues;
-        delete aiMessageForDb.sender;
-        delete aiMessageForDb.text;
-        delete aiMessageForDb.action;
-
-        await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
-        
-        console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
-
-        if (agentResponse.finalAnswer) {
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
-        }
-
+        // --- FIX ---
+        // The redundant, common DB save logic that was here has been removed.
+        // --- END FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
@@ -199,6 +223,7 @@ router.post('/message', async (req, res) => {
         }
     }
 });
+
 
 /*
 router.post('/message', async (req, res) => {

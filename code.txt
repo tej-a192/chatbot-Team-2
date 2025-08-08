@@ -7309,7 +7309,7 @@ function MainAppLayout({
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+            onNewChat={() => handleNewChat(messages)}
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -7337,9 +7337,9 @@ function MainAppLayout({
             <AnimatePresence mode="wait">
                 {isRightPanelOpen ? (
                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <RightPanel isChatProcessing={isChatProcessing} /> {/* Pass the prop */}
+                        <RightPanel isChatProcessing={isChatProcessing} />
                     </motion.aside>
-                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )} {/* Pass the prop */}
+                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )}
             </AnimatePresence>
         </div>
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
@@ -7357,14 +7357,17 @@ function App() {
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
-    const [appInitializing, setAppInitializing] = useState(true);
+    
+    const [isLoadingApp, setIsLoadingApp] = useState(true); 
+    const [sessionReady, setSessionReady] = useState(false);
+    
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
     const [appStateMessages, setAppStateMessages] = useState([]);
-    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
+    const [isCreatingSession, setIsCreatingSession] = useState(false);
 
-    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
         const messages = appStateMessages;
 
         if (!forceNewChat && messages.length === 0 && currentSessionId) {
@@ -7404,7 +7407,6 @@ function App() {
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
                 if (callback) {
-                    // Only show "New chat started!" toast if not explicitly skipping analysis
                     if (!skipSessionAnalysis) {
                          toast.success("New chat started!"); 
                     }
@@ -7425,6 +7427,7 @@ function App() {
     const fetchChatHistory = useCallback(async (sid) => {
         if (!sid || !regularUserToken) {
             setAppStateMessages([]);
+            setSessionReady(true);
             return;
         }
         try {
@@ -7432,22 +7435,15 @@ function App() {
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found in localStorage. It will be replaced.");
                 localStorage.removeItem('aiTutorSessionId');
                 setGlobalSessionId(null);
             } else {
                 toast.error(`History load failed: ${error.message}`);
             }
+        } finally {
+            setSessionReady(true); 
         }
     }, [regularUserToken, setGlobalSessionId]);
-
-    useEffect(() => {
-        if (currentSessionId && regularUserToken) {
-            fetchChatHistory(currentSessionId);
-        } else if (!regularUserToken) {
-            setAppStateMessages([]);
-        }
-    }, [currentSessionId, regularUserToken, fetchChatHistory]);
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
@@ -7455,42 +7451,43 @@ function App() {
     useEffect(() => {
         const handleAuthAndSession = async () => {
             if (isAdminSessionActive) {
-                setAppInitializing(false); setShowAuthModal(false);
+                setIsLoadingApp(false); setShowAuthModal(false);
                 if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
                 return;
             }
             if (regularUserAuthLoading) {
-                setAppInitializing(true); return;
+                setIsLoadingApp(true); return;
             }
-            setAppInitializing(false);
             
             if (regularUserToken && regularUser) {
                 setShowAuthModal(false);
                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
 
-                const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
-                if (shouldCreateSession && !isCreatingSession) {
+                if (currentSessionId) {
+                    await fetchChatHistory(currentSessionId);
+                } else if (!isCreatingSession && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) {
                     setIsCreatingSession(true);
-                    console.log("[App.jsx] Lock acquired. Creating initial session...");
-                    await handleNewChat();
-                    setIsCreatingSession(false);
-                    console.log("[App.jsx] Initial session created. Lock released.");
+                    await handleNewChat(() => {
+                        setSessionReady(true);
+                        setIsCreatingSession(false);
+                    }, true, true);
+                } else {
+                     setSessionReady(true);
                 }
             } else if (!location.pathname.startsWith('/admin')) {
                 setShowAuthModal(true);
             }
+            setIsLoadingApp(false);
         };
         handleAuthAndSession();
     }, [
         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
-        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+        currentSessionId, navigate, location.pathname, handleNewChat, fetchChatHistory, isCreatingSession
     ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
-            // After successful login, we ensure no session ID exists,
-            // which will trigger the useEffect above to create one cleanly.
             setGlobalSessionId(null); 
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
@@ -7498,7 +7495,7 @@ function App() {
         }
     };
 
-    if (appInitializing) {
+    if (isLoadingApp || !sessionReady) {
         return (
             <div className="fixed inset-0 flex items-center justify-center bg-background-light dark:bg-background-dark">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-primary"></div>
@@ -7512,27 +7509,25 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
-                    <CodeExecutorPage /> : <Navigate to="/" />} 
-                />
-                <Route
-                    path="/study-plan"
-                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
-                />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
-                    <QuizGeneratorPage /> : <Navigate to="/" />} 
-                />
-                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
-                    <AcademicIntegrityPage /> : <Navigate to="/" />}
-                />
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? <CodeExecutorPage /> : <Navigate to="/" />} />
+                <Route path="/study-plan" element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />} />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? <QuizGeneratorPage /> : <Navigate to="/" />} />
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ? <AcademicIntegrityPage /> : <Navigate to="/" />} />
                 <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
-                    orchestratorStatus={orchestratorStatus} 
-                    handleNewChat={handleNewChat} 
-                    isSessionLoading={isSessionLoading}
-                    messages={appStateMessages}
-                    setMessages={setAppStateMessages}
-                 /> : null} />
+                <Route 
+                    path="/*" 
+                    element={
+                        isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : 
+                        (regularUserToken && regularUser && sessionReady) ? 
+                        <MainAppLayout 
+                            orchestratorStatus={orchestratorStatus} 
+                            handleNewChat={handleNewChat} 
+                            isSessionLoading={isSessionLoading}
+                            messages={appStateMessages}
+                            setMessages={setAppStateMessages}
+                         /> : null
+                    } 
+                />
             </Routes>
         </div>
     );
@@ -7563,7 +7558,10 @@ import Modal from '../core/Modal.jsx';
 import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle } from 'lucide-react';
+import LLMConfigManager from './LLMConfigManager.jsx';
+import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
+
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -7640,6 +7638,8 @@ function AdminDashboardPage() {
     const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
+    const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+    
 
     const adminLogoutHandler = () => {
         setIsAdminSessionActive(false);
@@ -7749,11 +7749,16 @@ function AdminDashboardPage() {
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>
             </header>
 
             <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
+
+            <div className="mt-6">
+                <ModelFeedbackStats />
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
@@ -7829,6 +7834,9 @@ function AdminDashboardPage() {
                 {isInitialLoading ? (
                      <div className="flex justify-center items-center p-8"> <Loader2 size={24} className="animate-spin text-primary inline-block mr-2" /> Loading User Chat Data... </div>
                 ) : ( <UserChatManager usersWithChats={usersWithChats} /> )}
+            </Modal>
+            <Modal isOpen={isLlmModalOpen} onClose={() => setIsLlmModalOpen(false)} title="LLM Configuration Management" size="4xl">
+                <LLMConfigManager />
             </Modal>
         </div>
     );
@@ -8020,6 +8028,216 @@ function ApiKeyRequestManager({ requests, onAction }) {
 }
 
 export default ApiKeyRequestManager;
+```
+
+`frontend/src/components/admin/LLMConfigManager.jsx`
+
+```javascript
+// frontend/src/components/admin/LLMConfigManager.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import * as adminApi from '../../services/adminApi.js';
+import toast from 'react-hot-toast';
+import Button from '../core/Button.jsx';
+import IconButton from '../core/IconButton.jsx';
+import Modal from '../core/Modal.jsx';
+import { Plus, Edit, Trash2, Loader2, AlertTriangle } from 'lucide-react';
+
+const LLMConfigManager = () => {
+    const [configs, setConfigs] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+    const [editingConfig, setEditingConfig] = useState(null);
+
+    const fetchConfigs = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const data = await adminApi.getLlmConfigs();
+            setConfigs(data);
+        } catch (err) {
+            setError(err.message);
+            toast.error('Failed to load LLM configurations.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchConfigs();
+    }, [fetchConfigs]);
+
+    const handleOpenForm = (config = null) => {
+        setEditingConfig(config);
+        setIsFormModalOpen(true);
+    };
+
+    const handleDelete = async (config) => {
+        if (!window.confirm(`Are you sure you want to delete the LLM configuration for "${config.displayName}"?`)) return;
+        try {
+            await adminApi.deleteLlmConfig(config._id);
+            toast.success('Configuration deleted.');
+            fetchConfigs();
+        } catch (err) {
+            toast.error(`Deletion failed: ${err.message}`);
+        }
+    };
+
+    if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
+    if (error) return <div className="text-red-500 p-4"><AlertTriangle className="inline mr-2" />{error}</div>;
+
+    return (
+        <div>
+            <div className="flex justify-end mb-4">
+                <Button onClick={() => handleOpenForm(null)} leftIcon={<Plus />}>Add New LLM Config</Button>
+            </div>
+            <div className="space-y-3">
+                {configs.length > 0 ? configs.map(config => (
+                    <div key={config._id} className="card-base p-4 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
+                        <div>
+                            <h4 className="font-bold text-text-light dark:text-text-dark">{config.displayName} {config.isDefault && <span className="text-xs font-semibold bg-green-500/20 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">Default</span>}</h4>
+                            <p className="text-sm font-mono text-text-muted-light dark:text-text-muted-dark">{config.modelId} ({config.provider})</p>
+                            <p className="text-xs mt-1">Strengths: {config.strengths?.join(', ') || 'N/A'}</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <IconButton icon={Edit} onClick={() => handleOpenForm(config)} title="Edit" />
+                            <IconButton icon={Trash2} onClick={() => handleDelete(config)} title="Delete" variant="danger" />
+                        </div>
+                    </div>
+                )) : <p className="text-center text-text-muted-light dark:text-text-muted-dark">No LLM configurations found. Add one to get started.</p>}
+            </div>
+            {isFormModalOpen && (
+                <ConfigFormModal
+                    isOpen={isFormModalOpen}
+                    onClose={() => setIsFormModalOpen(false)}
+                    onSuccess={fetchConfigs}
+                    config={editingConfig}
+                />
+            )}
+        </div>
+    );
+};
+
+const ConfigFormModal = ({ isOpen, onClose, onSuccess, config }) => {
+    const [formData, setFormData] = useState({
+        modelId: config?.modelId || '',
+        provider: config?.provider || 'gemini',
+        displayName: config?.displayName || '',
+        description: config?.description || '',
+        isDefault: config?.isDefault || false,
+        strengths: config?.strengths?.join(', ') || '',
+        subjectFocus: config?.subjectFocus || '',
+    });
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSaving(true);
+        try {
+            const payload = {
+                ...formData,
+                strengths: formData.strengths.split(',').map(s => s.trim()).filter(Boolean)
+            };
+            if (config) {
+                await adminApi.updateLlmConfig(config._id, payload);
+                toast.success('Configuration updated!');
+            } else {
+                await adminApi.createLlmConfig(payload);
+                toast.success('New configuration created!');
+            }
+            onSuccess();
+            onClose();
+        } catch (err) {
+            toast.error(`Save failed: ${err.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={config ? 'Edit LLM Configuration' : 'Add New LLM'}>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div><label className="block text-sm font-medium">Display Name</label><input name="displayName" value={formData.displayName} onChange={handleChange} className="input-field" required /></div>
+                <div><label className="block text-sm font-medium">Model ID</label><input name="modelId" value={formData.modelId} onChange={handleChange} className="input-field" placeholder="e.g., gemini-1.5-pro or ollama/qwen2" required /></div>
+                <div><label className="block text-sm font-medium">Provider</label><select name="provider" value={formData.provider} onChange={handleChange} className="input-field"><option value="gemini">gemini</option><option value="ollama">ollama</option><option value="fine-tuned">fine-tuned</option></select></div>
+                <div><label className="block text-sm font-medium">Strengths (comma-separated)</label><input name="strengths" value={formData.strengths} onChange={handleChange} className="input-field" placeholder="e.g., code, reasoning, chat" /></div>
+                <div><label className="block text-sm font-medium">Subject Focus (for fine-tuned models)</label><input name="subjectFocus" value={formData.subjectFocus} onChange={handleChange} className="input-field" /></div>
+                <div className="flex items-center gap-2"><input type="checkbox" name="isDefault" checked={formData.isDefault} onChange={handleChange} className="form-checkbox" /><label>Is Default Model?</label></div>
+                <div className="flex justify-end gap-2 pt-4 border-t border-border-light dark:border-border-dark">
+                    <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+                    <Button type="submit" isLoading={isSaving}>Save Configuration</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+};
+
+export default LLMConfigManager;
+```
+
+`frontend/src/components/admin/ModelFeedbackStats.jsx`
+
+```javascript
+// frontend/src/components/admin/ModelFeedbackStats.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import * as adminApi from '../../services/adminApi.js';
+import { ThumbsUp, ThumbsDown, HelpCircle, Loader2, AlertTriangle, Wrench } from 'lucide-react';
+import Button from '../core/Button.jsx';
+
+const ModelFeedbackStats = () => {
+    const [stats, setStats] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const fetchStats = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const data = await adminApi.getFeedbackStats();
+            setStats(data);
+        } catch (err) {
+            // Handle error if needed, e.g., setError(err.message)
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
+
+    if (isLoading) return <div className="card-base p-4 text-center"><Loader2 className="animate-spin inline-block text-primary" /></div>;
+
+    return (
+        <div className="card-base p-4">
+            <h2 className="text-lg font-semibold mb-3">Model Feedback & Performance</h2>
+            {stats.length === 0 ? (
+                <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6">No feedback has been recorded yet.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {stats.map(model => (
+                        <div key={model.modelId} className="card-base p-4 bg-gray-50 dark:bg-gray-800/50">
+                            <h5 className="font-bold truncate" title={model.modelId}>{model.modelId}</h5>
+                            <p className="text-xs text-text-muted-light dark:text-text-muted-dark">{model.totalResponses} total responses logged</p>
+                            <div className="flex justify-around items-center my-4 text-center">
+                                <div title="Positive Feedback"><ThumbsUp className="text-green-500 mx-auto" /><span className="font-bold text-lg">{model.feedback.positive}</span></div>
+                                <div title="Negative Feedback"><ThumbsDown className="text-red-500 mx-auto" /><span className="font-bold text-lg">{model.feedback.negative}</span></div>
+                                <div title="No Feedback"><HelpCircle className="text-gray-400 mx-auto" /><span className="font-bold text-lg">{model.feedback.none}</span></div>
+                            </div>
+                            <Button size="sm" fullWidth variant="outline" leftIcon={<Wrench size={14}/>} onClick={() => alert('The fine-tuning pipeline (Feature P2.8) is the next step!')}>
+                                Fine-Tune
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default ModelFeedbackStats;
 ```
 
 `frontend/src/components/admin/UserChatManager.jsx`
@@ -10154,6 +10372,7 @@ function ChatHistory({ messages, onCueClick }) {
                         criticalThinkingCues={msg.criticalThinkingCues}
                         onCueClick={onCueClick}
                         messageId={msg.id}
+                        logId={msg.logId} 
                     />
 
                     </motion.div>
@@ -10625,7 +10844,7 @@ import { marked } from 'marked';
 import Prism from 'prismjs';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
+import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb, ThumbsUp, ThumbsDown } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
@@ -10634,6 +10853,7 @@ import { renderMathInHtml } from '../../utils/markdownUtils';
 import { getPlainTextFromMarkdown } from '../../utils/helpers.js';
 import DOMPurify from 'dompurify';
 import { useTypingEffect } from '../../hooks/useTypingEffect.js';
+import api from '../../services/api.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -10788,9 +11008,10 @@ const parseAndRenderMarkdown = (markdownText, messageId) => {
 };
 
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId, logId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [feedbackSent, setFeedbackSent] = useState(null);
     const contentRef = useRef(null);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
     
@@ -10807,6 +11028,18 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
             return () => clearTimeout(timer);
         }
     }, [isStreaming, mainContent]);
+
+    const handleFeedback = async (feedbackType) => {
+        if (feedbackSent) return; // Prevent multiple submissions
+        setFeedbackSent(feedbackType);
+        try {
+            await api.submitFeedback(logId, feedbackType);
+            toast.success('Thanks for your feedback!');
+        } catch (error) {
+            toast.error('Could not submit feedback.');
+            setFeedbackSent(null); // Allow user to try again
+        }
+    };
 
     const handleCopy = () => {
         if (isCopied) return;
@@ -10870,6 +11103,27 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                                     </motion.div>
                                 </AnimatePresence>
                             </button>
+
+                            {!isUser && logId && (
+                                <div className="flex items-center gap-0.5 ml-2 border-l border-border-light dark:border-border-dark pl-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    <IconButton
+                                        icon={ThumbsUp}
+                                        onClick={() => handleFeedback('positive')}
+                                        disabled={!!feedbackSent}
+                                        title="Good response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'positive' ? 'text-green-500 bg-green-500/10' : 'hover:text-green-500'}`}
+                                    />
+                                    <IconButton
+                                        icon={ThumbsDown}
+                                        onClick={() => handleFeedback('negative')}
+                                        disabled={!!feedbackSent}
+                                        title="Bad response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'negative' ? 'text-red-500 bg-red-500/10' : 'hover:text-red-500'}`}
+                                    />
+                                </div>
+                            )}
                             <div className="flex items-center gap-2 pl-1 opacity-70">
                                 {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
                                 <span>{formatTimestamp(timestamp)}</span>
@@ -12374,9 +12628,7 @@ export default SubjectList;
 ```javascript
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
-// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -12416,7 +12668,7 @@ const features = [
         icon: BookMarked,
         title: "Academic Search",
         description: "Find and synthesize information from academic papers and scholarly articles.",
-        action: 'toggleAcademicSearch', // Special action instead of a path
+        action: 'toggleAcademicSearch',
         status: 'active',
         glowColor: 'purple'
     }
@@ -12427,7 +12679,7 @@ const glowStyles = {
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
     yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
-    gray: "" // No glow for disabled/soon cards
+    gray: ""
 };
 
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
@@ -12436,7 +12688,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const navigate = useNavigate();
     const location = useLocation();
 
-    // Local state for toggles and component status
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
@@ -12447,8 +12698,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
-    // --- STABLE FUNCTION DEFINITIONS ---
-
     const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const payload = {
             query: inputText.trim(), 
@@ -12503,25 +12752,24 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         }
         
         if (finalBotMessageObject) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== placeholderId),
+                { ...finalBotMessageObject, id: finalBotMessageObject.id || placeholderId }
+            ]);
 
-            // --- THIS IS THE FIX ---
-            // Check for and handle the download action, even in streaming mode.
             if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
-                
                 toast.promise(
                     api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
                     {
-                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
+                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()}...`,
                         success: (data) => `Successfully downloaded '${data.filename}'!`,
                         error: (err) => `Download failed: ${err.message}`,
                     }
                 );
             }
-            // --- END OF FIX ---
         }
     }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
+
 
     const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
@@ -12536,29 +12784,26 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId 
-                ? { ...response.reply, id: placeholderId, isStreaming: false } 
-                : msg
-            ));
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== placeholderId),
+                { ...response.reply, id: response.reply.id || placeholderId }
+            ]);
             
            if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
-                
                 toast.promise(
                     api.generateDocumentFromTopic(response.reply.action.payload),
                     {
-                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()}...`,
                         success: (data) => `Successfully downloaded '${data.filename}'!`,
                         error: (err) => `Download failed: ${err.message}`,
                     }
                 );
             }
-
         } else {
             throw new Error("Invalid response from AI service.");
         }
     }, [messages, currentSessionId, systemPrompt, setMessages]);
+
 
     const handleSendMessage = useCallback(async (inputText, options = {}) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
@@ -12626,8 +12871,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         handleStreamingSendMessage, handleStandardSendMessage, systemPrompt
     ]);
     
-    // --- HOOKS ---
-
     useEffect(() => {
         const fetchRecommendations = async () => {
             if (messages.length === 0 && currentSessionId) {
@@ -12655,7 +12898,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     setUseAcademicSearch(true);
                     toast.success("Academic Search has been enabled for your next message.");
                     break;
-                // Can add more state-based actions here in the future
                 default:
                     break;
             }
@@ -12844,7 +13086,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 data={coachData}
             />
         </div>
-        
     );
 }
 
@@ -17520,6 +17761,13 @@ export const approveApiKeyRequest = (userId) => makeAdminApiRequest('post', '/ke
 export const rejectApiKeyRequest = (userId) => makeAdminApiRequest('post', '/key-requests/reject', { userId });
 
 export const getUsersAndChats = () => makeAdminApiRequest('get', '/users-with-chats');
+
+export const getLlmConfigs = () => makeAdminApiRequest('get', '/llms');
+export const createLlmConfig = (data) => makeAdminApiRequest('post', '/llms', data);
+export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/${id}`, data);
+export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);
+
+export const getFeedbackStats = () => makeAdminApiRequest('get', '/feedback-stats');
 ```
 
 `frontend/src/services/api.js`
@@ -17889,6 +18137,10 @@ const api = {
     window.URL.revokeObjectURL(url);
     
     return { success: true, filename }; // Return success status for the toast
+  },
+  submitFeedback: async (logId, feedback) => {
+    const response = await apiClient.post(`/feedback/${logId}`, { feedback });
+    return response.data;
   },
 
 };
@@ -20324,15 +20576,19 @@ module.exports = AdminDocument;
 // server/models/ChatHistory.js
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
-
 const MessageSchema = new mongoose.Schema({
     role: { type: String, enum: ['user', 'model'], required: true },
     parts: [{ text: { type: String, required: true } }],
     timestamp: { type: Date, default: Date.now },
     thinking: { type: String, default: '' },
     references: { type: Array, default: [] },
-    source_pipeline: { type: String, default: '' }
-}, { _id: false });
+    source_pipeline: { type: String, default: '' },
+    logId: { 
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'LLMPerformanceLog', 
+        default: null 
+    }
+}, {_id: true });
 
 const ChatHistorySchema = new mongoose.Schema({
     userId: {
@@ -20360,7 +20616,7 @@ const ChatHistorySchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     }
-});
+}, { _id: true }); 
 
 ChatHistorySchema.pre('save', function (next) {
     if (this.isModified()) {
@@ -20508,6 +20764,47 @@ const LearningPathSchema = new mongoose.Schema({
 
 const LearningPath = mongoose.model('LearningPath', LearningPathSchema);
 module.exports = LearningPath;
+```
+
+`server/models/LLMConfiguration.js`
+
+```javascript
+// server/models/LLMConfiguration.js
+const mongoose = require('mongoose');
+
+const LLMConfigurationSchema = new mongoose.Schema({
+  modelId: { type: String, required: true, unique: true, description: "e.g., 'gemini-1.5-pro', 'ollama/qwen2.5:14b-instruct', 'fine-tuned/physics-v1'" },
+  provider: { type: String, required: true, enum: ['gemini', 'ollama', 'openai', 'fine-tuned'] },
+  displayName: { type: String, required: true, description: "e.g., 'Gemini 1.5 Pro', 'Ollama Qwen 2.5'" },
+  description: { type: String, description: "Internal notes on the model's strengths." },
+  isDefault: { type: Boolean, default: false, description: "Fallback model if no specific model is chosen." },
+  // Strengths for the router to use in its decision-making
+  strengths: [{ type: String, enum: ['reasoning', 'chat', 'code', 'technical', 'creative', 'summarization'] }],
+  // If it's a fine-tuned model, this links it to a subject (FOR FEATURE P2.8)
+  subjectFocus: { type: String, default: null, index: true }, 
+});
+
+module.exports = mongoose.model('LLMConfiguration', LLMConfigurationSchema);
+```
+
+`server/models/LLMPerformanceLog.js`
+
+```javascript
+// server/models/LLMPerformanceLog.js
+const mongoose = require('mongoose');
+
+const LLMPerformanceLogSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  sessionId: { type: String, required: true, index: true },
+  query: { type: String, required: true },
+  chosenModelId: { type: String, required: true },
+  routerLogic: { type: String }, // e.g., 'subject_match', 'heuristic', 'default'
+  responseTimeMs: { type: Number },
+  userFeedback: { type: String, enum: ['positive', 'negative', 'none'], default: 'none' }, // For future UI feedback buttons
+  createdAt: { type: Date, default: Date.now },
+});
+
+module.exports = mongoose.model('LLMPerformanceLog', LLMPerformanceLogSchema);
 ```
 
 `server/models/User.js`
@@ -25536,9 +25833,98 @@ const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
+const LLMConfiguration = require('../models/LLMConfiguration'); 
 const { encrypt } = require('../utils/crypto');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog'); 
 
 const router = express.Router();
+
+
+/* ====== Model feedback routes ======= */
+
+// @route   GET /api/admin/feedback-stats
+// @desc    Get aggregated feedback stats for each model
+router.get('/feedback-stats', async (req, res) => {
+    try {
+        const stats = await LLMPerformanceLog.aggregate([
+            {
+                $group: {
+                    _id: '$chosenModelId', // Group by the model's ID
+                    positive: { $sum: { $cond: [{ $eq: ['$userFeedback', 'positive'] }, 1, 0] } },
+                    negative: { $sum: { $cond: [{ $eq: ['$userFeedback', 'negative'] }, 1, 0] } },
+                    none: { $sum: { $cond: [{ $eq: ['$userFeedback', 'none'] }, 1, 0] } },
+                    total: { $sum: 1 }
+                }
+            },
+            {
+                $project: { // Reshape the output
+                    modelId: '$_id',
+                    feedback: {
+                        positive: '$positive',
+                        negative: '$negative',
+                        none: '$none'
+                    },
+                    totalResponses: '$total',
+                    _id: 0
+                }
+            }
+        ]);
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching feedback stats:', error);
+        res.status(500).json({ message: 'Server error while fetching feedback stats.' });
+    }
+});
+/* ====== END Model feedback routes ===== */
+
+/* ====== LLM Management Routes ====== */
+
+// GET /api/admin/llms - List all LLM configurations
+router.get('/llms', async (req, res) => {
+    try {
+        const configs = await LLMConfiguration.find();
+        res.json(configs);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to fetch LLM configurations.' });
+    }
+});
+
+// POST /api/admin/llms - Create a new LLM configuration
+router.post('/llms', async (req, res) => {
+    try {
+        const newConfig = new LLMConfiguration(req.body);
+        await newConfig.save();
+        res.status(201).json(newConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to create LLM configuration.', error: error.message });
+    }
+});
+
+// PUT /api/admin/llms/:id - Update an LLM configuration
+router.put('/llms/:id', async (req, res) => {
+    try {
+        const updatedConfig = await LLMConfiguration.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!updatedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json(updatedConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to update LLM configuration.', error: error.message });
+    }
+});
+
+// DELETE /api/admin/llms/:id - Delete an LLM configuration
+router.delete('/llms/:id', async (req, res) => {
+    try {
+        const deletedConfig = await LLMConfiguration.findByIdAndDelete(req.params.id);
+        if (!deletedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json({ message: 'LLM configuration deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to delete LLM configuration.' });
+    }
+});
+
+
+/* ====== END LLM Managemet Routes =====  */
+
 const CACHE_DURATION_SECONDS = 30; 
 // --- NEW Dashboard Stats Route ---
 // @route   GET /api/admin/dashboard-stats
@@ -26262,6 +26648,8 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
+const { selectLLM } = require('../services/llmRouterService');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog');
 const router = express.Router();
 
 
@@ -26289,6 +26677,190 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
+
+router.post('/message', async (req, res) => {
+    const {
+        query, sessionId, useWebSearch, useAcademicSearch,
+        systemPrompt: clientProvidedSystemInstruction, criticalThinkingEnabled,
+        documentContextName, filter
+    } = req.body;
+    
+    const userId = req.user._id;
+
+    if (!query || typeof query !== 'string' || query.trim() === '') {
+        return res.status(400).json({ message: 'Query message text required.' });
+    }
+    if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: 'Session ID required.' });
+    }
+
+    const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
+    console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, CriticalThinking=${criticalThinkingEnabled}, Query: "${query.substring(0, 50)}..."`);
+    const startTime = Date.now();
+
+    try {
+        const [chatSession, user] = await Promise.all([
+            ChatHistory.findOne({ sessionId: sessionId, userId: userId }),
+            User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
+        ]);
+
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const chatContext = { userId, subject: documentContextName, chatHistory: historyFromDb };
+        const { chosenModel, logic: routerLogic } = await selectLLM(query.trim(), chatContext);
+
+        const llmConfig = {
+            llmProvider: chosenModel.provider,
+            geminiModel: chosenModel.provider === 'gemini' ? chosenModel.modelId : null,
+            ollamaModel: chosenModel.provider === 'ollama' ? (chosenModel.modelId.includes('/') ? chosenModel.modelId.split('/')[1] : chosenModel.modelId) : null,
+            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+            ollamaUrl: user?.ollamaUrl
+        };
+        
+        const summaryFromDb = chatSession ? chatSession.summary || "" : "";
+        const historyForLlm = [];
+
+        if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
+            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] });
+            historyForLlm.push({ role: 'model', parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] });
+        }
+        
+        const formattedDbMessages = historyFromDb.map(msg => ({ role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' })) }));
+        historyForLlm.push(...formattedDbMessages);
+        
+        const requestContext = {
+            documentContextName, criticalThinkingEnabled, filter,
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
+        };
+
+        let agentResponse;
+        if (criticalThinkingEnabled) {
+            // --- Logic for STREAMING response ---
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+            
+            const accumulatedThoughts = [];
+            const interceptingStreamCallback = (eventData) => {
+                if (eventData.type === 'thought') accumulatedThoughts.push(eventData.content);
+                streamEvent(res, eventData);
+            };
+            
+            const totResult = await processQueryWithToT_Streaming(query.trim(), historyForLlm, requestContext, interceptingStreamCallback);
+            const endTime = Date.now();
+            const cues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
+            
+            // 1. Create Log Entry
+            const logEntry = new LLMPerformanceLog({
+                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+
+            // 2. Inject logId into the response object
+            agentResponse.logId = logEntry._id;
+            
+            // 3. Send final event and close stream
+            streamEvent(res, { type: 'final_answer', content: agentResponse });
+            res.end();
+
+        } else {
+            // --- Logic for STANDARD JSON response ---
+            agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
+            const endTime = Date.now();
+            
+            // 1. Create the Performance Log Entry to get its ID
+            const logEntry = new LLMPerformanceLog({
+                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+            console.log(`[PerformanceLog] Logged decision for session ${sessionId} with logId: ${logEntry._id}.`);
+            
+            // 2. Build the FINAL AI message object for both DB and Client
+            const finalAiMessage = {
+                sender: 'bot', // for frontend
+                role: 'model', // for backend/db
+                text: agentResponse.finalAnswer, // for frontend convenience
+                parts: [{ text: agentResponse.finalAnswer }],
+                timestamp: new Date(),
+                thinking: agentResponse.thinking || null,
+                references: agentResponse.references || [],
+                source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null,
+                logId: logEntry._id, // Attach the log ID
+                criticalThinkingCues: await generateCues(agentResponse.finalAnswer, llmConfig)
+            };
+            
+            // 3. Create a clean version for the database (without frontend-specific fields)
+            const messageForDb = { ...finalAiMessage };
+            delete messageForDb.sender;
+            delete messageForDb.text;
+            delete messageForDb.criticalThinkingCues;
+            delete messageForDb.action;
+            
+            // 4. Save to Database
+            await ChatHistory.findOneAndUpdate(
+                { sessionId, userId },
+                { $push: { messages: { $each: [userMessageForDb, messageForDb] } } },
+                { upsert: true }
+            );
+
+            // 5. Send final response to client
+            if (criticalThinkingEnabled) {
+                // Inject logId for streaming responses before sending
+                const finalStreamResponse = { ...finalAiMessage };
+                streamEvent(res, { type: 'final_answer', content: finalStreamResponse });
+                res.end();
+            } else {
+                if (finalAiMessage.action) {
+                    return res.status(200).json({ reply: finalAiMessage });
+                }
+                res.status(200).json({ reply: finalAiMessage });
+            }
+            
+            // 6. Trigger background KG extraction (no change needed here)
+            if (finalAiMessage.text) {
+                extractAndStoreKgFromText(finalAiMessage.text, sessionId, userId, llmConfig);
+            }
+        }
+        
+        // --- DB & KG LOGIC (COMMON TO BOTH SUCCESSFUL PATHS) ---
+        const aiMessageForDb = { ...agentResponse, sender: 'bot', role: 'model', text: agentResponse.finalAnswer, parts: [{ text: agentResponse.finalAnswer }], timestamp: new Date() };
+        delete aiMessageForDb.criticalThinkingCues;
+        delete aiMessageForDb.sender;
+        delete aiMessageForDb.text;
+        delete aiMessageForDb.action;
+
+        await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
+        
+        console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
+
+        if (agentResponse.finalAnswer) {
+            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+        }
+
+
+    } catch (error) {
+        console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
+        const clientMessage = error.message || "Failed to get response from AI service.";
+        
+        if (res.headersSent && !res.writableEnded) {
+            streamEvent(res, { type: 'error', content: clientMessage });
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(error.status || 500).json({ message: clientMessage });
+        }
+    }
+});
+
+/*
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -26314,17 +26886,21 @@ router.post('/message', async (req, res) => {
             User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
         ]);
 
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const chatContext = { 
+            userId, 
+            subject: documentContextName, // The subject selected in the UI
+            chatHistory: historyFromDb 
+        };
+        const chosenLLM = await selectLLM(query.trim(), chatContext);
 
         const llmConfig = {
-            llmProvider,
-            ollamaModel,
+            llmProvider: chosenLLM.provider,
+            ollamaModel: chosenLLM.provider === 'ollama' ? chosenLLM.modelId.split('/')[1] : null,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
             ollamaUrl: user?.ollamaUrl
         };
 
-        const historyFromDb = chatSession ? chatSession.messages : [];
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
         const historyForLlm = [];
 
@@ -26371,10 +26947,13 @@ router.post('/message', async (req, res) => {
                     streamEvent(res, eventData);
                 }
             };
+            const startTime = Date.now();
 
             const totResult = await processQueryWithToT_Streaming(
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
+
+            const endTime = Date.now();
 
             const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
 
@@ -26457,9 +27036,21 @@ router.post('/message', async (req, res) => {
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
             res.status(200).json({ reply: aiMessageForClient });
             
+            const logEntry = new LLMPerformanceLog({
+                userId,
+                sessionId,
+                query: query.trim(),
+                chosenModelId: chosenLLM.modelId, // Assuming chosenLLM is in scope
+                routerLogic: 'heuristic_code_detection', // This would be passed back from the router service
+                responseTimeMs: endTime - startTime,
+            });
+            await logEntry.save();
+            console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
+
             if (agentResponse.finalAnswer) {
                 extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
             }
+
         }
 
     } catch (error) {
@@ -26474,7 +27065,7 @@ router.post('/message', async (req, res) => {
         }
     }
 });
-
+*/
 
 router.post('/history', async (req, res) => {
     const { previousSessionId, skipAnalysis } = req.body;
@@ -26591,10 +27182,21 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    try {
+     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
         if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
-        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+
+        const messagesForFrontend = (session.messages || []).map(msg => ({
+            id: msg._id || uuidv4(),
+            sender: msg.role === 'model' ? 'bot' : 'user',
+            text: msg.parts?.[0]?.text || '',
+            thinking: msg.thinking,
+            references: msg.references,
+            timestamp: msg.timestamp,
+            source_pipeline: msg.source_pipeline,
+            logId: msg.logId || null
+        }));
+        
         res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
         console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
@@ -26766,6 +27368,47 @@ router.post('/podcast', async (req, res) => {
         if (!res.headersSent) {
             res.status(error.response?.status || 500).json({ message: errorMsg });
         }
+    }
+});
+
+module.exports = router;
+```
+
+`server/routes/feedback.js`
+
+```javascript
+// server/routes/feedback.js
+const express = require('express');
+const router = express.Router();
+const LLMPerformanceLog = require('../models/LLMPerformanceLog');
+
+// @route   POST /api/feedback/:logId
+// @desc    Submit user feedback for a specific AI response
+// @access  Private (authMiddleware is applied in server.js)
+router.post('/:logId', async (req, res) => {
+    const { logId } = req.params;
+    const { feedback } = req.body; // 'positive' or 'negative'
+    const userId = req.user._id;
+
+    if (!['positive', 'negative'].includes(feedback)) {
+        return res.status(400).json({ message: 'Invalid feedback value.' });
+    }
+
+    try {
+        const logEntry = await LLMPerformanceLog.findById(logId);
+
+        // Security check: Ensure the log belongs to the user submitting feedback
+        if (!logEntry || logEntry.userId.toString() !== userId.toString()) {
+            return res.status(404).json({ message: 'Log entry not found or access denied.' });
+        }
+
+        logEntry.userFeedback = feedback;
+        await logEntry.save();
+
+        res.status(200).json({ message: 'Thank you for your feedback!' });
+    } catch (error) {
+        console.error(`Error saving feedback for log ${logId}:`, error);
+        res.status(500).json({ message: 'Server error while saving feedback.' });
     }
 });
 
@@ -28735,6 +29378,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const feedbackRoutes = require('./routes/feedback');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -28783,6 +29427,7 @@ app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
 app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
+app.use('/api/feedback', feedbackRoutes);
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);
@@ -29937,6 +30582,53 @@ async function createLearningPath(userId, goal, context = {}) {
 module.exports = {
     createLearningPath,
 };
+```
+
+`server/services/llmRouterService.js`
+
+```javascript
+// server/services/llmRouterService.js
+const LLMConfiguration = require('../models/LLMConfiguration');
+
+async function selectLLM(query, context) {
+  // Context will contain { userId, subject, chatHistory }
+  console.log(`[LLMRouter] Selecting LLM for query: "${query.substring(0, 50)}..."`);  
+
+  // PRIORITY 1: Subject-specific model
+  if (context.subject) {
+    const fineTunedModel = await LLMConfiguration.findOne({ subjectFocus: context.subject });
+    if (fineTunedModel) {
+      console.log(`[LLMRouter] Decision: Found specialized model '${fineTunedModel.modelId}' for subject '${context.subject}'.`);
+      return { chosenModel: fineTunedModel, logic: 'subject_match' }; // Return object
+    }
+  }
+
+  // PRIORITY 2: Heuristic-based routing
+  const lowerQuery = query.toLowerCase();
+  if (lowerQuery.includes('code') || lowerQuery.includes('python') || lowerQuery.includes('javascript') || lowerQuery.includes('java')) {
+     const codeModel = await LLMConfiguration.findOne({ strengths: 'code' });
+     if (codeModel) {
+        console.log(`[LLMRouter] Decision: Query suggests coding. Using model '${codeModel.modelId}'.`);
+        return { chosenModel: codeModel, logic: 'heuristic_code_detection' }; // Return object
+     }
+  }
+  
+  // PRIORITY 3: Fallback to the default model
+  const defaultModel = await LLMConfiguration.findOne({ isDefault: true });
+  if (defaultModel) {
+    console.log(`[LLMRouter] Decision: No specific model found. Using default '${defaultModel.modelId}'.`);
+    return { chosenModel: defaultModel, logic: 'default_fallback' }; // Return object
+  }
+
+  // ABSOLUTE FALLBACK
+  console.error("[LLMRouter] No default model configured in the database! Falling back to hardcoded default.");
+  return {
+    chosenModel: { modelId: 'gemini-1.5-flash-latest', provider: 'gemini' },
+    logic: 'absolute_fallback' // Return object
+  };
+}
+
+module.exports = { selectLLM };
 ```
 
 `server/services/ollamaService.js`

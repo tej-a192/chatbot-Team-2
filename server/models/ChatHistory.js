@@ -1,15 +1,19 @@
 // server/models/ChatHistory.js
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
-
 const MessageSchema = new mongoose.Schema({
     role: { type: String, enum: ['user', 'model'], required: true },
     parts: [{ text: { type: String, required: true } }],
     timestamp: { type: Date, default: Date.now },
     thinking: { type: String, default: '' },
     references: { type: Array, default: [] },
-    source_pipeline: { type: String, default: '' }
-}, { _id: false });
+    source_pipeline: { type: String, default: '' },
+    logId: { 
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'LLMPerformanceLog', 
+        default: null 
+    }
+}, {_id: true });
 
 const ChatHistorySchema = new mongoose.Schema({
     userId: {
@@ -29,11 +33,6 @@ const ChatHistorySchema = new mongoose.Schema({
         type: String,
         default: ''
     },
-    logId: { 
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'LLMPerformanceLog', default: null 
-    },
-
     createdAt: {
         type: Date,
         default: Date.now,
@@ -42,7 +41,7 @@ const ChatHistorySchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     }
-}, { _id: true });
+}, { _id: true }); 
 
 ChatHistorySchema.pre('save', function (next) {
     if (this.isModified()) {

@@ -1,8 +1,6 @@
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
-// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -42,7 +40,7 @@ const features = [
         icon: BookMarked,
         title: "Academic Search",
         description: "Find and synthesize information from academic papers and scholarly articles.",
-        action: 'toggleAcademicSearch', // Special action instead of a path
+        action: 'toggleAcademicSearch',
         status: 'active',
         glowColor: 'purple'
     }
@@ -53,7 +51,7 @@ const glowStyles = {
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
     yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
-    gray: "" // No glow for disabled/soon cards
+    gray: ""
 };
 
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
@@ -62,7 +60,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const navigate = useNavigate();
     const location = useLocation();
 
-    // Local state for toggles and component status
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
@@ -73,8 +70,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
-    // --- STABLE FUNCTION DEFINITIONS ---
-
     const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const payload = {
             query: inputText.trim(), 
@@ -129,25 +124,24 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         }
         
         if (finalBotMessageObject) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== placeholderId),
+                { ...finalBotMessageObject, id: finalBotMessageObject.id || placeholderId }
+            ]);
 
-            // --- THIS IS THE FIX ---
-            // Check for and handle the download action, even in streaming mode.
             if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
-                
                 toast.promise(
                     api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
                     {
-                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
+                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()}...`,
                         success: (data) => `Successfully downloaded '${data.filename}'!`,
                         error: (err) => `Download failed: ${err.message}`,
                     }
                 );
             }
-            // --- END OF FIX ---
         }
     }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
+
 
     const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
@@ -162,29 +156,26 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId 
-                ? { ...response.reply, id: placeholderId, isStreaming: false } 
-                : msg
-            ));
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== placeholderId),
+                { ...response.reply, id: response.reply.id || placeholderId }
+            ]);
             
            if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
-                
                 toast.promise(
                     api.generateDocumentFromTopic(response.reply.action.payload),
                     {
-                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()}...`,
                         success: (data) => `Successfully downloaded '${data.filename}'!`,
                         error: (err) => `Download failed: ${err.message}`,
                     }
                 );
             }
-
         } else {
             throw new Error("Invalid response from AI service.");
         }
     }, [messages, currentSessionId, systemPrompt, setMessages]);
+
 
     const handleSendMessage = useCallback(async (inputText, options = {}) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
@@ -252,8 +243,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         handleStreamingSendMessage, handleStandardSendMessage, systemPrompt
     ]);
     
-    // --- HOOKS ---
-
     useEffect(() => {
         const fetchRecommendations = async () => {
             if (messages.length === 0 && currentSessionId) {
@@ -281,7 +270,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     setUseAcademicSearch(true);
                     toast.success("Academic Search has been enabled for your next message.");
                     break;
-                // Can add more state-based actions here in the future
                 default:
                     break;
             }
@@ -470,7 +458,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 data={coachData}
             />
         </div>
-        
     );
 }
 
