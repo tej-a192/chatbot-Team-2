@@ -70,78 +70,95 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
-    const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
-        const payload = {
-            query: inputText.trim(), 
-            sessionId: currentSessionId, 
-            useWebSearch: options.useWebSearch, 
-            useAcademicSearch: options.useAcademicSearch,
-            systemPrompt, 
-            criticalThinkingEnabled: options.criticalThinkingEnabled, 
-            documentContextName: options.documentContextName,
-        };
+            const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
+                const payload = {
+                    query: inputText.trim(), 
+                    sessionId: currentSessionId, 
+                    useWebSearch: options.useWebSearch, 
+                    useAcademicSearch: options.useAcademicSearch,
+                    systemPrompt, 
+                    criticalThinkingEnabled: options.criticalThinkingEnabled, 
+                    documentContextName: options.documentContextName,
+                };
 
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
-            body: JSON.stringify(payload),
-            signal: abortControllerRef.current.signal,
-        });
+                // --- THIS IS THE FIX ---
+                // Construct the full, correct API URL using the environment variable.
+                const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/chat/message`;
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `Server error: ${response.status}`);
-        }
+                const response = await fetch(apiUrl, {
+                // --- END OF FIX ---
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
+                    body: JSON.stringify(payload),
+                    signal: abortControllerRef.current.signal,
+                });
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let finalBotMessageObject = null;
-        let accumulatedThinking = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n\n').filter(line => line.startsWith('data: '));
-            
-            for (const line of lines) {
-                const jsonString = line.replace('data: ', '');
-                try {
-                    const eventData = JSON.parse(jsonString);
-                    if (eventData.type === 'thought') {
-                        accumulatedThinking += eventData.content;
-                        setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...msg, thinking: accumulatedThinking, _accumulatedContent: accumulatedThinking } : msg));
-                    } else if (eventData.type === 'final_answer') {
-                        finalBotMessageObject = eventData.content;
-                    } else if (eventData.type === 'error') {
-                        throw new Error(eventData.content);
-                    }
-                } catch (e) { 
-                    console.error("Error parsing SSE chunk:", jsonString, e); 
+                if (!response.ok) {
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.message || `Server error: ${response.status}`);
                 }
-            }
-        }
-        
-        if (finalBotMessageObject) {
-            setMessages(prev => [
-                ...prev.filter(msg => msg.id !== placeholderId),
-                { ...finalBotMessageObject, id: finalBotMessageObject.id || placeholderId }
-            ]);
 
-            if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
-                toast.promise(
-                    api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
-                    {
-                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()}...`,
-                        success: (data) => `Successfully downloaded '${data.filename}'!`,
-                        error: (err) => `Download failed: ${err.message}`,
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let finalBotMessageObject = null;
+                let accumulatedThinking = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n\n').filter(line => line.startsWith('data: '));
+                    
+                    for (const line of lines) {
+                        const jsonString = line.replace('data: ', '');
+                        try {
+                            const eventData = JSON.parse(jsonString);
+                            if (eventData.type === 'thought') {
+                                accumulatedThinking += eventData.content;
+                                setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...msg, thinking: accumulatedThinking, _accumulatedContent: accumulatedThinking } : msg));
+                            } else if (eventData.type === 'final_answer') {
+                                finalBotMessageObject = eventData.content;
+                            } else if (eventData.type === 'error') {
+                                throw new Error(eventData.content);
+                            }
+                        } catch (e) { 
+                            console.error("Error parsing SSE chunk:", jsonString, e); 
+                        }
                     }
-                );
-            }
-        }
-    }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
+                }
+                
+                if (finalBotMessageObject) {
+                    // --- THIS IS THE FIX ---
+                    // Create a new, correctly structured message object for the frontend state.
+                    // This aligns the streaming response with the format used by chat history loading.
+                    const finalMessage = {
+                        ...finalBotMessageObject, // Copy all properties like thinking, references, etc.
+                        id: finalBotMessageObject.id || placeholderId,
+                        sender: 'bot', // Ensure sender is set
+                        text: finalBotMessageObject.finalAnswer, // Map 'finalAnswer' to the 'text' property
+                        isStreaming: false // Explicitly mark streaming as complete
+                    };
+                    
+                    // Now, update the state with the correctly formatted final message.
+                    setMessages(prev => [
+                        ...prev.filter(msg => msg.id !== placeholderId),
+                        finalMessage 
+                    ]);
+                    // --- END OF FIX ---
 
+                    if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
+                        toast.promise(
+                            api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
+                            {
+                                loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()}...`,
+                                success: (data) => `Successfully downloaded '${data.filename}'!`,
+                                error: (err) => `Download failed: ${err.message}`,
+                            }
+                        );
+                    }
+                }
+            }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
     const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
