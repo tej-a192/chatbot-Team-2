@@ -121,16 +121,23 @@ router.post('/message', async (req, res) => {
 
             agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
             
-            // 1. Create Log Entry
+            // 1. Create Log Entry AFTER getting the final answer
             const logEntry = new LLMPerformanceLog({
-                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
-                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
             });
             await logEntry.save();
+            // --- END MODIFICATION (Streaming Path) ---
 
             // 2. Inject logId into the response object
             agentResponse.logId = logEntry._id;
             
+            // ... (rest of the streaming logic remains the same)
             // 3. Prepare message for DB and save it ONCE.
             const aiMessageForDb = { 
                 ...agentResponse, 
@@ -158,16 +165,24 @@ router.post('/message', async (req, res) => {
 
         } else {
             // --- Logic for STANDARD JSON response ---
+            const startTime = Date.now(); // Moved start time here
             agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
             const endTime = Date.now();
             
-            // 1. Create the Performance Log Entry to get its ID
+            // --- START MODIFICATION (Non-Streaming Path) ---
+            // 1. Create the Performance Log Entry with the response
             const logEntry = new LLMPerformanceLog({
-                userId, sessionId, query: query.trim(), chosenModelId: chosenModel.modelId,
-                routerLogic: routerLogic, responseTimeMs: endTime - startTime
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
             });
             await logEntry.save();
             console.log(`[PerformanceLog] Logged decision for session ${sessionId} with logId: ${logEntry._id}.`);
+            // --- END MODIFICATION (Non-Streaming Path) ---
             
             // 2. Build the FINAL AI message object for both DB and Client
             const finalAiMessage = {
