@@ -81,3 +81,15 @@ export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/$
 export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);
 
 export const getFeedbackStats = () => makeAdminApiRequest('get', '/feedback-stats');
+
+
+// --- NEW DATASET MANAGEMENT API FUNCTIONS ---
+export const getDatasets = () => makeAdminApiRequest('get', '/datasets');
+
+export const getPresignedUploadUrl = (fileName, fileType) => makeAdminApiRequest('post', '/datasets/presigned-url', { fileName, fileType });
+
+export const finalizeUpload = (datasetMetadata) => makeAdminApiRequest('post', '/datasets/finalize-upload', datasetMetadata);
+
+export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get', `/datasets/${datasetId}/download-url`);
+
+export const deleteDataset = (datasetId) => makeAdminApiRequest('delete', `/datasets/${datasetId}`);

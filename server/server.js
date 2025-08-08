@@ -25,9 +25,8 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
-// const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/admin");
+const adminMasterRouter = require('./routes/index'); 
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generationRoutes");
 const exportRoutes = require("./routes/export");
@@ -66,8 +65,9 @@ app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
 
 // --- Admin Routes ---
-// Apply the fixed admin auth middleware to the single admin router.
-app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
+// Apply the fixed admin auth middleware to the single MASTER admin router.
+// This ensures all routes defined in ./routes/admin/* are protected correctly.
+app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -76,7 +76,6 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
 app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
-// app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/subjects", subjectsRoutes);
 app.use("/api/generate", generationRoutes);
@@ -84,9 +83,9 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
-app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 app.use('/api/feedback', feedbackRoutes);
+
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);

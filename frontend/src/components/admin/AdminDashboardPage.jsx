@@ -11,8 +11,9 @@ import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
 import LLMConfigManager from './LLMConfigManager.jsx';
 import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
+import DatasetManager from './DatasetManager.jsx'; // <<< NEW IMPORT
 
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog } from 'lucide-react';
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog, Database } from 'lucide-react'; // <<< ADDED Database ICON
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -90,6 +91,7 @@ function AdminDashboardPage() {
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
     const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+    const [isDatasetModalOpen, setIsDatasetModalOpen] = useState(false); // <<< NEW STATE for Dataset Modal
     
 
     const adminLogoutHandler = () => {
@@ -200,12 +202,12 @@ function AdminDashboardPage() {
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={Database} onClick={() => setIsDatasetModalOpen(true)} title="Dataset Management" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/> {/* <<< NEW BUTTON */}
                     <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>
             </header>
 
-            {/* --- THIS IS THE CHANGE: Added overflow-y-auto and custom-scrollbar --- */}
             <main className="flex-1 p-4 sm:p-6 overflow-y-auto custom-scrollbar space-y-6">
                 <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
 
@@ -289,6 +291,10 @@ function AdminDashboardPage() {
             </Modal>
             <Modal isOpen={isLlmModalOpen} onClose={() => setIsLlmModalOpen(false)} title="LLM Configuration Management" size="4xl">
                 <LLMConfigManager />
+            </Modal>
+            {/* <<< NEW MODAL FOR DATASETS --- */}
+            <Modal isOpen={isDatasetModalOpen} onClose={() => setIsDatasetModalOpen(false)} title="Secure Dataset Management" size="5xl">
+                <DatasetManager />
             </Modal>
         </div>
     );

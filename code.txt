@@ -7309,7 +7309,7 @@ function MainAppLayout({
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)}
+            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -7337,9 +7337,9 @@ function MainAppLayout({
             <AnimatePresence mode="wait">
                 {isRightPanelOpen ? (
                     <motion.aside key="right-panel-main" initial={{ x: '100%' }} animate={{ x: '0%' }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} className="hidden md:flex md:flex-col md:w-72 lg:w-80 xl:w-96 bg-surface-light dark:bg-surface-dark border-l border-border-light dark:border-border-dark overflow-y-auto p-3 sm:p-4 shadow-lg flex-shrink-0 custom-scrollbar">
-                        <RightPanel isChatProcessing={isChatProcessing} />
+                        <RightPanel isChatProcessing={isChatProcessing} /> {/* Pass the prop */}
                     </motion.aside>
-                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )}
+                ) : ( <RightCollapsedNav isChatProcessing={isChatProcessing} /> )} {/* Pass the prop */}
             </AnimatePresence>
         </div>
         <ChatHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} onSelectSession={handleSelectSessionFromHistory} />
@@ -7357,17 +7357,14 @@ function App() {
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
-    
-    const [isLoadingApp, setIsLoadingApp] = useState(true); 
-    const [sessionReady, setSessionReady] = useState(false);
-    
+    const [appInitializing, setAppInitializing] = useState(true);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
     const [appStateMessages, setAppStateMessages] = useState([]);
-    const [isCreatingSession, setIsCreatingSession] = useState(false);
+    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
 
-    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
         const messages = appStateMessages;
 
         if (!forceNewChat && messages.length === 0 && currentSessionId) {
@@ -7407,6 +7404,7 @@ function App() {
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
                 if (callback) {
+                    // Only show "New chat started!" toast if not explicitly skipping analysis
                     if (!skipSessionAnalysis) {
                          toast.success("New chat started!"); 
                     }
@@ -7427,7 +7425,6 @@ function App() {
     const fetchChatHistory = useCallback(async (sid) => {
         if (!sid || !regularUserToken) {
             setAppStateMessages([]);
-            setSessionReady(true);
             return;
         }
         try {
@@ -7435,15 +7432,22 @@ function App() {
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
             if (error.response && error.response.status === 404) {
+                console.warn("Stale session ID found in localStorage. It will be replaced.");
                 localStorage.removeItem('aiTutorSessionId');
                 setGlobalSessionId(null);
             } else {
                 toast.error(`History load failed: ${error.message}`);
             }
-        } finally {
-            setSessionReady(true); 
         }
     }, [regularUserToken, setGlobalSessionId]);
+
+    useEffect(() => {
+        if (currentSessionId && regularUserToken) {
+            fetchChatHistory(currentSessionId);
+        } else if (!regularUserToken) {
+            setAppStateMessages([]);
+        }
+    }, [currentSessionId, regularUserToken, fetchChatHistory]);
 
     useEffect(() => { document.documentElement.className = theme; }, [theme]);
     useEffect(() => { api.getOrchestratorStatus().then(setOrchestratorStatus); }, []);
@@ -7451,43 +7455,42 @@ function App() {
     useEffect(() => {
         const handleAuthAndSession = async () => {
             if (isAdminSessionActive) {
-                setIsLoadingApp(false); setShowAuthModal(false);
+                setAppInitializing(false); setShowAuthModal(false);
                 if (!location.pathname.startsWith('/admin')) navigate('/admin/dashboard', { replace: true });
                 return;
             }
             if (regularUserAuthLoading) {
-                setIsLoadingApp(true); return;
+                setAppInitializing(true); return;
             }
+            setAppInitializing(false);
             
             if (regularUserToken && regularUser) {
                 setShowAuthModal(false);
                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
 
-                if (currentSessionId) {
-                    await fetchChatHistory(currentSessionId);
-                } else if (!isCreatingSession && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan')) {
+                const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
+                if (shouldCreateSession && !isCreatingSession) {
                     setIsCreatingSession(true);
-                    await handleNewChat(() => {
-                        setSessionReady(true);
-                        setIsCreatingSession(false);
-                    }, true, true);
-                } else {
-                     setSessionReady(true);
+                    console.log("[App.jsx] Lock acquired. Creating initial session...");
+                    await handleNewChat();
+                    setIsCreatingSession(false);
+                    console.log("[App.jsx] Initial session created. Lock released.");
                 }
             } else if (!location.pathname.startsWith('/admin')) {
                 setShowAuthModal(true);
             }
-            setIsLoadingApp(false);
         };
         handleAuthAndSession();
     }, [
         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
-        currentSessionId, navigate, location.pathname, handleNewChat, fetchChatHistory, isCreatingSession
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
     ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
         if (authData && !authData.isAdminLogin && authData.token) {
+            // After successful login, we ensure no session ID exists,
+            // which will trigger the useEffect above to create one cleanly.
             setGlobalSessionId(null); 
             if (authData.email && authData._id) {
                 setRegularUserInAuthContext({ id: authData._id, email: authData.email });
@@ -7495,7 +7498,7 @@ function App() {
         }
     };
 
-    if (isLoadingApp || !sessionReady) {
+    if (appInitializing) {
         return (
             <div className="fixed inset-0 flex items-center justify-center bg-background-light dark:bg-background-dark">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-primary"></div>
@@ -7509,25 +7512,27 @@ function App() {
                 {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
             </AnimatePresence>
             <Routes>
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? <CodeExecutorPage /> : <Navigate to="/" />} />
-                <Route path="/study-plan" element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />} />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? <QuizGeneratorPage /> : <Navigate to="/" />} />
-                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ? <AcademicIntegrityPage /> : <Navigate to="/" />} />
-                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route 
-                    path="/*" 
-                    element={
-                        isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : 
-                        (regularUserToken && regularUser && sessionReady) ? 
-                        <MainAppLayout 
-                            orchestratorStatus={orchestratorStatus} 
-                            handleNewChat={handleNewChat} 
-                            isSessionLoading={isSessionLoading}
-                            messages={appStateMessages}
-                            setMessages={setAppStateMessages}
-                         /> : null
-                    } 
+                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
+                    <CodeExecutorPage /> : <Navigate to="/" />} 
                 />
+                <Route
+                    path="/study-plan"
+                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
+                />
+                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
+                    <QuizGeneratorPage /> : <Navigate to="/" />} 
+                />
+                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
+                    <AcademicIntegrityPage /> : <Navigate to="/" />}
+                />
+                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
+                    orchestratorStatus={orchestratorStatus} 
+                    handleNewChat={handleNewChat} 
+                    isSessionLoading={isSessionLoading}
+                    messages={appStateMessages}
+                    setMessages={setAppStateMessages}
+                 /> : null} />
             </Routes>
         </div>
     );
@@ -7560,8 +7565,9 @@ import UserChatManager from './UserChatManager.jsx';
 import AdminInsights from './AdminInsights.jsx';
 import LLMConfigManager from './LLMConfigManager.jsx';
 import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
+import DatasetManager from './DatasetManager.jsx'; // <<< NEW IMPORT
 
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog } from 'lucide-react';
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog, Database } from 'lucide-react'; // <<< ADDED Database ICON
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -7639,6 +7645,7 @@ function AdminDashboardPage() {
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
     const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+    const [isDatasetModalOpen, setIsDatasetModalOpen] = useState(false); // <<< NEW STATE for Dataset Modal
     
 
     const adminLogoutHandler = () => {
@@ -7742,84 +7749,85 @@ function AdminDashboardPage() {
     };
 
     return (
-        <div className="min-h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark p-4 sm:p-6">
-            <header className="flex items-center justify-between mb-6 pb-3 border-b border-border-light dark:border-border-dark">
+        <div className="h-screen flex flex-col bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark">
+            <header className="flex-shrink-0 flex items-center justify-between p-4 sm:p-6 border-b border-border-light dark:border-border-dark">
                 <h1 className="text-2xl font-bold">Professor's Dashboard</h1>
                 <div className="flex items-center gap-2">
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={Database} onClick={() => setIsDatasetModalOpen(true)} title="Dataset Management" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/> {/* <<< NEW BUTTON */}
                     <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>
             </header>
 
-            <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
+            <main className="flex-1 p-4 sm:p-6 overflow-y-auto custom-scrollbar space-y-6">
+                <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
 
-            <div className="mt-6">
                 <ModelFeedbackStats />
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="space-y-6">
-                    <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="space-y-6">
+                        <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
 
-                    <div className="card-base p-0 sm:p-4">
-                        <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark px-4 sm:px-0 pt-4 sm:pt-0">Uploaded Subject Documents</h2>
-                        {isInitialLoading && !documents.length && ( <div className="flex items-center justify-center p-6"> <Loader2 size={24} className="animate-spin text-primary mr-2" /> Loading documents... </div> )}
-                        {loadingError && !documents.length && ( <div className="p-3 my-3 mx-4 sm:mx-0 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2"> <AlertTriangle size={18} /> {loadingError} <button onClick={() => fetchAdminData(true)} className="ml-auto text-xs underline hover:text-red-400">Retry</button> </div> )}
-                        {!isInitialLoading && documents.length === 0 && !loadingError && ( <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6 px-4 sm:px-0"> No subject documents uploaded yet. </p> )}
-                        {documents.length > 0 && (
-                            <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-gray-50 dark:bg-gray-800">
-                                        <tr>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium">Original Name</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium hidden md:table-cell">Uploaded</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium">Analysis Status</th>
-                                            <th className="px-3 sm:px-4 py-2.5 font-medium text-center">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {documents.map((doc) => (
-                                            <tr key={doc.serverFilename} className="border-b border-border-light dark:border-border-dark hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                                                <td className="px-3 sm:px-4 py-2 truncate max-w-[150px] sm:max-w-xs" title={doc.originalName}>{doc.originalName}</td>
-                                                <td className="px-3 sm:px-4 py-2 whitespace-nowrap hidden md:table-cell"> {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'MMM d, yyyy HH:mm') : 'N/A'} </td>
-                                                <td className="px-3 sm:px-4 py-2"> {(doc.hasFaq || doc.hasTopics || doc.hasMindmap) ? ( <span className="flex items-center text-green-600 dark:text-green-400 text-xs"><CheckCircle size={14} className="mr-1"/> Generated</span> ) : (doc.analysisUpdatedAt ? <span className="text-gray-500 dark:text-gray-400 text-xs">Empty/Skipped</span> : <span className="text-yellow-500 dark:text-yellow-400 text-xs">Pending</span>)} </td>
-                                                <td className="px-1 sm:px-4 py-2 text-center whitespace-nowrap">
-                                                    <IconButton icon={Eye} title="View Analysis" size="sm" variant="ghost" className="text-primary hover:text-primary-dark mr-0.5 sm:mr-1" onClick={() => handleViewAnalysis(doc)} disabled={isLoadingAnalysis && currentDocForModal?.serverFilename === doc.serverFilename} />
-                                                    <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteDocument(doc.serverFilename, doc.originalName)} />
-                                                </td>
+                        <div className="card-base p-0 sm:p-4">
+                            <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark px-4 sm:px-0 pt-4 sm:pt-0">Uploaded Subject Documents</h2>
+                            {isInitialLoading && !documents.length && ( <div className="flex items-center justify-center p-6"> <Loader2 size={24} className="animate-spin text-primary mr-2" /> Loading documents... </div> )}
+                            {loadingError && !documents.length && ( <div className="p-3 my-3 mx-4 sm:mx-0 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-300 rounded-md text-sm flex items-center gap-2"> <AlertTriangle size={18} /> {loadingError} <button onClick={() => fetchAdminData(true)} className="ml-auto text-xs underline hover:text-red-400">Retry</button> </div> )}
+                            {!isInitialLoading && documents.length === 0 && !loadingError && ( <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6 px-4 sm:px-0"> No subject documents uploaded yet. </p> )}
+                            {documents.length > 0 && (
+                                <div className="overflow-x-auto custom-scrollbar">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium">Original Name</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium hidden md:table-cell">Uploaded</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium">Analysis Status</th>
+                                                <th className="px-3 sm:px-4 py-2.5 font-medium text-center">Actions</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                                        </thead>
+                                        <tbody>
+                                            {documents.map((doc) => (
+                                                <tr key={doc.serverFilename} className="border-b border-border-light dark:border-border-dark hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                                                    <td className="px-3 sm:px-4 py-2 truncate max-w-[150px] sm:max-w-xs" title={doc.originalName}>{doc.originalName}</td>
+                                                    <td className="px-3 sm:px-4 py-2 whitespace-nowrap hidden md:table-cell"> {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'MMM d, yyyy HH:mm') : 'N/A'} </td>
+                                                    <td className="px-3 sm:px-4 py-2"> {(doc.hasFaq || doc.hasTopics || doc.hasMindmap) ? ( <span className="flex items-center text-green-600 dark:text-green-400 text-xs"><CheckCircle size={14} className="mr-1"/> Generated</span> ) : (doc.analysisUpdatedAt ? <span className="text-gray-500 dark:text-gray-400 text-xs">Empty/Skipped</span> : <span className="text-yellow-500 dark:text-yellow-400 text-xs">Pending</span>)} </td>
+                                                    <td className="px-1 sm:px-4 py-2 text-center whitespace-nowrap">
+                                                        <IconButton icon={Eye} title="View Analysis" size="sm" variant="ghost" className="text-primary hover:text-primary-dark mr-0.5 sm:mr-1" onClick={() => handleViewAnalysis(doc)} disabled={isLoadingAnalysis && currentDocForModal?.serverFilename === doc.serverFilename} />
+                                                        <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteDocument(doc.serverFilename, doc.originalName)} />
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
 
-                <div className="space-y-6">
-                    <div className="card-base p-4">
-                        <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
-                            <HelpCircle size={20} className="text-accent" /> Content Gap Analysis
-                        </h2>
-                        <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
-                            <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show student questions that the chatbot could not answer from your documents.</p>
-                            <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                    <div className="space-y-6">
+                        <div className="card-base p-4">
+                            <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
+                                <HelpCircle size={20} className="text-accent" /> Content Gap Analysis
+                            </h2>
+                            <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show student questions that the chatbot could not answer from your documents.</p>
+                                <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                            </div>
                         </div>
-                    </div>
-                    <div className="card-base p-4">
-                         <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
-                            <Lightbulb size={20} className="text-accent" /> Frequently Asked Topics
-                        </h2>
-                        <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
-                            <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show a word cloud or list of the most common topics students ask about.</p>
-                            <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                        <div className="card-base p-4">
+                             <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
+                                <Lightbulb size={20} className="text-accent" /> Frequently Asked Topics
+                            </h2>
+                            <div className="text-center py-8 px-4 border-2 border-dashed border-border-light dark:border-border-dark rounded-lg">
+                                <p className="text-sm text-text-muted-light dark:text-text-muted-dark">This panel will show a word cloud or list of the most common topics students ask about.</p>
+                                <p className="text-xs mt-1 text-text-muted-light/70 dark:text-text-muted-dark/70">(Feature Coming Soon)</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </main>
 
             {/* Modals */}
             <Modal isOpen={isAnalysisModalOpen} onClose={() => setIsAnalysisModalOpen(false)} title={`Analysis Results: ${currentDocForModal?.originalName || 'Document'}`} size="2xl">
@@ -7837,6 +7845,10 @@ function AdminDashboardPage() {
             </Modal>
             <Modal isOpen={isLlmModalOpen} onClose={() => setIsLlmModalOpen(false)} title="LLM Configuration Management" size="4xl">
                 <LLMConfigManager />
+            </Modal>
+            {/* <<< NEW MODAL FOR DATASETS --- */}
+            <Modal isOpen={isDatasetModalOpen} onClose={() => setIsDatasetModalOpen(false)} title="Secure Dataset Management" size="5xl">
+                <DatasetManager />
             </Modal>
         </div>
     );
@@ -8028,6 +8040,200 @@ function ApiKeyRequestManager({ requests, onAction }) {
 }
 
 export default ApiKeyRequestManager;
+```
+
+`frontend/src/components/admin/DatasetManager.jsx`
+
+```javascript
+// frontend/src/components/admin/DatasetManager.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import * as adminApi from '../../services/adminApi.js';
+import toast from 'react-hot-toast';
+import axios from 'axios';
+import { UploadCloud, File, Download, Loader2, AlertTriangle } from 'lucide-react';
+import Button from '../core/Button.jsx';
+import { format } from 'date-fns';
+
+// Helper to format file size
+const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+function DatasetManager() {
+    const [datasets, setDatasets] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [category, setCategory] = useState('');
+    const [version, setVersion] = useState('');
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [downloadingId, setDownloadingId] = useState(null);
+
+    const fetchDatasets = useCallback(async () => {
+        setIsLoading(true);
+        setError('');
+        try {
+            const data = await adminApi.getDatasets();
+            setDatasets(Array.isArray(data) ? data : []);
+        } catch (err) {
+            setError(err.message || 'Failed to fetch datasets.');
+            toast.error('Could not load datasets.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchDatasets();
+    }, [fetchDatasets]);
+
+    const handleFileChange = (e) => {
+        if (isUploading) return;
+        const file = e.target.files?.[0];
+        if (file) setSelectedFile(file);
+    };
+
+    const handleUpload = async () => {
+        if (!selectedFile || !category.trim() || !version.trim()) {
+            toast.error('Please select a file and provide a category and version.');
+            return;
+        }
+
+        setIsUploading(true);
+        setUploadProgress(0);
+        const toastId = toast.loading('Preparing secure upload...');
+
+        try {
+            // 1. Get pre-signed URL from our backend
+            const { url, key } = await adminApi.getPresignedUploadUrl(selectedFile.name, selectedFile.type);
+            toast.loading('Uploading file directly to secure storage...', { id: toastId });
+
+            // 2. Upload the file directly to S3 using the pre-signed URL
+            await axios.put(url, selectedFile, {
+                headers: { 'Content-Type': selectedFile.type },
+                onUploadProgress: (progressEvent) => {
+                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    setUploadProgress(percentCompleted);
+                },
+            });
+            toast.loading('Finalizing upload...', { id: toastId });
+
+            // 3. Finalize the upload by sending metadata to our backend
+            await adminApi.finalizeUpload({
+                originalName: selectedFile.name,
+                s3Key: key,
+                category: category.trim(),
+                version: version.trim(),
+                fileType: selectedFile.type,
+                size: selectedFile.size,
+            });
+
+            toast.success('Dataset uploaded successfully!', { id: toastId });
+            // Reset form and refresh list
+            setSelectedFile(null);
+            setCategory('');
+            setVersion('');
+            fetchDatasets();
+        } catch (err) {
+            const errorMsg = err.response?.data?.message || err.message || 'Upload failed.';
+            toast.error(errorMsg, { id: toastId });
+            setError(errorMsg);
+        } finally {
+            setIsUploading(false);
+            setUploadProgress(0);
+        }
+    };
+
+    const handleDownload = async (datasetId) => {
+        setDownloadingId(datasetId);
+        const toastId = toast.loading('Preparing secure download...');
+        try {
+            const { url } = await adminApi.getPresignedDownloadUrl(datasetId);
+            // The browser will handle the download via this secure, temporary link
+            window.location.href = url;
+            toast.success('Download will begin shortly!', { id: toastId });
+        } catch (err) {
+            const errorMsg = err.response?.data?.message || err.message || 'Download failed.';
+            toast.error(errorMsg, { id: toastId });
+        } finally {
+            setDownloadingId(null);
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Upload Form Section */}
+            <div className="card-base p-4">
+                <h3 className="text-lg font-semibold mb-3">Upload New Dataset</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <input type="file" onChange={handleFileChange} className="input-field col-span-3" disabled={isUploading} />
+                    <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category (e.g., Physics)" className="input-field" disabled={isUploading} />
+                    <input type="text" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Version (e.g., 1.0.0)" className="input-field" disabled={isUploading} />
+                </div>
+                {isUploading && (
+                    <div className="mt-4">
+                        <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                            <div className="bg-primary h-2.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                        </div>
+                        <p className="text-center text-sm mt-1">{uploadProgress}%</p>
+                    </div>
+                )}
+                <Button onClick={handleUpload} isLoading={isUploading} disabled={!selectedFile || isUploading} leftIcon={<UploadCloud size={16} />} className="mt-4 w-full md:w-auto">
+                    {isUploading ? 'Uploading...' : 'Upload Dataset'}
+                </Button>
+            </div>
+
+            {/* Datasets List Section */}
+            <div className="card-base p-0 sm:p-4">
+                <h3 className="text-lg font-semibold mb-3 px-4 pt-4 sm:px-0 sm:pt-0">Managed Datasets</h3>
+                {isLoading && <div className="p-6 text-center"><Loader2 className="animate-spin inline-block" /></div>}
+                {error && <div className="p-4 text-red-500"><AlertTriangle className="inline mr-2" />{error}</div>}
+                {!isLoading && !error && datasets.length === 0 && (
+                    <p className="py-6 text-center text-text-muted-light dark:text-text-muted-dark">No datasets have been uploaded yet.</p>
+                )}
+                {!isLoading && !error && datasets.length > 0 && (
+                    <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-50 dark:bg-gray-800">
+                                <tr>
+                                    <th className="px-4 py-2.5 font-medium">Filename</th>
+                                    <th className="px-4 py-2.5 font-medium">Category</th>
+                                    <th className="px-4 py-2.5 font-medium">Version</th>
+                                    <th className="px-4 py-2.5 font-medium">Size</th>
+                                    <th className="px-4 py-2.5 font-medium hidden md:table-cell">Uploaded On</th>
+                                    <th className="px-4 py-2.5 font-medium text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {datasets.map((ds) => (
+                                    <tr key={ds._id} className="border-b border-border-light dark:border-border-dark">
+                                        <td className="px-4 py-2 truncate max-w-xs" title={ds.originalName}><File size={14} className="inline mr-2" />{ds.originalName}</td>
+                                        <td className="px-4 py-2">{ds.category}</td>
+                                        <td className="px-4 py-2 font-mono">{ds.version}</td>
+                                        <td className="px-4 py-2">{formatFileSize(ds.size)}</td>
+                                        <td className="px-4 py-2 hidden md:table-cell">{format(new Date(ds.uploadDate), 'MMM d, yyyy HH:mm')}</td>
+                                        <td className="px-4 py-2 text-center">
+                                            <Button size="sm" variant="outline" onClick={() => handleDownload(ds._id)} isLoading={downloadingId === ds._id} leftIcon={<Download size={14} />}>
+                                                Download
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+export default DatasetManager;
 ```
 
 `frontend/src/components/admin/LLMConfigManager.jsx`
@@ -17768,6 +17974,16 @@ export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/$
 export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);
 
 export const getFeedbackStats = () => makeAdminApiRequest('get', '/feedback-stats');
+
+
+// --- NEW DATASET MANAGEMENT API FUNCTIONS ---
+export const getDatasets = () => makeAdminApiRequest('get', '/datasets');
+
+export const getPresignedUploadUrl = (fileName, fileType) => makeAdminApiRequest('post', '/datasets/presigned-url', { fileName, fileType });
+
+export const finalizeUpload = (datasetMetadata) => makeAdminApiRequest('post', '/datasets/finalize-upload', datasetMetadata);
+
+export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get', `/datasets/${datasetId}/download-url`);
 ```
 
 `frontend/src/services/api.js`
@@ -18413,6 +18629,13 @@ FIXED_ADMIN_PASSWORD=admin123
 TURNITIN_API_URL="https://your-institution.turnitin.com/api/v1"
 TURNITIN_API_KEY="your_api_key"
 TURNITIN_API_SECRET="your_api_secret"
+
+
+# Add these new variables to your server/.env file
+S3_BUCKET_NAME="your-unique-bucket-name"
+AWS_ACCESS_KEY_ID="YOUR_IAM_USER_ACCESS_KEY_ID"
+AWS_SECRET_ACCESS_KEY="YOUR_IAM_USER_SECRET_ACCESS_KEY"
+AWS_REGION="us-east-1" # Or your chosen region
 ```
 
 `server/config/db.js`
@@ -20632,6 +20855,59 @@ ChatHistorySchema.pre('findOneAndUpdate', function(next) {
 
 const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
 module.exports = ChatHistory;
+```
+
+`server/models/Dataset.js`
+
+```javascript
+// server/models/Dataset.js
+const mongoose = require('mongoose');
+
+const DatasetSchema = new mongoose.Schema({
+  originalName: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  s3Key: { // The unique key for the object in the S3 bucket
+    type: String,
+    required: true,
+    unique: true,
+  },
+  category: {
+    type: String,
+    required: [true, "Dataset category is required."],
+    trim: true,
+  },
+  version: {
+    type: String,
+    required: [true, "Dataset version is required."],
+    trim: true,
+  },
+  fileType: { // e.g., 'application/pdf'
+    type: String,
+    required: true,
+  },
+  size: { // Size in bytes
+    type: Number,
+    required: true,
+  },
+  uploadedBy: {
+    type: String, // For now, we'll just store 'admin'
+    required: true,
+    default: 'admin',
+  },
+  uploadDate: {
+    type: Date,
+    default: Date.now,
+  },
+}, { timestamps: true });
+
+DatasetSchema.index({ category: 1, version: 1 });
+
+const Dataset = mongoose.model('Dataset', DatasetSchema);
+
+module.exports = Dataset;
 ```
 
 `server/models/KnowledgeSource.js`
@@ -26678,6 +26954,7 @@ function doesQuerySuggestRecall(query) {
 }
 
 
+
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -26766,7 +27043,28 @@ router.post('/message', async (req, res) => {
             // 2. Inject logId into the response object
             agentResponse.logId = logEntry._id;
             
-            // 3. Send final event and close stream
+            // 3. Prepare message for DB and save it ONCE.
+            const aiMessageForDb = { 
+                ...agentResponse, 
+                sender: 'bot', 
+                role: 'model', 
+                text: agentResponse.finalAnswer, 
+                parts: [{ text: agentResponse.finalAnswer }], 
+                timestamp: new Date() 
+            };
+            delete aiMessageForDb.criticalThinkingCues;
+            delete aiMessageForDb.sender;
+            delete aiMessageForDb.text;
+            delete aiMessageForDb.action;
+    
+            await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
+            
+            // 4. Trigger KG extraction
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
+
+            // 5. Send final event and close stream
             streamEvent(res, { type: 'final_answer', content: agentResponse });
             res.end();
 
@@ -26785,9 +27083,9 @@ router.post('/message', async (req, res) => {
             
             // 2. Build the FINAL AI message object for both DB and Client
             const finalAiMessage = {
-                sender: 'bot', // for frontend
-                role: 'model', // for backend/db
-                text: agentResponse.finalAnswer, // for frontend convenience
+                sender: 'bot',
+                role: 'model',
+                text: agentResponse.finalAnswer,
                 parts: [{ text: agentResponse.finalAnswer }],
                 timestamp: new Date(),
                 thinking: agentResponse.thinking || null,
@@ -26805,7 +27103,7 @@ router.post('/message', async (req, res) => {
             delete messageForDb.criticalThinkingCues;
             delete messageForDb.action;
             
-            // 4. Save to Database
+            // 4. Save to Database ONCE
             await ChatHistory.findOneAndUpdate(
                 { sessionId, userId },
                 { $push: { messages: { $each: [userMessageForDb, messageForDb] } } },
@@ -26813,39 +27111,17 @@ router.post('/message', async (req, res) => {
             );
 
             // 5. Send final response to client
-            if (criticalThinkingEnabled) {
-                // Inject logId for streaming responses before sending
-                const finalStreamResponse = { ...finalAiMessage };
-                streamEvent(res, { type: 'final_answer', content: finalStreamResponse });
-                res.end();
-            } else {
-                if (finalAiMessage.action) {
-                    return res.status(200).json({ reply: finalAiMessage });
-                }
-                res.status(200).json({ reply: finalAiMessage });
-            }
+            res.status(200).json({ reply: finalAiMessage });
             
-            // 6. Trigger background KG extraction (no change needed here)
-            if (finalAiMessage.text) {
-                extractAndStoreKgFromText(finalAiMessage.text, sessionId, userId, llmConfig);
+            // 6. Trigger background KG extraction
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
             }
         }
         
-        // --- DB & KG LOGIC (COMMON TO BOTH SUCCESSFUL PATHS) ---
-        const aiMessageForDb = { ...agentResponse, sender: 'bot', role: 'model', text: agentResponse.finalAnswer, parts: [{ text: agentResponse.finalAnswer }], timestamp: new Date() };
-        delete aiMessageForDb.criticalThinkingCues;
-        delete aiMessageForDb.sender;
-        delete aiMessageForDb.text;
-        delete aiMessageForDb.action;
-
-        await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
-        
-        console.log(`[PerformanceLog] Logged decision for session ${sessionId}.`);
-
-        if (agentResponse.finalAnswer) {
-            extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
-        }
-
+        // --- FIX ---
+        // The redundant, common DB save logic that was here has been removed.
+        // --- END FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
@@ -26859,6 +27135,7 @@ router.post('/message', async (req, res) => {
         }
     }
 });
+
 
 /*
 router.post('/message', async (req, res) => {
@@ -27249,6 +27526,87 @@ router.post('/analyze-prompt', async (req, res) => {
     } catch (error) {
         console.error(`[API /analyze-prompt] Error for user ${userId} with prompt "${trimmedPrompt.substring(0, 50)}...":`, error);
         res.status(500).json({ message: error.message || 'Server error during prompt analysis.' });
+    }
+});
+
+module.exports = router;
+```
+
+`server/routes/datasetRoutes.js`
+
+```javascript
+// server/routes/admin/datasetRoutes.js
+const express = require('express');
+const router = express.Router();
+const Dataset = require('./../models/Dataset');
+const { getSignedUploadUrl, getSignedDownloadUrl } = require('./../services/s3Service');
+
+// @route   POST /api/admin/datasets/presigned-url
+// @desc    Get a secure, pre-signed URL for uploading a dataset to S3
+// @access  Admin
+router.post('/presigned-url', async (req, res) => {
+    const { fileName, fileType } = req.body;
+    if (!fileName || !fileType) {
+        return res.status(400).json({ message: 'fileName and fileType are required.' });
+    }
+
+    try {
+        const { url, key } = await getSignedUploadUrl(fileName, fileType);
+        res.json({ url, key });
+    } catch (error) {
+        console.error('Error generating pre-signed upload URL:', error);
+        res.status(500).json({ message: 'Could not generate upload URL.' });
+    }
+});
+
+// @route   POST /api/admin/datasets/finalize-upload
+// @desc    Create the dataset metadata record in MongoDB after successful S3 upload
+// @access  Admin
+router.post('/finalize-upload', async (req, res) => {
+    const { originalName, s3Key, category, version, fileType, size } = req.body;
+    if (!originalName || !s3Key || !category || !version || !fileType || !size) {
+        return res.status(400).json({ message: 'Missing required fields to finalize upload.' });
+    }
+
+    try {
+        const newDataset = new Dataset({
+            originalName, s3Key, category, version, fileType, size
+        });
+        await newDataset.save();
+        res.status(201).json({ message: 'Dataset metadata saved successfully.', dataset: newDataset });
+    } catch (error) {
+        console.error('Error finalizing upload:', error);
+        res.status(500).json({ message: 'Server error while saving dataset metadata.' });
+    }
+});
+
+// @route   GET /api/admin/datasets
+// @desc    Get a list of all uploaded datasets
+// @access  Admin
+router.get('/', async (req, res) => {
+    try {
+        const datasets = await Dataset.find().sort({ createdAt: -1 });
+        res.json(datasets);
+    } catch (error) {
+        console.error('Error fetching datasets:', error);
+        res.status(500).json({ message: 'Server error while fetching datasets.' });
+    }
+});
+
+// @route   GET /api/admin/datasets/:id/download-url
+// @desc    Get a secure, pre-signed URL for downloading a dataset from S3
+// @access  Admin
+router.get('/:id/download-url', async (req, res) => {
+    try {
+        const dataset = await Dataset.findById(req.params.id);
+        if (!dataset) {
+            return res.status(404).json({ message: 'Dataset not found.' });
+        }
+        const url = await getSignedDownloadUrl(dataset.s3Key, dataset.originalName);
+        res.json({ url });
+    } catch (error) {
+        console.error('Error generating pre-signed download URL:', error);
+        res.status(500).json({ message: 'Could not generate download URL.' });
     }
 });
 
@@ -27930,6 +28288,25 @@ router.post('/document/from-topic', async (req, res) => {
         }
     }
 });
+
+module.exports = router;
+```
+
+`server/routes/index.js`
+
+```javascript
+// server/routes/admin/index.js
+const express = require('express');
+const router = express.Router();
+
+// Import the individual route modules for different admin functionalities
+const adminCoreRoutes = require('./admin'); // This is the original admin.js with stats, user management, etc.
+const datasetRoutes = require('./datasetRoutes'); // The new dataset management routes
+
+// Use the imported routers
+// The path here is relative to the mount point in server.js, which will be '/api/admin'
+router.use('/', adminCoreRoutes); // Mounts routes from admin.js at the base ('/api/admin')
+router.use('/datasets', datasetRoutes); // Mounts dataset routes under '/api/admin/datasets'
 
 module.exports = router;
 ```
@@ -29366,9 +29743,8 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chat");
 const uploadRoutes = require("./routes/upload");
-// const filesRoutes = require("./routes/files");
 const analysisRoutes = require("./routes/analysis");
-const adminApiRoutes = require("./routes/admin");
+const adminMasterRouter = require('./routes/index'); 
 const subjectsRoutes = require("./routes/subjects");
 const generationRoutes = require("./routes/generationRoutes");
 const exportRoutes = require("./routes/export");
@@ -29407,8 +29783,9 @@ app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
 
 // --- Admin Routes ---
-// Apply the fixed admin auth middleware to the single admin router.
-app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
+// Apply the fixed admin auth middleware to the single MASTER admin router.
+// This ensures all routes defined in ./routes/admin/* are protected correctly.
+app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -29417,7 +29794,6 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/learning", learningRoutes);
 app.use("/api/learning/paths", learningPathRoutes);
 app.use("/api/upload", uploadRoutes);
-// app.use("/api/files", filesRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/subjects", subjectsRoutes);
 app.use("/api/generate", generationRoutes);
@@ -29425,9 +29801,9 @@ app.use("/api/export", exportRoutes);
 app.use("/api/kg", kgRoutes);
 app.use("/api/llm", llmConfigRoutes);
 app.use("/api/tools", toolsRoutes);
-app.use("/api/admin", adminApiRoutes);
 app.use("/api/knowledge-sources", knowledgeSourceRoutes);
 app.use('/api/feedback', feedbackRoutes);
+
 // --- Centralized Error Handling ---
 app.use((err, req, res, next) => {
   console.error("Unhandled Error:", err.stack || err);
@@ -29505,7 +29881,6 @@ async function checkRagService(url) {
 }
 
 startServer();
-
 ```
 
 `server/services/agentService.js`
@@ -30895,6 +31270,61 @@ async function queryPythonRagService(
 module.exports = {
     queryPythonRagService,
 };
+```
+
+`server/services/s3Service.js`
+
+```javascript
+// server/services/s3Service.js
+const AWS = require('aws-sdk');
+const { v4: uuidv4 } = require('uuid');
+
+const S3_BUCKET = process.env.S3_BUCKET_NAME;
+const AWS_REGION = process.env.AWS_REGION;
+const ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+
+// Configure the AWS SDK
+AWS.config.update({
+    region: AWS_REGION,
+    accessKeyId: ACCESS_KEY_ID,
+    secretAccessKey: SECRET_ACCESS_KEY,
+});
+
+const s3 = new AWS.S3({
+    signatureVersion: 'v4',
+});
+
+async function getSignedUploadUrl(fileName, fileType) {
+    const key = `datasets/${uuidv4()}-${fileName}`;
+
+    const params = {
+        Bucket: S3_BUCKET,
+        Key: key,
+        Expires: 120, // URL expires in 2 minutes
+        ContentType: fileType,
+    };
+
+    const url = await s3.getSignedUrlPromise('putObject', params);
+    return { url, key };
+}
+
+async function getSignedDownloadUrl(key, originalName) {
+    const params = {
+        Bucket: S3_BUCKET,
+        Key: key,
+        Expires: 120, // URL expires in 2 minutes
+        ResponseContentDisposition: `attachment; filename="${originalName}"`, // Prompts download with original filename
+    };
+
+    const url = await s3.getSignedUrlPromise('getObject', params);
+    return url;
+}
+
+module.exports = {
+    getSignedUploadUrl,
+    getSignedDownloadUrl,
+};  
 ```
 
 `server/services/sessionAnalysisService.js`
