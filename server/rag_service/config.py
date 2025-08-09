@@ -5,10 +5,50 @@ from dotenv import load_dotenv
 from pythonjsonlogger import jsonlogger
 
 # --- Load .env from the parent 'server' directory ---
-# This ensures that both Node.js and Python use the same .env file
-# The path is calculated relative to this config.py file
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+def setup_logging():
+    """Configure logging to output structured JSON to the SINGLE combined log file."""
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            root_logger.removeHandler(handler)
+
+    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, 'app.log')
+    
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
+    )
+    
+    class ServiceContextFilter(logging.Filter):
+        def filter(self, record):
+            record.service = "ai-tutor-python-rag"
+            return True
+
+    root_logger.addFilter(ServiceContextFilter())
+    
+    file_handler = logging.FileHandler(log_file_path, mode='a')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    LOGGING_LEVEL = os.getenv('LOGGING_LEVEL', 'INFO').upper()
+    root_logger.setLevel(LOGGING_LEVEL)
+    
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    
+    # Use a temporary logger to announce initialization
+    init_logger = logging.getLogger(__name__)
+    init_logger.info(f"Python logging initialized. Appending to: {log_file_path}")
+
+setup_logging()
 
 
 # ─── Logging Configuration ───────────────────────────
@@ -16,49 +56,6 @@ logger = logging.getLogger(__name__)
 LOGGING_LEVEL_NAME = os.getenv('LOGGING_LEVEL', 'INFO').upper()
 LOGGING_LEVEL      = getattr(logging, LOGGING_LEVEL_NAME, logging.INFO)
 LOGGING_FORMAT     = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
-
-def setup_logging():
-    """Configure logging to output structured JSON to a central file."""
-    root_logger = logging.getLogger()
-    # Prevent duplicate handlers
-    if root_logger.handlers:
-        for handler in root_logger.handlers:
-            root_logger.removeHandler(handler)
-
-    # --- THIS IS THE KEY CHANGE ---
-    # Define the log file path relative to this config file
-    # It will place the log file at server/logs/rag_service.log
-    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, 'rag_service.log')
-    # --- END KEY CHANGE ---
-
-    # The formatter now includes a 'service' field
-    formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
-    )
-    
-    # Add the service name to all log records from this service
-    root_logger.addFilter(lambda record: setattr(record, 'service', 'ai-tutor-python-rag') or True)
-
-    # 1. Handler for the central log file
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
-
-    # 2. Handler for the console (so you can still see logs in the Python terminal)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-    
-    root_logger.setLevel(LOGGING_LEVEL)
-    
-    # Suppress noisy third-party logs
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    # ... (rest of the suppressions) ...
-    
-    logging.getLogger(__name__).info(f"Logging initialized. Outputting to console and {log_file_path}")
-
 
 
 # --- API Keys and Service URLs ---

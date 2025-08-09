@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { redisClient } = require('../config/redisClient');
+const { auditLog } = require('../utils/logger');
 
 // Note: The main 'authMiddleware' will be applied in server.js before this router is used,
 // so we don't need to add it to each route here. req.user will be available.
@@ -57,6 +58,10 @@ router.put('/profile', async (req, res) => {
         // The performanceMetrics field is intentionally not updated here, as it's managed by the system.
 
         await user.save();
+        
+        auditLog(req, 'USER_PROFILE_UPDATE_SUCCESS', {
+            updatedFields: Object.keys(req.body) // Log which fields were included in the update
+        });
         
         if (redisClient && redisClient.isOpen) {
             const cacheKey = `user:${req.user._id}`;

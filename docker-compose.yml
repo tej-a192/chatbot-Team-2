@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # Qdrant Vector DB Service
   qdrant:
@@ -18,7 +20,7 @@ services:
     container_name: neo4j_service
     ports:
       - "7474:7474"
-      - "7687:7687" # Corrected internal port for Bolt
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -52,23 +54,31 @@ services:
       - "9200:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - ai_tutor_network
     restart: unless-stopped
 
-  # Logstash Pipeline Service
-  logstash:
-    image: docker.elastic.co/logstash/logstash:8.11.3
-    container_name: logstash
-    # REMOVE the 'ports' section for 5044
+  # Filebeat Lightweight Log Shipper Service
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.3
+    container_name: filebeat
+    user: root
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     volumes:
-      # Keep this line
-      - ./server/logging/pipeline/:/usr/share/logstash/pipeline/:ro
-      # ADD this new line to mount the log file
-      - ./server/logs/:/usr/share/logstash/logs/:ro
-    # REMOVE the 'command' line
+      # --- THIS IS THE ONLY LINE TO CHANGE (remove ":ro") ---
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml
+      # --- KEEP ":ro" ON THIS LINE ---
+      - ./server/logs:/usr/share/filebeat/logs:ro
+    command: sh -c 'chmod go-w /usr/share/filebeat/filebeat.yml && filebeat -e -d "publish"'
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - ai_tutor_network
     restart: unless-stopped
@@ -79,12 +89,16 @@ services:
     container_name: kibana
     ports:
       - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - ai_tutor_network
     restart: unless-stopped
 
+  # Prometheus Monitoring Service
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -99,6 +113,7 @@ services:
       - ai_tutor_network
     restart: unless-stopped
 
+  # Grafana Visualization Service
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
@@ -111,7 +126,6 @@ services:
     networks:
       - ai_tutor_network
     restart: unless-stopped
-
 
 volumes:
   qdrant_data:

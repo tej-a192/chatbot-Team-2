@@ -1,7 +1,7 @@
 // server/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 require('dotenv').config();
 
 const authMiddleware = async (req, res, next) => {

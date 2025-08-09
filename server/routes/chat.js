@@ -12,7 +12,8 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
+const { auditLog } = require('../utils/logger');
 const router = express.Router();
 
 
@@ -49,19 +50,14 @@ router.post('/message', async (req, res) => {
     
     const userId = req.user._id;
 
-    logger.info('User submitted a new query', {
-        eventType: 'USER_QUERY',
-        userId: userId.toString(),
-        sessionId: sessionId,
-        payload: {
-            query: query.substring(0, 200), // Log first 200 chars to prevent overly long logs
-            queryLength: query.length,
-            useWebSearch: !!useWebSearch,
-            useAcademicSearch: !!useAcademicSearch,
-            criticalThinkingEnabled: !!criticalThinkingEnabled,
-            documentContext: documentContextName || 'None'
-        }
+    auditLog(req, 'CHAT_MESSAGE_SENT', {
+        queryLength: query.length,
+        useWebSearch: !!useWebSearch,
+        useAcademicSearch: !!useAcademicSearch,
+        criticalThinkingEnabled: !!criticalThinkingEnabled,
+        documentContext: documentContextName || null
     });
+
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
@@ -246,6 +242,11 @@ router.post('/history', async (req, res) => {
     const userId = req.user._id;
     const newSessionId = uuidv4();
     
+    auditLog(req, 'NEW_CHAT_SESSION_CREATED', {
+        previousSessionId: previousSessionId || null,
+        skipAnalysis: !!skipAnalysis
+    });
+
     // This will hold our final response payload
     const responsePayload = {
         message: 'New session started.',
@@ -392,6 +393,11 @@ router.delete('/session/:sessionId', async (req, res) => {
 router.post('/analyze-prompt', async (req, res) => {
     const { prompt } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'PROMPT_COACH_REQUESTED', {
+        promptLength: prompt ? prompt.length : 0
+    });
+
 
     // --- REVISED VALIDATION ---
     if (!prompt || typeof prompt !== 'string') {

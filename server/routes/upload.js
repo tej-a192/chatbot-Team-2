@@ -9,7 +9,7 @@ const User = require('../models/User');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
-const logger = require('../utils/logger');
+const { logger, auditLog } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -80,18 +80,12 @@ router.post('/', upload.single('file'), async (req, res) => {
         });
         await newSource.save();
 
-        logger.info('User file upload successful', {
-            eventType: 'FILE_UPLOAD_SUCCESS',
-            userId: userId.toString(),
-            payload: {
-                originalName: originalName,
-                serverFilename: newSource.serverFilename,
-                mimeType: mimetype,
-                sizeBytes: req.file.size,
-                sourceType: type,
-                processor: processor
-            }
+        auditLog(req, 'KNOWLEDGE_SOURCE_UPLOAD_SUCCESS', {
+            sourceType: type,
+            originalName: originalName,
+            sizeBytes: req.file.size
         });
+
         res.status(202).json({ 
             message: "File accepted. Processing has started in the background.",
             source: newSource
@@ -149,17 +143,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
 
     } catch (error) {
-        logger.error('User file upload failed', {
-            eventType: 'FILE_UPLOAD_FAILURE',
-            userId: userId.toString(),
-            payload: {
-                originalName: originalName,
-                mimeType: mimetype,
-                sizeBytes: req.file?.size,
-                errorMessage: error.message,
-                stack: error.stack
-            }
-        });
+        
 
         console.error(`Error processing uploaded file '${originalName}':`, error);
         if (newSource) {

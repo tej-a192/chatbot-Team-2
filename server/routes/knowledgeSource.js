@@ -8,6 +8,7 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 const fs = require('fs').promises;
 
 // --- HELPER FOR PYTHON SERVICE DELETION ---
@@ -54,6 +55,10 @@ router.post('/', async (req, res) => {
             status: 'processing_extraction',
         });
         await newSource.save();
+
+        auditLog(req, 'KNOWLEDGE_SOURCE_URL_INGEST_SUCCESS', {
+            url: content
+        });
 
         // Immediately respond to the user so the UI doesn't hang
         res.status(202).json({ 
@@ -181,6 +186,12 @@ router.delete('/:sourceId', async (req, res) => {
         }
 
         console.log(`[Delete Source] Deleting source: '${source.title}' for user: ${username}`);
+
+        auditLog(req, 'KNOWLEDGE_SOURCE_DELETE_SUCCESS', {
+            sourceId: sourceId,
+            sourceTitle: source.title,
+            sourceType: source.sourceType
+        });
 
         // 1. Delete from Vector DB (Qdrant) and Graph DB (Neo4j) via Python service
         await callPythonDeletionEndpoint(`/delete_qdrant_document_data`, userId, source.title);

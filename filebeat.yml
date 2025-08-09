@@ -1,0 +1,25 @@
+filebeat.inputs:
+- type: filestream  # Using the modern, recommended input type
+  id: my-app-logs
+  enabled: true
+  paths:
+    - /usr/share/filebeat/logs/app.log
+
+# This section is the key. We remove all JSON parsing from Filebeat.
+# It will now treat each line as a simple text message.
+# The 'message' field will contain the raw JSON string.
+parsers:
+  - ndjson:
+      target: "" # Don't output under a json key, but parse it
+      keys_under_root: true
+      overwrite_keys: true
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  index: "ai-tutor-logs-%{+yyyy.MM.dd}"
+
+setup.template.name: "ai-tutor-logs"
+setup.template.pattern: "ai-tutor-logs-*"
+
+setup.kibana:
+  host: "kibana:5601"

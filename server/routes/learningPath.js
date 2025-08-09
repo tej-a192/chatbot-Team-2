@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const LearningPath = require('../models/LearningPath');
 const { createLearningPath } = require('../services/learning/curriculumOrchestrator');
+const { auditLog } = require('../utils/logger');
 
 // @route   POST /api/learning/paths/generate
 // @desc    Create a new learning path for the authenticated user based on a goal.
@@ -11,14 +12,27 @@ router.post('/generate', async (req, res) => {
     const { goal, context } = req.body;
     const userId = req.user._id;
 
+
     if (!goal) {
         return res.status(400).json({ message: 'A learning goal is required.' });
     }
 
     try {
+        
+        const newPathOrQuestions = await createLearningPath(userId, goal, context);
+        
+        auditLog(req, 'STUDY_PLAN_GENERATION_SUCCESS', {
+            goal: goal,
+            isClarificationNeeded: newPathOrQuestions.isQuestionnaire || false
+        });
+
         const newPath = await createLearningPath(userId, goal, context);
         res.status(201).json(newPath);
     } catch (error) {
+        auditLog(req, 'STUDY_PLAN_GENERATION_FAILURE', {
+            goal: goal,
+            error: error.message
+        });
         console.error(`[API Error] Failed to create learning path for user ${userId}:`, error);
         res.status(500).json({ message: `Server error: ${error.message}` });
     }
@@ -77,6 +91,11 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
         learningPath.markModified('modules');
         await learningPath.save();
         
+        auditLog(req, 'STUDY_PLAN_MODULE_UPDATED', {
+            pathId: pathId,
+            moduleId: moduleId,
+            newStatus: status
+        });
         // Return the entire updated path so the frontend can refresh its state
         res.status(200).json(learningPath);
 
@@ -105,6 +124,9 @@ router.delete('/:pathId', async (req, res) => {
         // Also remove the reference from the User's learningPaths array (optional but good cleanup)
         await User.updateOne({ _id: userId }, { $pull: { learningPaths: pathId } });
 
+        auditLog(req, 'STUDY_PLAN_DELETED', {
+            pathId: pathId
+        });
         res.status(200).json({ message: 'Learning path deleted successfully.' });
     } catch (error) {
         console.error(`[API Error] Failed to delete learning path ${pathId} for user ${userId}:`, error);

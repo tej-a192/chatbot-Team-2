@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const User = require('../models/User');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { auditLog } = require('../utils/logger');
 require('dotenv').config();
 
 const router = express.Router();
@@ -60,21 +61,30 @@ router.post('/signup', async (req, res) => {
 
     await newUser.save();
 
-    const payload = {
-      userId: newUser._id,
-      email: newUser.email,
-      username: newUser.username,
-    };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+  // --- ADDED AUDIT LOG ---
+  // We pass `req` so the logger can get IP, but also manually add user info
+  // because `req.user` isn't set until a user is logged in.
+  auditLog(req, 'USER_SIGNUP_SUCCESS', { 
+      email: newUser.email, 
+      userId: newUser._id.toString() 
+  });
+  // --- END ---
 
-    res.status(201).json({
-      token,
-      _id: newUser._id,
-      email: newUser.email,
-      username: newUser.username,
-      sessionId: uuidv4(),
-      message: "User registered successfully",
-    });
+  const payload = {
+    userId: newUser._id,
+    email: newUser.email,
+    username: newUser.username,
+  };
+  const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+  res.status(201).json({
+    token,
+    _id: newUser._id,
+    email: newUser.email,
+    username: newUser.username,
+    sessionId: uuidv4(),
+    message: "User registered successfully",
+  });
 
   } catch (error) {
     console.error('Signup Error:', error);
@@ -98,36 +108,44 @@ router.post('/signin', async (req, res) => {
   }
 
   try {
-    const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
-    const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
+      const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
+      const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
 
-    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        console.log("Admin login successful via special auth check.");
-        return res.status(200).json({
-            isAdminLogin: true,
-            message: 'Admin login successful',
-        });
-    }
+      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+          // --- THIS IS THE NEW, CORRECT LOCATION FOR THE ADMIN LOGIN LOG ---
+          auditLog(req, 'ADMIN_LOGIN_SUCCESS', { username: email });
+          // --- END ---
+          
+          console.log("Admin login successful via special auth check.");
+          return res.status(200).json({
+              isAdminLogin: true,
+              message: 'Admin login successful',
+          });
+      }
 
-    const user = await User.findByCredentials(email, password);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid email address or password.' });
-    }
+      const user = await User.findByCredentials(email, password);
+      if (!user) {
+          auditLog(req, 'USER_LOGIN_FAILURE', { email: email, reason: 'Invalid credentials' });
+          return res.status(401).json({ message: 'Invalid email address or password.' });
+      }
 
-    const payload = { userId: user._id, email: user.email };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+      req.user = user; 
+      auditLog(req, 'USER_LOGIN_SUCCESS', { email: user.email });
 
-    res.status(200).json({
-      token,
-      _id: user._id,
-      email: user.email,
-      username: user.username,
-      sessionId: uuidv4(),
-      message: "Login successful",
-    });
+      const payload = { userId: user._id, email: user.email };
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+      res.status(200).json({
+          token,
+          _id: user._id,
+          email: user.email,
+          username: user.username,
+          sessionId: uuidv4(),
+          message: "Login successful",
+      });
   } catch (error) {
-    console.error('Signin Error:', error);
-    res.status(500).json({ message: 'Server error during signin.' });
+      console.error('Signin Error:', error);
+      res.status(500).json({ message: 'Server error during signin.' });
   }
 });
 

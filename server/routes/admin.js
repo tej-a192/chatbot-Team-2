@@ -11,6 +11,7 @@ const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
 const { encrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 const router = express.Router();
 const CACHE_DURATION_SECONDS = 30; 
@@ -81,6 +82,10 @@ router.post("/key-requests/approve", async (req, res) => {
 
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_APPROVE', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -114,6 +119,10 @@ router.post("/key-requests/reject", async (req, res) => {
     user.apiKeyRequestStatus = "rejected";
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_REJECT', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -271,16 +280,23 @@ router.post(
       }
 
       adminDocRecord = new AdminDocument({
-        filename: serverFilename,
-        originalName: originalName,
-        text: ragResult.text,
-      });
-      await adminDocRecord.save();
-      await fsPromises.unlink(tempServerPath);
+      filename: serverFilename,
+      originalName: originalName,
+      text: ragResult.text,
+    });
+    await adminDocRecord.save();
+    await fsPromises.unlink(tempServerPath);
 
-      res.status(202).json({
-        message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
-      });
+    // --- ADDED AUDIT LOG ---
+    auditLog(req, 'ADMIN_DOCUMENT_UPLOAD_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
+    // --- END ---
+
+    res.status(202).json({
+      message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
+    });
 
       const { Worker } = require("worker_threads");
       const analysisWorker = new Worker(
@@ -393,6 +409,11 @@ router.delete("/documents/:serverFilename", async (req, res) => {
       originalName
     );
     await AdminDocument.deleteOne({ _id: docToDelete._id });
+
+    auditLog(req, 'ADMIN_DOCUMENT_DELETE_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
 
     res
       .status(200)

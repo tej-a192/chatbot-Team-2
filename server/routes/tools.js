@@ -9,6 +9,7 @@ const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
 const { v4: uuidv4 } = require('uuid'); 
+const { auditLog } = require('../utils/logger');
 const integrityReportCache = new Map();
 
 
@@ -68,6 +69,13 @@ async function getApiKeyForRequest(userId) {
 // ... (existing tool routes like /execute, /analyze-code, etc. remain the same) ...
 router.post("/execute", async (req, res) => {
   const { language, code, testCases } = req.body;
+
+  auditLog(req, 'TOOL_USAGE_CODE_EXECUTOR', {
+      language: language,
+      codeLength: code ? code.length : 0,
+      testCaseCount: testCases ? testCases.length : 0
+  });
+
   if (!code || !language) {
     return res.status(400).json({ message: "Code and language are required." });
   }
@@ -199,6 +207,12 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   form.append("quiz_option", quizOption);
 
   try {
+
+    auditLog(req, 'TOOL_USAGE_QUIZ_GENERATOR', {
+        sourceDocument: file ? file.originalname : 'N/A',
+        quizOption: quizOption
+    });
+
     const apiKey = await getApiKeyForRequest(req.user._id);
     form.append("api_key", apiKey);
 
@@ -212,6 +226,13 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 
     res.status(200).json(pythonResponse.data);
   } catch (error) {
+
+    auditLog(req, 'TOOL_USAGE_QUIZ_GENERATOR_FAILURE', {
+        sourceDocument: file ? file.originalname : 'N/A',
+        quizOption: quizOption,
+        error: error.message
+    });
+
     const errorMsg =
       error.response?.data?.error ||
       error.message ||
@@ -229,6 +250,12 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
+
+    auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
+        textLength: text ? text.length : 0,
+        checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
+    });
+
     if (!text || text.trim().length < 50) {
         return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
     }
@@ -257,6 +284,10 @@ router.post('/analyze-integrity/submit', async (req, res) => {
         res.status(202).json({ reportId, initialReport });
 
     } catch (error) {
+        auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER_FAILURE', {
+            textLength: text ? text.length : 0,
+            error: error.message
+        });
         const errorMsg = error.response?.data?.error || error.message;
         console.error(`[Node Integrity Submit] Error: ${errorMsg}`);
         res.status(error.response?.status || 500).json({ message: errorMsg });

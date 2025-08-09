@@ -23,7 +23,7 @@ const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
 const { connectRedis } = require("./config/redisClient");
-const logger = require('./utils/logger');
+const { logger } = require('./utils/logger');
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -42,6 +42,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const analyticsRoutes = require('./routes/analytics');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -62,6 +63,14 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+app.use((req, res, next) => {
+    const end = httpRequestDurationMicroseconds.startTimer();
+    res.on('finish', () => {
+        end({ route: req.route?.path || req.path, code: res.statusCode, method: req.method });
+    });
+    next();
+});
+
 // --- API Route Mounting ---
 app.get("/", (req, res) => res.send("AI Tutor Backend API is running..."));
 app.get('/metrics', async (req, res) => {
@@ -71,6 +80,8 @@ app.get('/metrics', async (req, res) => {
 app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
+app.use("/api/admin/analytics", fixedAdminAuthMiddleware, analyticsRoutes);
+
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);

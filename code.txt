@@ -18093,6 +18093,7 @@ SENTRY_DSN="https://458178e6527d82e9373ea1b1b34d3954@o4509804762497024.ingest.us
 REDIS_URL="redis://localhost:6379"
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
+ELASTICSEARCH_URL=http://localhost:9200
 
 ```
 
@@ -18130,6 +18131,28 @@ const connectDB = async (mongoUri) => {
 
 module.exports = connectDB;
 
+```
+
+`server/config/elasticsearchClient.js`
+
+```javascript
+// server/config/elasticsearchClient.js
+const { Client } = require('@elastic/elasticsearch');
+
+// The Elasticsearch container is available at this address from our Node.js app
+const ELASTICSEARCH_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
+
+let esClient;
+
+try {
+    esClient = new Client({ node: ELASTICSEARCH_URL });
+    console.log("✓ Elasticsearch client configured.");
+} catch (error) {
+    console.error("!!! Could not create Elasticsearch client:", error);
+    esClient = null;
+}
+
+module.exports = esClient;
 ```
 
 `server/config/promptTemplates.js`
@@ -20076,7 +20099,7 @@ if (process.env.SENTRY_DSN) {
 // server/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 require('dotenv').config();
 
 const authMiddleware = async (req, res, next) => {
@@ -20172,9 +20195,10 @@ module.exports = { cacheMiddleware };
 ```javascript
 // server/middleware/fixedAdminAuthMiddleware.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') }); // Ensure .env from server directory is loaded
+const { auditLog } = require('../utils/logger');
 
-const ADMIN_USERNAME = process.env.FIXED_ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
+const ADMIN_USERNAME = process.env.FIXED_ADMIN_USERNAME
+const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD
 
 const fixedAdminAuthMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -20204,13 +20228,11 @@ const fixedAdminAuthMiddleware = (req, res, next) => {
     const [username, password] = decodedCreds.split(':', 2); // Split into max 2 parts
 
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-        // Attach a simple admin context to the request object
-        // This isn't a full user object from DB, just an indicator
         req.adminUser = { 
             username: ADMIN_USERNAME, 
-            id: "fixed_admin_id_marker" // A placeholder ID
+            id: "fixed_admin_id_marker"
         }; 
-        return next(); // Authentication successful, proceed to the route handler
+        return next(); // Authentication successful, proceed.
     }
 
     // Authentication failed
@@ -22483,7 +22505,13 @@ def generate_document_from_topic_route():
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
-
+# Test for sentry debug
+# url : http://localhost:5000/debug-sentry-python
+# @app.route('/debug-sentry-python', methods=['GET'])
+# def trigger_python_sentry_error():
+#     # This will cause a deliberate ZeroDivisionError
+#     result = 1 / 0
+#     return "This won't be reached."
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])
@@ -23212,10 +23240,50 @@ from dotenv import load_dotenv
 from pythonjsonlogger import jsonlogger
 
 # --- Load .env from the parent 'server' directory ---
-# This ensures that both Node.js and Python use the same .env file
-# The path is calculated relative to this config.py file
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+def setup_logging():
+    """Configure logging to output structured JSON to the SINGLE combined log file."""
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            root_logger.removeHandler(handler)
+
+    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, 'app.log')
+    
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
+    )
+    
+    class ServiceContextFilter(logging.Filter):
+        def filter(self, record):
+            record.service = "ai-tutor-python-rag"
+            return True
+
+    root_logger.addFilter(ServiceContextFilter())
+    
+    file_handler = logging.FileHandler(log_file_path, mode='a')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    LOGGING_LEVEL = os.getenv('LOGGING_LEVEL', 'INFO').upper()
+    root_logger.setLevel(LOGGING_LEVEL)
+    
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    
+    # Use a temporary logger to announce initialization
+    init_logger = logging.getLogger(__name__)
+    init_logger.info(f"Python logging initialized. Appending to: {log_file_path}")
+
+setup_logging()
 
 
 # ─── Logging Configuration ───────────────────────────
@@ -23223,49 +23291,6 @@ logger = logging.getLogger(__name__)
 LOGGING_LEVEL_NAME = os.getenv('LOGGING_LEVEL', 'INFO').upper()
 LOGGING_LEVEL      = getattr(logging, LOGGING_LEVEL_NAME, logging.INFO)
 LOGGING_FORMAT     = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
-
-def setup_logging():
-    """Configure logging to output structured JSON to a central file."""
-    root_logger = logging.getLogger()
-    # Prevent duplicate handlers
-    if root_logger.handlers:
-        for handler in root_logger.handlers:
-            root_logger.removeHandler(handler)
-
-    # --- THIS IS THE KEY CHANGE ---
-    # Define the log file path relative to this config file
-    # It will place the log file at server/logs/rag_service.log
-    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, 'rag_service.log')
-    # --- END KEY CHANGE ---
-
-    # The formatter now includes a 'service' field
-    formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
-    )
-    
-    # Add the service name to all log records from this service
-    root_logger.addFilter(lambda record: setattr(record, 'service', 'ai-tutor-python-rag') or True)
-
-    # 1. Handler for the central log file
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
-
-    # 2. Handler for the console (so you can still see logs in the Python terminal)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-    
-    root_logger.setLevel(LOGGING_LEVEL)
-    
-    # Suppress noisy third-party logs
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    # ... (rest of the suppressions) ...
-    
-    logging.getLogger(__name__).info(f"Logging initialized. Outputting to console and {log_file_path}")
-
 
 
 # --- API Keys and Service URLs ---
@@ -24979,6 +25004,7 @@ def extract_text_for_quiz(file_path: str) -> str:
 flask
 requests
 langchain
+langchain-text-splitters
 langchain-huggingface
 pypdf
 PyPDF2
@@ -25552,6 +25578,7 @@ const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
 const { encrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 const router = express.Router();
 const CACHE_DURATION_SECONDS = 30; 
@@ -25622,6 +25649,10 @@ router.post("/key-requests/approve", async (req, res) => {
 
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_APPROVE', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -25655,6 +25686,10 @@ router.post("/key-requests/reject", async (req, res) => {
     user.apiKeyRequestStatus = "rejected";
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_REJECT', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -25812,16 +25847,23 @@ router.post(
       }
 
       adminDocRecord = new AdminDocument({
-        filename: serverFilename,
-        originalName: originalName,
-        text: ragResult.text,
-      });
-      await adminDocRecord.save();
-      await fsPromises.unlink(tempServerPath);
+      filename: serverFilename,
+      originalName: originalName,
+      text: ragResult.text,
+    });
+    await adminDocRecord.save();
+    await fsPromises.unlink(tempServerPath);
 
-      res.status(202).json({
-        message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
-      });
+    // --- ADDED AUDIT LOG ---
+    auditLog(req, 'ADMIN_DOCUMENT_UPLOAD_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
+    // --- END ---
+
+    res.status(202).json({
+      message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
+    });
 
       const { Worker } = require("worker_threads");
       const analysisWorker = new Worker(
@@ -25934,6 +25976,11 @@ router.delete("/documents/:serverFilename", async (req, res) => {
       originalName
     );
     await AdminDocument.deleteOne({ _id: docToDelete._id });
+
+    auditLog(req, 'ADMIN_DOCUMENT_DELETE_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
 
     res
       .status(200)
@@ -26109,6 +26156,62 @@ router.get('/:documentFilename', authMiddleware, async (req, res) => {
 module.exports = router;
 ```
 
+`server/routes/analytics.js`
+
+```javascript
+// server/routes/analytics.js
+const express = require('express');
+const router = express.Router();
+const esClient = require('../config/elasticsearchClient');
+const logger = require('../utils/logger');
+
+// @route   GET /api/analytics/feature-usage
+// @desc    Get counts of different user activities
+// @access  Admin
+router.get('/feature-usage', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service is currently unavailable." });
+    }
+
+try {
+    const { body } = await esClient.search({
+        index: 'ai-tutor-logs-*',
+        body: {
+            size: 0,
+            query: {
+                exists: { field: "eventType" } // Look for top-level field
+            },
+            aggs: {
+                feature_counts: {
+                    terms: { field: "eventType.keyword", size: 10 } // Aggregate on top-level field
+                }
+            }
+        }
+    });
+    
+    logger.info('Raw Elasticsearch aggregation response', { responseBody: body });
+
+    if (body && body.aggregations && body.aggregations.feature_counts) {
+        const formattedData = body.aggregations.feature_counts.buckets.map(bucket => ({
+            feature: bucket.key,
+            count: bucket.doc_count
+        }));
+        res.json(formattedData);
+    } else {
+        res.json([]);
+    }
+} catch (error) {
+        logger.error('Elasticsearch query for feature usage failed', {
+            errorMessage: error.message,
+            meta: error.meta?.body
+        });
+        res.status(500).json({ message: "Failed to retrieve feature usage analytics." });
+    }
+});
+
+module.exports = router;
+```
+
 `server/routes/auth.js`
 
 ```javascript
@@ -26118,6 +26221,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const User = require('../models/User');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { auditLog } = require('../utils/logger');
 require('dotenv').config();
 
 const router = express.Router();
@@ -26174,21 +26278,30 @@ router.post('/signup', async (req, res) => {
 
     await newUser.save();
 
-    const payload = {
-      userId: newUser._id,
-      email: newUser.email,
-      username: newUser.username,
-    };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+  // --- ADDED AUDIT LOG ---
+  // We pass `req` so the logger can get IP, but also manually add user info
+  // because `req.user` isn't set until a user is logged in.
+  auditLog(req, 'USER_SIGNUP_SUCCESS', { 
+      email: newUser.email, 
+      userId: newUser._id.toString() 
+  });
+  // --- END ---
 
-    res.status(201).json({
-      token,
-      _id: newUser._id,
-      email: newUser.email,
-      username: newUser.username,
-      sessionId: uuidv4(),
-      message: "User registered successfully",
-    });
+  const payload = {
+    userId: newUser._id,
+    email: newUser.email,
+    username: newUser.username,
+  };
+  const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+  res.status(201).json({
+    token,
+    _id: newUser._id,
+    email: newUser.email,
+    username: newUser.username,
+    sessionId: uuidv4(),
+    message: "User registered successfully",
+  });
 
   } catch (error) {
     console.error('Signup Error:', error);
@@ -26212,36 +26325,44 @@ router.post('/signin', async (req, res) => {
   }
 
   try {
-    const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
-    const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
+      const ADMIN_EMAIL = process.env.FIXED_ADMIN_USERNAME || 'admin@admin.com';
+      const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
 
-    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        console.log("Admin login successful via special auth check.");
-        return res.status(200).json({
-            isAdminLogin: true,
-            message: 'Admin login successful',
-        });
-    }
+      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+          // --- THIS IS THE NEW, CORRECT LOCATION FOR THE ADMIN LOGIN LOG ---
+          auditLog(req, 'ADMIN_LOGIN_SUCCESS', { username: email });
+          // --- END ---
+          
+          console.log("Admin login successful via special auth check.");
+          return res.status(200).json({
+              isAdminLogin: true,
+              message: 'Admin login successful',
+          });
+      }
 
-    const user = await User.findByCredentials(email, password);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid email address or password.' });
-    }
+      const user = await User.findByCredentials(email, password);
+      if (!user) {
+          auditLog(req, 'USER_LOGIN_FAILURE', { email: email, reason: 'Invalid credentials' });
+          return res.status(401).json({ message: 'Invalid email address or password.' });
+      }
 
-    const payload = { userId: user._id, email: user.email };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+      req.user = user; 
+      auditLog(req, 'USER_LOGIN_SUCCESS', { email: user.email });
 
-    res.status(200).json({
-      token,
-      _id: user._id,
-      email: user.email,
-      username: user.username,
-      sessionId: uuidv4(),
-      message: "Login successful",
-    });
+      const payload = { userId: user._id, email: user.email };
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+      res.status(200).json({
+          token,
+          _id: user._id,
+          email: user.email,
+          username: user.username,
+          sessionId: uuidv4(),
+          message: "Login successful",
+      });
   } catch (error) {
-    console.error('Signin Error:', error);
-    res.status(500).json({ message: 'Server error during signin.' });
+      console.error('Signin Error:', error);
+      res.status(500).json({ message: 'Server error during signin.' });
   }
 });
 
@@ -26277,7 +26398,8 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
+const { auditLog } = require('../utils/logger');
 const router = express.Router();
 
 
@@ -26314,19 +26436,14 @@ router.post('/message', async (req, res) => {
     
     const userId = req.user._id;
 
-    logger.info('User submitted a new query', {
-        eventType: 'USER_QUERY',
-        userId: userId.toString(),
-        sessionId: sessionId,
-        payload: {
-            query: query.substring(0, 200), // Log first 200 chars to prevent overly long logs
-            queryLength: query.length,
-            useWebSearch: !!useWebSearch,
-            useAcademicSearch: !!useAcademicSearch,
-            criticalThinkingEnabled: !!criticalThinkingEnabled,
-            documentContext: documentContextName || 'None'
-        }
+    auditLog(req, 'CHAT_MESSAGE_SENT', {
+        queryLength: query.length,
+        useWebSearch: !!useWebSearch,
+        useAcademicSearch: !!useAcademicSearch,
+        criticalThinkingEnabled: !!criticalThinkingEnabled,
+        documentContext: documentContextName || null
     });
+
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
@@ -26511,6 +26628,11 @@ router.post('/history', async (req, res) => {
     const userId = req.user._id;
     const newSessionId = uuidv4();
     
+    auditLog(req, 'NEW_CHAT_SESSION_CREATED', {
+        previousSessionId: previousSessionId || null,
+        skipAnalysis: !!skipAnalysis
+    });
+
     // This will hold our final response payload
     const responsePayload = {
         message: 'New session started.',
@@ -26658,6 +26780,11 @@ router.post('/analyze-prompt', async (req, res) => {
     const { prompt } = req.body;
     const userId = req.user._id;
 
+    auditLog(req, 'PROMPT_COACH_REQUESTED', {
+        promptLength: prompt ? prompt.length : 0
+    });
+
+
     // --- REVISED VALIDATION ---
     if (!prompt || typeof prompt !== 'string') {
         console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: 'prompt' field is missing or not a string. Received body:`, req.body);
@@ -26694,6 +26821,7 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource'); // Import the correct model
 const { decrypt } = require('../utils/crypto'); // For decrypting user's API key
+const { auditLog } = require('../utils/logger');
 
 // All routes here are protected by the authMiddleware applied in server.js
 
@@ -26711,6 +26839,11 @@ router.post('/podcast', async (req, res) => {
     }
 
     try {
+        auditLog(req, 'TOOL_USAGE_PODCAST_GENERATOR', {
+            sourceDocumentName: sourceDocumentName,
+            podcastOptions: podcastOptions
+        });
+
         let sourceDocumentText = null;
         let apiKeyForRequest = null;
         
@@ -26790,6 +26923,11 @@ router.post('/podcast', async (req, res) => {
         fileResponse.data.pipe(res);
 
     } catch (error) {
+        auditLog(req, 'TOOL_USAGE_PODCAST_GENERATOR_FAILURE', {
+            sourceDocumentName: sourceDocumentName,
+            podcastOptions: podcastOptions,
+            error: error.message
+        });
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate podcast.";
         console.error(`[Node Export] Error proxying podcast generation: ${errorMsg}`);
         // Ensure we don't try to send headers if the stream has already started
@@ -27186,10 +27324,16 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 router.post('/document', async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'CONTENT_GENERATION_FROM_SOURCE_SUCCESS', {
+        docType: docType,
+        sourceDocumentName: sourceDocumentName
+    });
 
     if (!markdownContent || !docType || !sourceDocumentName) {
         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
@@ -27250,6 +27394,12 @@ router.post('/document', async (req, res) => {
         pythonResponse.data.pipe(res);
 
     } catch (error) {
+        auditLog(req, 'CONTENT_GENERATION_FROM_SOURCE_FAILURE', {
+            docType: docType,
+            sourceDocumentName: sourceDocumentName,
+            error: error.message
+        });
+
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
         console.error(`[Generation Route] Error: ${errorMsg}`);
         if (!res.headersSent) {
@@ -27261,6 +27411,12 @@ router.post('/document', async (req, res) => {
 router.post('/document/from-topic', async (req, res) => {
     const { topic, docType } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'CONTENT_GENERATION_FROM_TOPIC_SUCCESS', {
+        docType: docType,
+        topic: topic
+    });
+
 
     if (!topic || !docType) {
         return res.status(400).json({ message: 'Topic and docType are required.' });
@@ -27310,6 +27466,12 @@ router.post('/document/from-topic', async (req, res) => {
         // --- END OF FIX ---
 
     } catch (error) {
+        auditLog(req, 'CONTENT_GENERATION_FROM_TOPIC_FAILURE', {
+            docType: docType,
+            topic: topic,
+            error: error.message
+        });
+
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document from topic.";
         console.error(`[Node Generation] Error for topic '${topic}':`, errorMsg);
         if (!res.headersSent) {
@@ -27332,6 +27494,7 @@ const axios = require('axios');
 const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 router.get('/visualize/:documentName', async (req, res) => {
     const { documentName } = req.params;
@@ -27419,6 +27582,9 @@ router.get('/session/:sessionId', async (req, res) => {
     const getKgUrl = `${pythonServiceUrl}/kg/${userId}/${encodeURIComponent(sessionId)}`;
 
     try {
+        auditLog(req, 'TOOL_USAGE_LIVE_CONCEPT_MAP', {
+            sessionId: sessionId
+        });
         console.log(`[KG Route] Proxying request to Python service to get KG for session: ${sessionId}`);
         const pythonResponse = await axios.get(getKgUrl, { timeout: 30000 });
         
@@ -27455,6 +27621,7 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 const fs = require('fs').promises;
 
 // --- HELPER FOR PYTHON SERVICE DELETION ---
@@ -27501,6 +27668,10 @@ router.post('/', async (req, res) => {
             status: 'processing_extraction',
         });
         await newSource.save();
+
+        auditLog(req, 'KNOWLEDGE_SOURCE_URL_INGEST_SUCCESS', {
+            url: content
+        });
 
         // Immediately respond to the user so the UI doesn't hang
         res.status(202).json({ 
@@ -27628,6 +27799,12 @@ router.delete('/:sourceId', async (req, res) => {
         }
 
         console.log(`[Delete Source] Deleting source: '${source.title}' for user: ${username}`);
+
+        auditLog(req, 'KNOWLEDGE_SOURCE_DELETE_SUCCESS', {
+            sourceId: sourceId,
+            sourceTitle: source.title,
+            sourceType: source.sourceType
+        });
 
         // 1. Delete from Vector DB (Qdrant) and Graph DB (Neo4j) via Python service
         await callPythonDeletionEndpoint(`/delete_qdrant_document_data`, userId, source.title);
@@ -27760,6 +27937,7 @@ const express = require('express');
 const router = express.Router();
 const LearningPath = require('../models/LearningPath');
 const { createLearningPath } = require('../services/learning/curriculumOrchestrator');
+const { auditLog } = require('../utils/logger');
 
 // @route   POST /api/learning/paths/generate
 // @desc    Create a new learning path for the authenticated user based on a goal.
@@ -27768,14 +27946,27 @@ router.post('/generate', async (req, res) => {
     const { goal, context } = req.body;
     const userId = req.user._id;
 
+
     if (!goal) {
         return res.status(400).json({ message: 'A learning goal is required.' });
     }
 
     try {
+        
+        const newPathOrQuestions = await createLearningPath(userId, goal, context);
+        
+        auditLog(req, 'STUDY_PLAN_GENERATION_SUCCESS', {
+            goal: goal,
+            isClarificationNeeded: newPathOrQuestions.isQuestionnaire || false
+        });
+
         const newPath = await createLearningPath(userId, goal, context);
         res.status(201).json(newPath);
     } catch (error) {
+        auditLog(req, 'STUDY_PLAN_GENERATION_FAILURE', {
+            goal: goal,
+            error: error.message
+        });
         console.error(`[API Error] Failed to create learning path for user ${userId}:`, error);
         res.status(500).json({ message: `Server error: ${error.message}` });
     }
@@ -27834,6 +28025,11 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
         learningPath.markModified('modules');
         await learningPath.save();
         
+        auditLog(req, 'STUDY_PLAN_MODULE_UPDATED', {
+            pathId: pathId,
+            moduleId: moduleId,
+            newStatus: status
+        });
         // Return the entire updated path so the frontend can refresh its state
         res.status(200).json(learningPath);
 
@@ -27862,6 +28058,9 @@ router.delete('/:pathId', async (req, res) => {
         // Also remove the reference from the User's learningPaths array (optional but good cleanup)
         await User.updateOne({ _id: userId }, { $pull: { learningPaths: pathId } });
 
+        auditLog(req, 'STUDY_PLAN_DELETED', {
+            pathId: pathId
+        });
         res.status(200).json({ message: 'Learning path deleted successfully.' });
     } catch (error) {
         console.error(`[API Error] Failed to delete learning path ${pathId} for user ${userId}:`, error);
@@ -27881,6 +28080,7 @@ const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
 const { encrypt } = require("../utils/crypto");
+const { auditLog } = require('../utils/logger');
 
 // @route   PUT /api/llm/config
 // @desc    Update user's LLM preferences (provider, key, or URL)
@@ -27929,6 +28129,14 @@ router.put("/config", async (req, res) => {
     // This will NEVER delete a field that isn't included in the request.
     await User.updateOne({ _id: userId }, { $set: updates });
 
+    const logPayload = {
+        llmProvider: llmProvider || undefined,
+        apiKeyUpdated: !!apiKey,
+        ollamaUrlUpdated: typeof ollamaUrl === 'string',
+        ollamaModelUpdated: !!ollamaModel
+    };
+    auditLog(req, 'USER_CONFIG_UPDATE_SUCCESS', logPayload);
+    
     res.status(200).json({ message: "LLM preferences updated successfully." });
   } catch (error) {
     console.error(`Error updating LLM config for user ${userId}:`, error);
@@ -28074,6 +28282,11 @@ router.get('/ip', (req, res) => {
     });
 });
 
+//Testing route for Sentry errors
+// url : http://localhost:5001/api/network/debug-sentry-nodejs
+// router.get('/debug-sentry-nodejs', (req, res) => {
+//     throw new Error('Sentry Test Error from Node.js Backend @ ' + new Date().toLocaleTimeString());
+// });
 
 module.exports = router;
 
@@ -28181,6 +28394,7 @@ const router = express.Router();
 const User = require("../models/User");
 const { decrypt } = require("../utils/crypto");
 const { v4: uuidv4 } = require('uuid'); 
+const { auditLog } = require('../utils/logger');
 const integrityReportCache = new Map();
 
 
@@ -28240,6 +28454,13 @@ async function getApiKeyForRequest(userId) {
 // ... (existing tool routes like /execute, /analyze-code, etc. remain the same) ...
 router.post("/execute", async (req, res) => {
   const { language, code, testCases } = req.body;
+
+  auditLog(req, 'TOOL_USAGE_CODE_EXECUTOR', {
+      language: language,
+      codeLength: code ? code.length : 0,
+      testCaseCount: testCases ? testCases.length : 0
+  });
+
   if (!code || !language) {
     return res.status(400).json({ message: "Code and language are required." });
   }
@@ -28371,6 +28592,12 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   form.append("quiz_option", quizOption);
 
   try {
+
+    auditLog(req, 'TOOL_USAGE_QUIZ_GENERATOR', {
+        sourceDocument: file ? file.originalname : 'N/A',
+        quizOption: quizOption
+    });
+
     const apiKey = await getApiKeyForRequest(req.user._id);
     form.append("api_key", apiKey);
 
@@ -28384,6 +28611,13 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 
     res.status(200).json(pythonResponse.data);
   } catch (error) {
+
+    auditLog(req, 'TOOL_USAGE_QUIZ_GENERATOR_FAILURE', {
+        sourceDocument: file ? file.originalname : 'N/A',
+        quizOption: quizOption,
+        error: error.message
+    });
+
     const errorMsg =
       error.response?.data?.error ||
       error.message ||
@@ -28401,6 +28635,12 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
+
+    auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
+        textLength: text ? text.length : 0,
+        checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
+    });
+
     if (!text || text.trim().length < 50) {
         return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
     }
@@ -28429,6 +28669,10 @@ router.post('/analyze-integrity/submit', async (req, res) => {
         res.status(202).json({ reportId, initialReport });
 
     } catch (error) {
+        auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER_FAILURE', {
+            textLength: text ? text.length : 0,
+            error: error.message
+        });
         const errorMsg = error.response?.data?.error || error.message;
         console.error(`[Node Integrity Submit] Error: ${errorMsg}`);
         res.status(error.response?.status || 500).json({ message: errorMsg });
@@ -28493,7 +28737,7 @@ const User = require('../models/User');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
-const logger = require('../utils/logger');
+const { logger, auditLog } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -28564,18 +28808,12 @@ router.post('/', upload.single('file'), async (req, res) => {
         });
         await newSource.save();
 
-        logger.info('User file upload successful', {
-            eventType: 'FILE_UPLOAD_SUCCESS',
-            userId: userId.toString(),
-            payload: {
-                originalName: originalName,
-                serverFilename: newSource.serverFilename,
-                mimeType: mimetype,
-                sizeBytes: req.file.size,
-                sourceType: type,
-                processor: processor
-            }
+        auditLog(req, 'KNOWLEDGE_SOURCE_UPLOAD_SUCCESS', {
+            sourceType: type,
+            originalName: originalName,
+            sizeBytes: req.file.size
         });
+
         res.status(202).json({ 
             message: "File accepted. Processing has started in the background.",
             source: newSource
@@ -28633,17 +28871,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
 
     } catch (error) {
-        logger.error('User file upload failed', {
-            eventType: 'FILE_UPLOAD_FAILURE',
-            userId: userId.toString(),
-            payload: {
-                originalName: originalName,
-                mimeType: mimetype,
-                sizeBytes: req.file?.size,
-                errorMessage: error.message,
-                stack: error.stack
-            }
-        });
+        
 
         console.error(`Error processing uploaded file '${originalName}':`, error);
         if (newSource) {
@@ -28674,6 +28902,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { redisClient } = require('../config/redisClient');
+const { auditLog } = require('../utils/logger');
 
 // Note: The main 'authMiddleware' will be applied in server.js before this router is used,
 // so we don't need to add it to each route here. req.user will be available.
@@ -28729,6 +28958,10 @@ router.put('/profile', async (req, res) => {
 
         await user.save();
         
+        auditLog(req, 'USER_PROFILE_UPDATE_SUCCESS', {
+            updatedFields: Object.keys(req.body) // Log which fields were included in the update
+        });
+        
         if (redisClient && redisClient.isOpen) {
             const cacheKey = `user:${req.user._id}`;
             await redisClient.del(cacheKey);
@@ -28777,7 +29010,7 @@ const {
   fixedAdminAuthMiddleware,
 } = require("./middleware/fixedAdminAuthMiddleware");
 const { connectRedis } = require("./config/redisClient");
-const logger = require('./utils/logger');
+const { logger } = require('./utils/logger');
 
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
@@ -28796,6 +29029,7 @@ const toolsRoutes = require("./routes/tools");
 const learningRoutes = require("./routes/learning");
 const learningPathRoutes = require("./routes/learningPath");
 const knowledgeSourceRoutes = require("./routes/knowledgeSource");
+const analyticsRoutes = require('./routes/analytics');
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -28816,6 +29050,14 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+app.use((req, res, next) => {
+    const end = httpRequestDurationMicroseconds.startTimer();
+    res.on('finish', () => {
+        end({ route: req.route?.path || req.path, code: res.statusCode, method: req.method });
+    });
+    next();
+});
+
 // --- API Route Mounting ---
 app.get("/", (req, res) => res.send("AI Tutor Backend API is running..."));
 app.get('/metrics', async (req, res) => {
@@ -28825,6 +29067,8 @@ app.get('/metrics', async (req, res) => {
 app.use("/api/network", networkRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", fixedAdminAuthMiddleware, adminApiRoutes);
+app.use("/api/admin/analytics", fixedAdminAuthMiddleware, analyticsRoutes);
+
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -28931,7 +29175,6 @@ async function checkRagService(url) {
 }
 
 startServer();
-
 ```
 
 `server/services/agentService.js`
@@ -31270,23 +31513,23 @@ module.exports = { encrypt, decrypt };
 const winston = require('winston');
 const path = require('path');
 
-// Define the path for our log file
-const logFilePath = path.join(__dirname, '..', 'logs', 'app.log');
-
+// This path is correct
+const logFilePath = path.join(__dirname, '..', 'logs', 'app.log'); // <-- Make sure this is app.log
+// --- THIS IS THE CORRECT, SIMPLIFIED FORMAT ---
 const logFormat = winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
+    winston.format.splat(), // Correctly handles metadata merging
     winston.format.json()
 );
+// --- END CORRECTION ---
 
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: logFormat,
+    defaultMeta: { service: 'ai-tutor-nodejs-backend' },
     transports: [
-        // We'll still log to the console for immediate feedback during development
         new winston.transports.Console(),
-
-        // NEW: Log to a rotating file
         new winston.transports.File({
             filename: logFilePath,
             maxsize: 5242880, // 5MB
@@ -31296,7 +31539,29 @@ const logger = winston.createLogger({
     exitOnError: false
 });
 
-module.exports = logger;
+
+/**
+ * Creates a standardized audit log for a user-initiated event.
+ * @param {object} req - The Express request object, used to get user info and IP.
+ * @param {string} eventType - A standardized, uppercase_snake_case string for the event (e.g., 'USER_LOGIN_SUCCESS').
+ * @param {object} payload - A JSON object with specific details about the event.
+ */
+function auditLog(req, eventType, payload) {
+  // Gracefully handle system events where req.user might not exist
+  const userId = req.user?._id?.toString() || 'SYSTEM';
+  const username = req.user?.email || 'N/A';
+  
+  // Use the existing Winston logger to ensure consistent format
+  logger.info(`User Event: ${eventType}`, {
+    eventType,
+    userId,
+    username,
+    ip: req.ip, // Capture the user's IP address for security auditing
+    payload
+  });
+}
+
+module.exports = { logger, auditLog };
 ```
 
 `server/utils/metrics.js`
