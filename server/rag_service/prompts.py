@@ -240,7 +240,7 @@ Each slide must follow this format:
 }
 
 Instructions:
-use fonr of 12pt and each slide contains 5 bullet points
+use font of 12pt and each slide contains 5 bullet points
 1. Generate 6 to 8 slides that flow logically from introduction to conclusion.
 2. Ensure each slide focuses on a single idea or subtopic.
 3. Provide informative, presentation-ready content in each slide.

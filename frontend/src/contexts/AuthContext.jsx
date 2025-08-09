@@ -5,8 +5,6 @@ import toast from 'react-hot-toast';
 
 export const AuthContext = createContext(null);
 
-export const DEV_MODE_ALLOW_DEV_LOGIN = false;
-
 export const AuthProvider = ({ children }) => {
     const [token, setTokenState] = useState(localStorage.getItem('authToken'));
     const [user, setUserState] = useState(null);
@@ -23,8 +21,14 @@ export const AuthProvider = ({ children }) => {
     const processAuthData = useCallback((authApiResponse) => {
         if (authApiResponse && authApiResponse.token && authApiResponse._id && authApiResponse.email) {
             setToken(authApiResponse.token);
-            setUser({ id: authApiResponse._id, email: authApiResponse.email, username: authApiResponse.username });
-             console.log("AuthContext: User and Token set.", { email: authApiResponse.email, username: authApiResponse.username });
+            const userObject = { 
+                id: authApiResponse._id, 
+                email: authApiResponse.email, 
+                username: authApiResponse.username,
+                hasCompletedOnboarding: authApiResponse.hasCompletedOnboarding
+            };
+            setUser(userObject);
+             console.log("AuthContext: User and Token set.", userObject);
             return authApiResponse; 
         } else {
             setToken(null);
@@ -42,7 +46,12 @@ export const AuthProvider = ({ children }) => {
                 try {
                     const userDataFromMe = await api.getMe();
                     if (userDataFromMe && userDataFromMe._id && userDataFromMe.email) {
-                        setUser({ id: userDataFromMe._id, email: userDataFromMe.email, username: userDataFromMe.username });
+                        setUser({ 
+                            id: userDataFromMe._id, 
+                            email: userDataFromMe.email, 
+                            username: userDataFromMe.username,
+                            hasCompletedOnboarding: userDataFromMe.hasCompletedOnboarding
+                        });
                     } else {
                         setToken(null);
                         setUser(null);

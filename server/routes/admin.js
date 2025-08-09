@@ -10,10 +10,99 @@ const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
+const LLMConfiguration = require('../models/LLMConfiguration'); 
 const { encrypt } = require('../utils/crypto');
 const { auditLog } = require('../utils/logger');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog'); 
 
 const router = express.Router();
+
+
+/* ====== Model feedback routes ======= */
+
+// @route   GET /api/admin/feedback-stats
+// @desc    Get aggregated feedback stats for each model
+router.get('/feedback-stats', async (req, res) => {
+    try {
+        const stats = await LLMPerformanceLog.aggregate([
+            {
+                $group: {
+                    _id: '$chosenModelId', // Group by the model's ID
+                    positive: { $sum: { $cond: [{ $eq: ['$userFeedback', 'positive'] }, 1, 0] } },
+                    negative: { $sum: { $cond: [{ $eq: ['$userFeedback', 'negative'] }, 1, 0] } },
+                    none: { $sum: { $cond: [{ $eq: ['$userFeedback', 'none'] }, 1, 0] } },
+                    total: { $sum: 1 }
+                }
+            },
+            {
+                $project: { // Reshape the output
+                    modelId: '$_id',
+                    feedback: {
+                        positive: '$positive',
+                        negative: '$negative',
+                        none: '$none'
+                    },
+                    totalResponses: '$total',
+                    _id: 0
+                }
+            }
+        ]);
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching feedback stats:', error);
+        res.status(500).json({ message: 'Server error while fetching feedback stats.' });
+    }
+});
+/* ====== END Model feedback routes ===== */
+
+/* ====== LLM Management Routes ====== */
+
+// GET /api/admin/llms - List all LLM configurations
+router.get('/llms', async (req, res) => {
+    try {
+        const configs = await LLMConfiguration.find();
+        res.json(configs);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to fetch LLM configurations.' });
+    }
+});
+
+// POST /api/admin/llms - Create a new LLM configuration
+router.post('/llms', async (req, res) => {
+    try {
+        const newConfig = new LLMConfiguration(req.body);
+        await newConfig.save();
+        res.status(201).json(newConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to create LLM configuration.', error: error.message });
+    }
+});
+
+// PUT /api/admin/llms/:id - Update an LLM configuration
+router.put('/llms/:id', async (req, res) => {
+    try {
+        const updatedConfig = await LLMConfiguration.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!updatedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json(updatedConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to update LLM configuration.', error: error.message });
+    }
+});
+
+// DELETE /api/admin/llms/:id - Delete an LLM configuration
+router.delete('/llms/:id', async (req, res) => {
+    try {
+        const deletedConfig = await LLMConfiguration.findByIdAndDelete(req.params.id);
+        if (!deletedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json({ message: 'LLM configuration deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to delete LLM configuration.' });
+    }
+});
+
+
+/* ====== END LLM Managemet Routes =====  */
+
 const CACHE_DURATION_SECONDS = 30; 
 // --- NEW Dashboard Stats Route ---
 // @route   GET /api/admin/dashboard-stats

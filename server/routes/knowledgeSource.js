@@ -46,6 +46,19 @@ router.post('/', async (req, res) => {
 
     let newSource;
     try {
+        // --- THIS IS THE FIX ---
+        // 1. Check if this exact URL already exists for this user.
+        const existingSource = await KnowledgeSource.findOne({ userId, sourceUrl: content });
+        if (existingSource) {
+            // 2. If it exists, inform the user and stop execution.
+            console.warn(`[KnowledgeSource Route] User ${userId} attempted to re-add existing URL: ${content}`);
+            return res.status(409).json({ 
+                message: `This URL has already been added. Title: "${existingSource.title}"`,
+                source: existingSource
+            });
+        }
+        // --- END OF FIX ---
+
         // Create initial record in DB to track progress
         newSource = new KnowledgeSource({
             userId,
@@ -79,13 +92,12 @@ router.post('/', async (req, res) => {
         if (!text_content) throw new Error("Failed to extract text from the URL source.");
         
         // 2. Call Python to add the extracted content to Qdrant and get KG chunks
-        // This is the CRITICAL NEW STEP for URL embedding
         const addDocumentResponse = await axios.post(`${pythonServiceUrl}/add_document`, {
             user_id: userId.toString(),
-            file_path: '', // Dummy path, as content is provided directly
-            original_name: title, // Use the extracted title as the original_name
-            text_content_override: text_content // Pass the actual content here
-        }, { timeout: 300000 }); // Large timeout for processing
+            file_path: '',
+            original_name: title,
+            text_content_override: text_content
+        }, { timeout: 300000 });
 
         const { num_chunks_added_to_qdrant, raw_text_for_analysis, chunks_with_metadata: chunksForKg } = addDocumentResponse.data;
 
@@ -97,10 +109,10 @@ router.post('/', async (req, res) => {
         const sourceDoc = await KnowledgeSource.findById(newSource._id);
         if (!sourceDoc) throw new Error(`KnowledgeSource with ID ${newSource._id} disappeared during processing.`);
 
-        sourceDoc.textContent = text_content; // Store the extracted content
-        sourceDoc.title = title; // Update with proper title from Python
-        sourceDoc.sourceType = source_type; // Update with actual type from Python
-        sourceDoc.status = 'processing_analysis'; // Next step: analysis
+        sourceDoc.textContent = text_content;
+        sourceDoc.title = title;
+        sourceDoc.sourceType = source_type;
+        sourceDoc.status = 'processing_analysis';
         await sourceDoc.save();
 
         // 4. Trigger Analysis Worker
@@ -155,11 +167,11 @@ router.get('/', async (req, res) => {
         const [userSources, adminSubjects] = await Promise.all([userSourcesPromise, adminSubjectsPromise]);
 
         const formattedAdminSubjects = adminSubjects.map(doc => ({
-            _id: `admin_${doc._id}`, // Create a unique ID for the frontend key
+            _id: `admin_${doc._id}`,
             sourceType: 'subject',
             title: doc.originalName,
             status: 'completed',
-            createdAt: doc.createdAt // Pass the creation date
+            createdAt: doc.createdAt
         }));
 
         res.json([...formattedAdminSubjects, ...userSources]);
@@ -170,7 +182,6 @@ router.get('/', async (req, res) => {
 });
 
 
-// --- NEW ---
 // @route   DELETE /api/knowledge-sources/:sourceId
 // @desc    Delete a knowledge source and all its associated data
 // @access  Private
@@ -197,7 +208,6 @@ router.delete('/:sourceId', async (req, res) => {
         await callPythonDeletionEndpoint(`/delete_qdrant_document_data`, userId, source.title);
         await callPythonDeletionEndpoint(`/kg/${userId}/${encodeURIComponent(source.title)}`, userId, source.title);
 
-        // 2. If it's a file, move the physical file to a backup location
         if (source.sourceType === 'document' && source.serverFilename) {
             const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
             const sourcePath = path.join(__dirname, '..', 'assets', sanitizedUsername, 'document', source.serverFilename);
@@ -210,13 +220,12 @@ router.delete('/:sourceId', async (req, res) => {
                 await fs.rename(sourcePath, backupPath);
                 console.log(`[Delete Source] Backed up file to ${backupPath}`);
             } catch (fileError) {
-                if (fileError.code !== 'ENOENT') { // ENOENT = file not found, which is ok if it was already cleaned up
+                if (fileError.code !== 'ENOENT') {
                     console.warn(`[Delete Source] Could not back up physical file '${sourcePath}': ${fileError.message}`);
                 }
             }
         }
 
-        // 3. Delete from MongoDB
         await KnowledgeSource.deleteOne({ _id: sourceId });
         console.log(`[Delete Source] Removed MongoDB record for '${source.title}'`);
 

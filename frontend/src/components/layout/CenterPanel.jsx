@@ -1,8 +1,6 @@
 // frontend/src/components/layout/CenterPanel.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// --- THIS IS THE FIX: Added the missing import for hooks from react-router-dom ---
 import { useNavigate, useLocation } from 'react-router-dom';
-// --- END OF FIX ---
 import ChatHistory from '../chat/ChatHistory';
 import ChatInput from '../chat/ChatInput';
 import PromptCoachModal from '../chat/PromptCoachModal.jsx';
@@ -42,7 +40,7 @@ const features = [
         icon: BookMarked,
         title: "Academic Search",
         description: "Find and synthesize information from academic papers and scholarly articles.",
-        action: 'toggleAcademicSearch', // Special action instead of a path
+        action: 'toggleAcademicSearch',
         status: 'active',
         glowColor: 'purple'
     }
@@ -53,7 +51,7 @@ const glowStyles = {
     purple: "hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-[0_0_20px_theme(colors.purple.500/40%)]",
     orange: "hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-[0_0_20px_theme(colors.orange.500/40%)]",
     yellow: "hover:border-yellow-400 dark:hover:border-yellow-500 hover:shadow-[0_0_20px_theme(colors.yellow.500/40%)]",
-    gray: "" // No glow for disabled/soon cards
+    gray: ""
 };
 
 function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessingChange, initialPromptForNewSession, setInitialPromptForNewSession, initialActivityForNewSession, setInitialActivityForNewSession }) {
@@ -62,7 +60,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const navigate = useNavigate();
     const location = useLocation();
 
-    // Local state for toggles and component status
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [useAcademicSearch, setUseAcademicSearch] = useState(false);
     const [criticalThinkingEnabled, setCriticalThinkingEnabled] = useState(false);
@@ -73,81 +70,95 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
     const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
     const [coachData, setCoachData] = useState(null);
     
-    // --- STABLE FUNCTION DEFINITIONS ---
+            const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
+                const payload = {
+                    query: inputText.trim(), 
+                    sessionId: currentSessionId, 
+                    useWebSearch: options.useWebSearch, 
+                    useAcademicSearch: options.useAcademicSearch,
+                    systemPrompt, 
+                    criticalThinkingEnabled: options.criticalThinkingEnabled, 
+                    documentContextName: options.documentContextName,
+                };
 
-    const handleStreamingSendMessage = useCallback(async (inputText, placeholderId, options) => {
-        const payload = {
-            query: inputText.trim(), 
-            sessionId: currentSessionId, 
-            useWebSearch: options.useWebSearch, 
-            useAcademicSearch: options.useAcademicSearch,
-            systemPrompt, 
-            criticalThinkingEnabled: options.criticalThinkingEnabled, 
-            documentContextName: options.documentContextName,
-        };
+                // --- THIS IS THE FIX ---
+                // Construct the full, correct API URL using the environment variable.
+                const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api'}/chat/message`;
 
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
-            body: JSON.stringify(payload),
-            signal: abortControllerRef.current.signal,
-        });
+                const response = await fetch(apiUrl, {
+                // --- END OF FIX ---
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regularUserToken}` },
+                    body: JSON.stringify(payload),
+                    signal: abortControllerRef.current.signal,
+                });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `Server error: ${response.status}`);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let finalBotMessageObject = null;
-        let accumulatedThinking = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n\n').filter(line => line.startsWith('data: '));
-            
-            for (const line of lines) {
-                const jsonString = line.replace('data: ', '');
-                try {
-                    const eventData = JSON.parse(jsonString);
-                    if (eventData.type === 'thought') {
-                        accumulatedThinking += eventData.content;
-                        setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...msg, thinking: accumulatedThinking, _accumulatedContent: accumulatedThinking } : msg));
-                    } else if (eventData.type === 'final_answer') {
-                        finalBotMessageObject = eventData.content;
-                    } else if (eventData.type === 'error') {
-                        throw new Error(eventData.content);
-                    }
-                } catch (e) { 
-                    console.error("Error parsing SSE chunk:", jsonString, e); 
+                if (!response.ok) {
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.message || `Server error: ${response.status}`);
                 }
-            }
-        }
-        
-        if (finalBotMessageObject) {
-            setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...finalBotMessageObject, id: placeholderId, sender: 'bot', isStreaming: false, thinking: accumulatedThinking || finalBotMessageObject.thinking } : msg));
 
-            // --- THIS IS THE FIX ---
-            // Check for and handle the download action, even in streaming mode.
-            if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel Streaming] Action received! Triggering document download.", finalBotMessageObject.action.payload);
-                
-                toast.promise(
-                    api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
-                    {
-                        loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()} on "${finalBotMessageObject.action.payload.topic}"... This may take a moment.`,
-                        success: (data) => `Successfully downloaded '${data.filename}'!`,
-                        error: (err) => `Download failed: ${err.message}`,
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let finalBotMessageObject = null;
+                let accumulatedThinking = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n\n').filter(line => line.startsWith('data: '));
+                    
+                    for (const line of lines) {
+                        const jsonString = line.replace('data: ', '');
+                        try {
+                            const eventData = JSON.parse(jsonString);
+                            if (eventData.type === 'thought') {
+                                accumulatedThinking += eventData.content;
+                                setMessages(prev => prev.map(msg => msg.id === placeholderId ? { ...msg, thinking: accumulatedThinking, _accumulatedContent: accumulatedThinking } : msg));
+                            } else if (eventData.type === 'final_answer') {
+                                finalBotMessageObject = eventData.content;
+                            } else if (eventData.type === 'error') {
+                                throw new Error(eventData.content);
+                            }
+                        } catch (e) { 
+                            console.error("Error parsing SSE chunk:", jsonString, e); 
+                        }
                     }
-                );
-            }
-            // --- END OF FIX ---
-        }
-    }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
+                }
+                
+                if (finalBotMessageObject) {
+                    // --- THIS IS THE FIX ---
+                    // Create a new, correctly structured message object for the frontend state.
+                    // This aligns the streaming response with the format used by chat history loading.
+                    const finalMessage = {
+                        ...finalBotMessageObject, // Copy all properties like thinking, references, etc.
+                        id: finalBotMessageObject.id || placeholderId,
+                        sender: 'bot', // Ensure sender is set
+                        text: finalBotMessageObject.finalAnswer, // Map 'finalAnswer' to the 'text' property
+                        isStreaming: false // Explicitly mark streaming as complete
+                    };
+                    
+                    // Now, update the state with the correctly formatted final message.
+                    setMessages(prev => [
+                        ...prev.filter(msg => msg.id !== placeholderId),
+                        finalMessage 
+                    ]);
+                    // --- END OF FIX ---
+
+                    if (finalBotMessageObject.action && finalBotMessageObject.action.type === 'DOWNLOAD_DOCUMENT') {
+                        toast.promise(
+                            api.generateDocumentFromTopic(finalBotMessageObject.action.payload),
+                            {
+                                loading: `Generating your ${finalBotMessageObject.action.payload.docType.toUpperCase()}...`,
+                                success: (data) => `Successfully downloaded '${data.filename}'!`,
+                                error: (err) => `Download failed: ${err.message}`,
+                            }
+                        );
+                    }
+                }
+            }, [currentSessionId, systemPrompt, regularUserToken, setMessages]);
 
     const handleStandardSendMessage = useCallback(async (inputText, placeholderId, options) => {
         const response = await api.sendMessage({
@@ -162,29 +173,26 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         });
 
         if (response && response.reply) {
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId 
-                ? { ...response.reply, id: placeholderId, isStreaming: false } 
-                : msg
-            ));
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== placeholderId),
+                { ...response.reply, id: response.reply.id || placeholderId }
+            ]);
             
            if (response.reply.action && response.reply.action.type === 'DOWNLOAD_DOCUMENT') {
-                console.log("[CenterPanel] Action received! Triggering document download.", response.reply.action.payload);
-                
                 toast.promise(
                     api.generateDocumentFromTopic(response.reply.action.payload),
                     {
-                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()} on "${response.reply.action.payload.topic}"... This may take a moment.`,
+                        loading: `Generating your ${response.reply.action.payload.docType.toUpperCase()}...`,
                         success: (data) => `Successfully downloaded '${data.filename}'!`,
                         error: (err) => `Download failed: ${err.message}`,
                     }
                 );
             }
-
         } else {
             throw new Error("Invalid response from AI service.");
         }
     }, [messages, currentSessionId, systemPrompt, setMessages]);
+
 
     const handleSendMessage = useCallback(async (inputText, options = {}) => {
         if (!inputText.trim() || !regularUserToken || !currentSessionId || isActuallySendingAPI) return;
@@ -252,8 +260,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
         handleStreamingSendMessage, handleStandardSendMessage, systemPrompt
     ]);
     
-    // --- HOOKS ---
-
     useEffect(() => {
         const fetchRecommendations = async () => {
             if (messages.length === 0 && currentSessionId) {
@@ -281,7 +287,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                     setUseAcademicSearch(true);
                     toast.success("Academic Search has been enabled for your next message.");
                     break;
-                // Can add more state-based actions here in the future
                 default:
                     break;
             }
@@ -470,7 +475,6 @@ function CenterPanel({ messages, setMessages, currentSessionId, onChatProcessing
                 data={coachData}
             />
         </div>
-        
     );
 }
 

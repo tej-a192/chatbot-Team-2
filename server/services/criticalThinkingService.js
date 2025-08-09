@@ -14,45 +14,56 @@ const CUE_OLLAMA_MODEL = process.env.PROMPT_COACH_OLLAMA_MODEL || 'phi3:mini-ins
  */
 async function generateCues(aiAnswerText, llmConfig) {
     if (!aiAnswerText || aiAnswerText.trim().length < 50) {
-        // Don't generate cues for very short or empty answers
         return null;
     }
 
     const { llmProvider, ollamaUrl, apiKey } = llmConfig;
     const llmService = llmProvider === 'ollama' ? ollamaService : geminiService;
 
-    const promptForLlm = CRITICAL_THINKING_CUE_TEMPLATE.replace('{aiAnswer}', aiAnswerText.substring(0, 2000)); // Limit context size for speed
+    const promptForLlm = CRITICAL_THINKING_CUE_TEMPLATE.replace('{aiAnswer}', aiAnswerText.substring(0, 2000));
 
     const llmOptions = {
         model: llmProvider === 'ollama' ? CUE_OLLAMA_MODEL : CUE_GEMINI_MODEL,
         apiKey: apiKey,
         ollamaUrl: ollamaUrl,
-        temperature: 0.4 // Lower temperature for more deterministic, structured output
+        temperature: 0.4 
     };
 
     try {
         console.log(`[CriticalThinkingService] Generating cues using ${llmProvider} with model ${llmOptions.model}.`);
         const responseText = await llmService.generateContentWithHistory([], promptForLlm, null, llmOptions);
 
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            console.warn("[CriticalThinkingService] LLM response did not contain a valid JSON object.");
-            return null;
+        // --- THIS IS THE FIX (More Robust JSON Extraction) ---
+        let jsonString = '';
+        // First, try to find a JSON object within markdown code fences
+        const fencedMatch = responseText.match(/```(json)?\s*(\{[\s\S]*?\})\s*```/);
+        if (fencedMatch && fencedMatch[2]) {
+            jsonString = fencedMatch[2];
+        } else {
+            // If not found, fall back to finding the first and last curly brace
+            const firstBrace = responseText.indexOf('{');
+            const lastBrace = responseText.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace > firstBrace) {
+                jsonString = responseText.substring(firstBrace, lastBrace + 1);
+            }
         }
         
-        const parsedResponse = JSON.parse(jsonMatch[0]);
+        if (!jsonString) {
+            console.warn("[CriticalThinkingService] LLM response did not contain a parsable JSON object.");
+            return null;
+        }
+        // --- END OF FIX ---
+        
+        const parsedResponse = JSON.parse(jsonString);
 
-        // Validate that at least one valid key exists
         if (parsedResponse.verificationPrompt || parsedResponse.alternativePrompt || parsedResponse.applicationPrompt) {
             return parsedResponse;
         }
 
-        // Return null if the object is empty ({})
         return null;
 
     } catch (error) {
         console.error(`[CriticalThinkingService] Failed to generate cues: ${error.message}`);
-        // Return null on any error to ensure this feature doesn't block the main response
         return null;
     }
 }

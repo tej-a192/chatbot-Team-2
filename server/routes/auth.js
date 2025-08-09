@@ -10,18 +10,13 @@ require('dotenv').config();
 const router = express.Router();
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || '7d';
 
-// --- @route   POST /api/auth/signup ---
-// server/routes/auth.js
-
 router.post('/signup', async (req, res) => {
-  // 1. Destructure the full payload from the multi-step form
   const {
     email, password, apiKey, ollamaUrl, preferredLlmProvider, requestAdminKey,
     name, college, universityNumber, degreeType, branch, year,
     learningStyle, currentGoals
   } = req.body;
 
-  // 2. Comprehensive Validation for the entire payload
   if (!email || !password || !name || !college || !universityNumber || !degreeType || !branch || !year || !learningStyle) {
     return res.status(400).json({ message: 'All required profile fields must be completed to sign up.' });
   }
@@ -44,10 +39,9 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // 3. Create the new User with the complete profile object
     const newUser = new User({
       email,
-      username: email.split('@')[0],
+      username: email.split('@')[0] + uuidv4().substring(0, 4),
       password,
       preferredLlmProvider: preferredLlmProvider || 'gemini',
       apiKeyRequestStatus: requestAdminKey ? 'pending' : 'none',
@@ -55,8 +49,9 @@ router.post('/signup', async (req, res) => {
       ollamaUrl: (preferredLlmProvider === 'ollama') ? ollamaUrl.trim() : '',
       profile: {
         name, college, universityNumber, degreeType, branch, year,
-        learningStyle, currentGoals: currentGoals || '' // Ensure currentGoals is not null
-      }
+        learningStyle, currentGoals: currentGoals || ''
+      },
+      hasCompletedOnboarding: false
     });
 
     await newUser.save();
@@ -77,18 +72,19 @@ router.post('/signup', async (req, res) => {
   };
   const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
-  res.status(201).json({
-    token,
-    _id: newUser._id,
-    email: newUser.email,
-    username: newUser.username,
-    sessionId: uuidv4(),
-    message: "User registered successfully",
-  });
+    res.status(201).json({
+      token,
+      _id: newUser._id,
+      email: newUser.email,
+      username: newUser.username,
+      hasCompletedOnboarding: newUser.hasCompletedOnboarding,
+      isNewUser: true,
+      message: "User registered successfully",
+    });
 
   } catch (error) {
     console.error('Signup Error:', error);
-    if (error.code === 11000 || error.message.includes('duplicate key error collection')) {
+    if (error.code === 11000) {
         return res.status(400).json({ message: 'An account with this email or username already exists.' });
     }
     if (error.name === 'ValidationError') {
@@ -99,7 +95,6 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// --- @route   POST /api/auth/signin ---
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
 
@@ -135,21 +130,20 @@ router.post('/signin', async (req, res) => {
       const payload = { userId: user._id, email: user.email };
       const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 
-      res.status(200).json({
-          token,
-          _id: user._id,
-          email: user.email,
-          username: user.username,
-          sessionId: uuidv4(),
-          message: "Login successful",
-      });
+    res.status(200).json({
+      token,
+      _id: user._id,
+      email: user.email,
+      username: user.username,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      message: "Login successful",
+    });
   } catch (error) {
       console.error('Signin Error:', error);
       res.status(500).json({ message: 'Server error during signin.' });
   }
 });
 
-// --- @route   GET /api/auth/me ---
 router.get('/me', authMiddleware, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Not authorized.' });
@@ -158,7 +152,23 @@ router.get('/me', authMiddleware, async (req, res) => {
     _id: req.user._id,
     email: req.user.email,
     username: req.user.username,
+    hasCompletedOnboarding: req.user.hasCompletedOnboarding
   });
+});
+
+router.post('/complete-onboarding', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+        user.hasCompletedOnboarding = true;
+        await user.save();
+        res.status(200).json({ message: 'Onboarding marked as complete.' });
+    } catch (error) {
+        console.error('Error completing onboarding:', error);
+        res.status(500).json({ message: 'Server error.' });
+    }
 });
 
 module.exports = router;

@@ -36,6 +36,7 @@ function ChatHistory({ messages, onCueClick }) {
                         criticalThinkingCues={msg.criticalThinkingCues}
                         onCueClick={onCueClick}
                         messageId={msg.id}
+                        logId={msg.logId} 
                     />
 
                     </motion.div>

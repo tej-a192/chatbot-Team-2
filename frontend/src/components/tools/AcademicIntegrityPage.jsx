@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Home, UploadCloud } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import Editor from '@monaco-editor/react';
-import IntegrityReportPanel from './IntegrityReportPanel'; // We will create this next
+import IntegrityReportPanel from './IntegrityReportPanel';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import Button from '../core/Button';
@@ -12,14 +12,26 @@ import { useTheme } from '../../hooks/useTheme';
 // For client-side text extraction
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import mammoth from 'mammoth';
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
+
+
+
+// Step 1: Navigate to the Correct Directory
+// // PS C:\Users\Asus\Desktop\chatbot-Team-2\frontend>
+// npm install pdfjs-dist
+// ls node_modules/pdfjs-dist/build/
+// You should see pdf.worker.min.mjs listed in the output.
+// Step 4: Run the Correct Copy Command for Windows
+// copy node_modules\pdfjs-dist\build\pdf.worker.min.mjs public\
+
+
+
 
 const ANALYSIS_STEPS = [
     { name: "Submitting for Analysis", progress: 10 },
     { name: "Checking for Biased Language", progress: 30 },
-    // --- THIS IS THE FIX ---
     { name: "Analyzing Readability", progress: 50 },
-    // --- END FIX ---
     { name: "Submitting to Plagiarism Detector", progress: 70 },
     { name: "Awaiting Plagiarism Report", progress: 90 },
     { name: "Completed", progress: 100 }
@@ -56,19 +68,15 @@ const AcademicIntegrityPage = () => {
             const { reportId, initialReport } = await api.submitIntegrityCheck({ text });
             setReport(initialReport);
 
-            // Update progress based on synchronous results
             if(initialReport.bias) setCurrentStep(1);
-            // --- THIS IS THE FIX ---
             if(initialReport.readability) setCurrentStep(2);
-            // --- END FIX ---
             if(initialReport.plagiarism) setCurrentStep(3);
             
-            // If plagiarism check is pending, start polling
             if (initialReport.plagiarism?.status === 'pending') {
                 setCurrentStep(4);
                 startPolling(reportId);
             } else {
-                setIsLoading(false); // All checks were sync (or failed sync)
+                setIsLoading(false);
                 setCurrentStep(5);
             }
         } catch (err) {
@@ -97,7 +105,7 @@ const AcademicIntegrityPage = () => {
                 setError("Failed to retrieve the final plagiarism report.");
                 toast.error("Failed to retrieve the final plagiarism report.");
             }
-        }, 5000); // Poll every 5 seconds
+        }, 5000);
     };
     
     const stopPolling = () => {
@@ -107,12 +115,10 @@ const AcademicIntegrityPage = () => {
         }
     };
 
-    // Cleanup polling on unmount
     useEffect(() => {
         return () => stopPolling();
     }, []);
 
-    // Handle text highlighting
     useEffect(() => {
         if (!editorRef.current || !selectedFinding) return;
 
@@ -132,46 +138,87 @@ const AcademicIntegrityPage = () => {
         }
     }, [selectedFinding]);
 
-    // File upload handler
+const handleApplySuggestion = (finding) => {
+        const { text: originalText, suggestion } = finding;
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        const model = editor.getModel();
+        if (!model) return;
+
+        // Find the first occurrence of the biased text
+        const matches = model.findMatches(originalText, true, false, true, null, true);
+
+        if (matches.length > 0) {
+            const range = matches[0].range;
+            
+            // Create an "edit" operation to replace the text
+            const op = { range: range, text: suggestion };
+            
+            // Execute the edit and clear the selection/highlight
+            editor.executeEdits('bias-fix', [op]);
+            editor.setSelection(range); // Optional: select the newly inserted text
+            
+            // Clear the highlight decoration
+            decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
+            setSelectedFinding(null); // Clear the selected finding state
+            
+            toast.success('Suggestion applied!');
+        } else {
+            toast.error(`Could not find the text "${originalText}" to replace. It may have already been changed.`);
+        }
+    };
+
+    // --- THIS IS THE CORRECTED FUNCTION ---
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
         const toastId = toast.loading(`Extracting text from ${file.name}...`);
+        
+        // This function wraps FileReader in a promise for clean async/await usage
+        const readFileAsArrayBuffer = (inputFile) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsArrayBuffer(inputFile);
+            });
+        };
+
         try {
             let extractedText = '';
             const fileType = file.type;
+
             if (fileType === 'application/pdf') {
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    const typedarray = new Uint8Array(event.target.result);
-                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
-                    let fullText = '';
-                    for (let i = 1; i <= pdf.numPages; i++) {
-                        const page = await pdf.getPage(i);
-                        const textContent = await page.getTextContent();
-                        fullText += textContent.items.map(item => item.str).join(' ');
-                    }
-                    setText(fullText);
-                };
-                reader.readAsArrayBuffer(file);
+                const fileBuffer = await readFileAsArrayBuffer(file);
+                const typedarray = new Uint8Array(fileBuffer);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    fullText += textContent.items.map(item => item.str).join(' ');
+                }
+                extractedText = fullText;
             } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    const { value } = await mammoth.extractRawText({ arrayBuffer: event.target.result });
-                    setText(value);
-                };
-                reader.readAsArrayBuffer(file);
+                const fileBuffer = await readFileAsArrayBuffer(file);
+                const { value } = await mammoth.extractRawText({ arrayBuffer: fileBuffer });
+                extractedText = value;
             } else {
+                // .text() is already a promise, so it's naturally await-able
                 extractedText = await file.text();
-                setText(extractedText);
             }
+
+            setText(extractedText); // Set the state with the final extracted text
             toast.success("Text extracted successfully!", { id: toastId });
+
         } catch (err) {
+            console.error("File extraction error:", err);
             toast.error("Failed to extract text from file.", { id: toastId });
         }
     };
-
+    // --- END OF CORRECTION ---
 
     return (
         <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
@@ -216,13 +263,14 @@ const AcademicIntegrityPage = () => {
                     <PanelResizeHandle className="w-2 panel-resize-handle" />
                     <Panel defaultSize={50} minSize={30}>
                         <div className="p-2 h-full">
-                            <IntegrityReportPanel
+                           <IntegrityReportPanel
                                 report={report}
                                 isLoading={isLoading}
                                 error={error}
                                 steps={ANALYSIS_STEPS}
                                 currentStep={currentStep}
                                 onFindingSelect={setSelectedFinding}
+                                onApplySuggestion={handleApplySuggestion}
                             />
                         </div>
                     </Panel>
