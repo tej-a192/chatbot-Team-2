@@ -57,6 +57,10 @@ const api = {
     const response = await apiClient.get("/auth/me");
     return response.data;
   },
+  completeOnboarding: async () => {
+    const response = await apiClient.post('/auth/complete-onboarding');
+    return response.data;
+  },
   sendMessage: async (payload) => {
     const response = await apiClient.post("/chat/message", payload);
     return response.data;
