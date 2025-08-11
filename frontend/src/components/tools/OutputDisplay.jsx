@@ -1,7 +1,8 @@
 // frontend/src/components/tools/OutputDisplay.jsx
 import React, { useState } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Clock, Sparkles, Loader2, Copy, Check } from 'lucide-react';
 import Button from '../core/Button';
+import IconButton from '../core/IconButton';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import { marked } from 'marked';
@@ -12,6 +13,32 @@ const createMarkup = (markdownText) => {
     const rawHtml = marked.parse(markdownText);
     const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
     return { __html: cleanHtml };
+};
+
+const CopyablePre = ({ content }) => {
+    const [copied, setCopied] = useState(false);
+    const handleCopy = () => {
+        navigator.clipboard.writeText(content).then(() => {
+            setCopied(true);
+            toast.success('Copied to clipboard!');
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
+
+    return (
+        <div className="relative group">
+            <pre className="bg-gray-200 dark:bg-gray-900 p-2 rounded whitespace-pre-wrap font-mono">{content || '(empty)'}</pre>
+            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <IconButton
+                    icon={copied ? Check : Copy}
+                    onClick={handleCopy}
+                    title={copied ? 'Copied!' : 'Copy'}
+                    size="sm"
+                    className={copied ? 'text-green-500' : ''}
+                />
+            </div>
+        </div>
+    );
 };
 
 
@@ -45,7 +72,9 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                         </Button>
                     )}
                 </div>
-                <pre className="flex-grow bg-red-900/20 p-4 rounded-md text-xs whitespace-pre-wrap font-mono overflow-auto custom-scrollbar">{compilationError}</pre>
+                 <div className="flex-grow overflow-auto custom-scrollbar">
+                    <CopyablePre content={compilationError} />
+                </div>
                 {isLoadingExplanation && explanationFor === 'compilation' && (
                     <div className="mt-2 p-3 text-sm text-center text-text-muted-light dark:text-text-muted-dark"><Loader2 className="animate-spin inline mr-2"/>AI is explaining the error...</div>
                 )}
@@ -73,9 +102,16 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
         return <AlertTriangle className="text-red-500" />;
     };
 
+    const score = results.filter(r => r.status === 'pass').length;
+
     return (
         <div className="p-4 bg-surface-light dark:bg-surface-dark border-t border-border-light dark:border-border-dark h-full flex flex-col">
-            <h3 className="text-lg font-semibold mb-3 flex-shrink-0">Execution Results</h3>
+            <h3 className="text-lg font-semibold mb-3 flex-shrink-0 flex justify-between items-center">
+                <span>Execution Results</span>
+                <span className="text-base font-bold text-green-500 bg-green-500/10 px-3 py-1 rounded-md">
+                    {score} / {results.length} Passed
+                </span>
+            </h3>
             <div className="flex-grow space-y-4 overflow-y-auto custom-scrollbar pr-2">
                 {results.map((res, index) => (
                     <div key={index} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-border-light dark:border-border-dark">
@@ -88,15 +124,17 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                             <div>
                                 <strong className="block mb-1 text-text-light dark:text-text-dark">Input:</strong>
-                                <pre className="bg-gray-200 dark:bg-gray-900 p-2 rounded whitespace-pre-wrap font-mono">{res.input || '(empty)'}</pre>
+                                <CopyablePre content={res.input} />
                             </div>
                             <div>
                                 <strong className="block mb-1 text-text-light dark:text-text-dark">Expected Output:</strong>
-                                <pre className="bg-gray-200 dark:bg-gray-900 p-2 rounded whitespace-pre-wrap font-mono">{res.expected || '(empty)'}</pre>
+                                <CopyablePre content={res.expected} />
                             </div>
                             <div className="md:col-span-2">
                                 <strong className="block mb-1 text-text-light dark:text-text-dark">Actual Output:</strong>
-                                <pre className={`p-2 rounded whitespace-pre-wrap font-mono ${res.status === 'pass' ? 'bg-green-900/20' : 'bg-yellow-900/20'}`}>{res.output || '(empty)'}</pre>
+                                <div className={`relative group ${res.status === 'pass' ? 'bg-green-900/20' : 'bg-yellow-900/20'} rounded`}>
+                                    <CopyablePre content={res.output} />
+                                </div>
                             </div>
                             {res.error && (
                                 <div className="md:col-span-2">
@@ -108,7 +146,9 @@ const OutputDisplay = ({ results, compilationError, code, language }) => {
                                             </Button>
                                         )}
                                     </div>
-                                    <pre className="bg-red-900/20 p-2 rounded text-red-400 whitespace-pre-wrap font-mono">{res.error}</pre>
+                                     <div className="relative group bg-red-900/20 rounded">
+                                        <CopyablePre content={res.error} />
+                                    </div>
                                 </div>
                             )}
                             {isLoadingExplanation && explanationFor === index && (
