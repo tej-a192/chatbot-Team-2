@@ -627,4 +627,21 @@ router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (r
 });
 
 
+// @route   GET /api/admin/negative-feedback
+// @desc    Get all log entries with negative feedback
+router.get('/negative-feedback', async (req, res) => {
+    try {
+        const negativeFeedback = await LLMPerformanceLog.find({ userFeedback: 'negative' })
+            .populate('userId', 'email') // Optionally get user email
+            .sort({ createdAt: -1 })
+            .limit(100); // Limit to the last 100 to prevent performance issues
+
+        res.json(negativeFeedback);
+    } catch (error) {
+        console.error('Error fetching negative feedback logs:', error);
+        res.status(500).json({ message: 'Server error while fetching negative feedback.' });
+    }
+});
+
+
 module.exports = router;

@@ -1,21 +1,55 @@
 // frontend/src/components/admin/ModelFeedbackStats.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-// --- START MODIFICATION: Import startFineTuningJob ---
 import * as adminApi from '../../services/adminApi.js';
-// --- END MODIFICATION ---
-import { ThumbsUp, ThumbsDown, HelpCircle, Loader2, AlertTriangle, Wrench } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, HelpCircle, Loader2, AlertTriangle, Wrench, Eye } from 'lucide-react';
 import Button from '../core/Button.jsx';
-// --- START MODIFICATION: Import toast ---
+import Modal from '../core/Modal.jsx'; 
 import toast from 'react-hot-toast';
-// --- END MODIFICATION ---
 
+
+const NegativeFeedbackViewer = () => {
+    const [feedback, setFeedback] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchFeedback = async () => {
+            setIsLoading(true);
+            try {
+                // This new API function needs to be created in adminApi.js
+                const data = await adminApi.getNegativeFeedback(); 
+                setFeedback(data);
+            } catch (error) {
+                toast.error("Failed to load negative feedback.");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchFeedback();
+    }, []);
+
+    if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-primary" /></div>;
+    if (feedback.length === 0) return <p className="text-center p-8">No negative feedback has been recorded yet.</p>;
+
+    return (
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+            {feedback.map(item => (
+                <details key={item._id} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-border-light dark:border-border-dark p-3">
+                    <summary className="cursor-pointer font-semibold text-sm">Query: "{item.query.substring(0, 100)}..."</summary>
+                    <div className="mt-3 pt-3 border-t border-dashed">
+                        <h5 className="font-semibold text-xs mb-1">AI Response:</h5>
+                        <pre className="text-xs whitespace-pre-wrap font-sans bg-gray-100 dark:bg-gray-900/50 p-2 rounded">{item.response}</pre>
+                    </div>
+                </details>
+            ))}
+        </div>
+    );
+};
 
 const ModelFeedbackStats = () => {
     const [stats, setStats] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    // --- START MODIFICATION: Add fine-tuning loading state ---
     const [isFineTuning, setIsFineTuning] = useState(false);
-    // --- END MODIFICATION ---
+    const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
 
 
     const fetchStats = useCallback(async () => {
@@ -34,7 +68,6 @@ const ModelFeedbackStats = () => {
         fetchStats();
     }, [fetchStats]);
 
-    // --- START MODIFICATION: Add handler for fine-tuning ---
     const handleStartFineTuning = async (modelId) => {
         if (!window.confirm(`Are you sure you want to start a fine-tuning job for the model tagged as '${modelId}'? This will use all positive feedback data.`)) {
             return;
@@ -52,14 +85,19 @@ const ModelFeedbackStats = () => {
             setIsFineTuning(false);
         }
     };
-    // --- END MODIFICATION ---
 
 
     if (isLoading) return <div className="card-base p-4 text-center"><Loader2 className="animate-spin inline-block text-primary" /></div>;
 
     return (
         <div className="card-base p-4">
-            <h2 className="text-lg font-semibold mb-3">Model Feedback & Performance</h2>
+             <div className="flex justify-between items-center mb-3">
+                <h2 className="text-lg font-semibold">Model Feedback & Performance</h2>
+                <Button size="sm" variant="outline" leftIcon={<Eye size={14}/>} onClick={() => setIsFeedbackModalOpen(true)}>
+                    View Negative Feedback
+                </Button>
+            </div>
+
             {stats.length === 0 ? (
                 <p className="text-center text-sm text-text-muted-light dark:text-text-muted-dark py-6">No feedback has been recorded yet.</p>
             ) : (
@@ -73,7 +111,6 @@ const ModelFeedbackStats = () => {
                                 <div title="Negative Feedback"><ThumbsDown className="text-red-500 mx-auto" /><span className="font-bold text-lg">{model.feedback.negative}</span></div>
                                 <div title="No Feedback"><HelpCircle className="text-gray-400 mx-auto" /><span className="font-bold text-lg">{model.feedback.none}</span></div>
                             </div>
-                            {/* --- START MODIFICATION: Update Button functionality --- */}
                             <Button 
                                 size="sm" 
                                 fullWidth 
@@ -86,11 +123,14 @@ const ModelFeedbackStats = () => {
                             >
                                 Fine-Tune
                             </Button>
-                            {/* --- END MODIFICATION --- */}
                         </div>
                     ))}
                 </div>
             )}
+            <Modal isOpen={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} title="Negative Feedback Review" size="2xl">
+                <NegativeFeedbackViewer />
+            </Modal>
+
         </div>
     );
 };
