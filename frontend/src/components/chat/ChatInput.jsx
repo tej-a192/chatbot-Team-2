@@ -35,15 +35,12 @@ function ChatInput({
     const handleRequestPromptCoaching = async () => {
         const trimmedInput = inputValue.trim();
 
-        if (!trimmedInput) return; // General check to prevent action on empty input
+        if (!trimmedInput) return;
         
         if (trimmedInput.length < 3) {
             toast("Prompt is too short for coaching. Please provide a bit more detail.", {
                 icon: '❤️',
-                style: {
-                    background: '#FBBF24',
-                    color: '#ffffff',
-                },
+                style: { background: '#FBBF24', color: '#ffffff' },
             });
             return;
         }
@@ -51,18 +48,29 @@ function ChatInput({
         if (isCoaching) return;
 
         setIsCoaching(true);
-        const toastId = toast.loading('Asking the coach for advice...');
+
+        const promise = api.analyzePrompt(trimmedInput);
+
+        toast.promise(
+            promise,
+            {
+                loading: 'Asking the coach for advice...',
+                success: 'Suggestion received!',
+                error: (err) => err.message || "The Prompt Coach is unavailable.",
+            }
+        );
+
         try {
-            const response = await api.analyzePrompt(trimmedInput);
+            const response = await promise;
             openCoachModalWithData({
                 original: trimmedInput,
                 improved: response.improvedPrompt,
                 explanation: response.explanation
             });
             setCoachModalOpen(true);
-            toast.success('Suggestion received!', { id: toastId });
         } catch (error) {
-            toast.error(error.message || "The Prompt Coach is unavailable.", { id: toastId });
+            // toast.promise already handled displaying the error.
+            console.error("Error requesting prompt coaching:", error.message);
         } finally {
             setIsCoaching(false);
         }

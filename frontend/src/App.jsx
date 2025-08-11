@@ -96,7 +96,7 @@ function MainAppLayout({
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+            onNewChat={handleNewChat}
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -155,11 +155,13 @@ function App() {
     const [isAwaitingOnboarding, setIsAwaitingOnboarding] = useState(false);
 
     const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
+
+        const actualCallback = typeof callback === 'function' ? callback : null;
         const messages = appStateMessages;
 
         if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
-            if (callback) callback(currentSessionId);
+            if (actualCallback) currentSessionId(currentSessionId);
             return;
         }
         
@@ -193,19 +195,22 @@ function App() {
                         </motion.div>
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                if (callback) {
+                if (actualCallback) {
                     if (!skipSessionAnalysis) {
                          toast.success("New chat started!"); 
                     }
-                    callback(data.newSessionId);
+                    actualCallback(data.newSessionId);
+                } else if (!skipSessionAnalysis) {
+                    // If no callback, but it's a user-initiated new chat, still show the toast.
+                    toast.success("New chat started!");
                 }
             } else {
                 toast.error(data.message || "Could not start new chat session.");
-                if (callback) callback(null);
+                if (actualCallback) actualCallback(null);
             }
         } catch (error) {
             toast.error(`Failed to start new chat: ${error.message}`);
-            if (callback) callback(null);
+            if (actualCallback) actualCallback(null);
         } finally {
             setIsSessionLoading(false);
         }
