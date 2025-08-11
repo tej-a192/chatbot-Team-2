@@ -1,51 +1,68 @@
-flask
+# -- Core Web & API Frameworks --
+flask~=2.3.0
 requests
-langchain
-langchain-text-splitters
-langchain-huggingface
+python-dotenv
+Werkzeug~=2.3.0
+aiohttp
+python-json-logger
+prometheus-flask-exporter
+sentry-sdk
+
+# -- LangChain --
+langchain~=0.2.0
+langchain-core~=0.2.0
+langchain-community~=0.2.0
+langchain-text-splitters~=0.2.0
+
+# -- AI & LLM SDKs --
+google-generativeai
+ollama
+openai
+openai-whisper
+
+# -- Vector & Graph Databases (Pinned for API consistency) --
+qdrant-client==1.8.2
+neo4j==5.17.0
+
+# -- Core ML/AI Block (Pinned as they are highly interdependent) --
+torch==2.3.0
+transformers==4.41.2
+accelerate==0.30.1
+bitsandbytes==0.43.1
+datasets==2.19.0
+sentence-transformers==2.7.0
+unsloth @ git+https://github.com/unslothai/unsloth.git
+
+# -- Text-to-Speech (Pinned due to its own complex dependencies) --
+TTS==0.22.0
+
+# -- Foundational Data Science Libraries (Generalized) --
+pandas
+numpy
+
+# -- Document & Data Processing --
 pypdf
 PyPDF2
 python-docx
-python-dotenv
-ollama # Keep if using Ollama embeddings
 python-pptx
-uuid
-langchain-community
 pdfplumber
-fitz # PyMuPDF for PDF parsing
+PyMuPDF
+Pillow
 pytesseract
-nltk
-spacy-layout
-pandas
-numpy
-typing
-pytesseract # OCR
-pillow
-qdrant-client
-neo4j
-sentence_transformers
-spacy
-opencv-python
-ddgs
-python-docx
-reportlab
-google-generativeai
-gTTS
-yt-dlp
-openai-whisper
+spacy~=3.7.0
+# Note: After install, run: python -m spacy download en_core_web_sm
+
+# -- Web Scraping & Media --
 beautifulsoup4
 playwright
+yt-dlp
 moviepy
-Werkzeug
-aiohttp
-textstat
-TTS
 pydub
-python-json-logger
-prometheus-flask-exporter
-unsloth[llama-3-8b-bnb-4bit] @ git+https://github.com/unslothai/unsloth.git
-torch==2.3.0
-transformers==4.41.2
-datasets==2.19.0
-accelerate==0.30.1
-bitsandbytes==0.43.1
+
+# -- Utilities --
+uuid
+nltk
+reportlab
+gTTS
+textstat
+ddgs
