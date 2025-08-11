@@ -352,17 +352,6 @@ echo "Script complete. Output generated: $OUTPUT_FILE"
 exit 0
 ```
 
-`frontend/.env`
-
-```
-#REACT_APP_API_BASE_URL=http://localhost:5001/api
-# OR for Vite:
-VITE_API_BASE_URL=http://localhost:5001/api
-VITE_ADMIN_USERNAME=admin@admin.com
-VITE_ADMIN_PASSWORD=admin123
-
-```
-
 `frontend/eslint.config.js`
 
 ```javascript
@@ -8799,7 +8788,7 @@ const services = [
     },
     {
         name: 'Kibana',
-        url: 'http://localhost:5601',
+        url: 'http://localhost:5601/app/discover/',
         icon: Search,
         description: 'Explore, search, and visualize application logs.'
     },
@@ -19131,6 +19120,13 @@ export const useWebSpeech = () => {
   .animated-underline::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, theme('colors.orange.500'), theme('colors.red.500'), theme('colors.amber.400'), transparent); animation: sweep-underline 4s linear infinite; }
   @keyframes fire-flicker { 0%, 100% { transform: scale(1, 1); box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400'); } 50% { transform: scale(1.05, 1.05); box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7); } }
   .fire-tag-animation { animation: fire-flicker 2.5s ease-in-out infinite; }
+
+  .processing-overlay {
+    pointer-events: none; /* Disables all click/hover events */
+    opacity: 0.6;         /* Reduces opacity for visual feedback */
+    transition: opacity 0.3s ease-in-out; /* Smooth transition */
+  }
+
 }
 ```
 
@@ -19970,13 +19966,156 @@ export default defineConfig({
 `grafana/provisioning/dashboards/dashboard.json`
 
 ```json
-
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Requests Per Second (Traffic)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(http_request_duration_seconds_count{job=\"nodejs_backend\"}[5m]))",
+          "legendFormat": "Node.js Backend"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(flask_http_request_duration_seconds_count{job=\"python_rag_service\"}[5m]))",
+          "legendFormat": "Python RAG Service"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "API Latency (P95)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"nodejs_backend\"}[5m])) by (le))",
+          "legendFormat": "Node.js Backend (P95)"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(flask_http_request_duration_seconds_bucket{job=\"python_rag_service\"}[5m])) by (le))",
+          "legendFormat": "Python RAG Service (P95)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Server Error Rate (5xx)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 20 }, "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(http_request_duration_seconds_count{job=\"nodejs_backend\", code=~\"5..\"}[5m])) / sum(rate(http_request_duration_seconds_count{job=\"nodejs_backend\"}[5m])) * 100",
+          "legendFormat": "Node.js Backend 5xx Errors (%)"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(flask_http_request_duration_seconds_count{job=\"python_rag_service\", status=~\"5..\"}[5m])) / sum(rate(flask_http_request_duration_seconds_count{job=\"python_rag_service\"}[5m])) * 100",
+          "legendFormat": "Python RAG Service 5xx Errors (%)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "CPU Usage",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 15 }, "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(process_cpu_seconds_total{job=\"nodejs_backend\"}[5m])) * 100",
+          "legendFormat": "Node.js Backend CPU (%)"
+        }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Application Health Dashboard",
+  "uid": "ai_tutor_dashboard",
+  "version": 1
+}
 ```
 
 `grafana/provisioning/dashboards/dashboard.yml`
 
 ```yaml
-apiVersion
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
 ```
 
 `grafana/provisioning/datasources/datasource.yml`
@@ -20019,15 +20158,14 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   - job_name: 'nodejs_backend'
+    # Use the container name and port defined in docker-compose.yml
     static_configs:
-      - targets: ['host.docker.internal:5001']
+      - targets: ['nodejs_backend:5001']
 
-  # --- ADD THIS NEW JOB ---
   - job_name: 'python_rag_service'
+    # Use the container name and port for the python service
     static_configs:
-      # We use the same 'host.docker.internal' to reach the host machine,
-      # but this time we target port 5000 where the Python service is running.
-      - targets: ['host.docker.internal:5000']
+      - targets: ['python_rag_service:5000']
 ```
 
 `README.md`
@@ -20316,21 +20454,31 @@ This project is a collaborative effort. The contributors are listed below and th
 `server/.env`
 
 ```
+#server env
+
 PORT=5001
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
 JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
+
+# --- Language Model (LLM) APIs ---
 GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
-PROMPT_COACH_GEMINI_MODEL=gemini-2.5-pro
-PROMPT_COACH_OLLAMA_MODEL=qwen2.5:14b-instruct
-PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
 OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
-ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
-SENTRY_DSN="https://458178e6527d82e9373ea1b1b34d3954@o4509804762497024.ingest.us.sentry.io/4509804765577216"
+
+# --- Services ---
+PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
 REDIS_URL="redis://localhost:6379"
+
+# --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
-ELASTICSEARCH_URL=http://localhost:9200
+
+# --- Turnitin Core API Credentials (Optional) ---
+TURNITIN_API_URL="https://your-institution.turnitin.com/api/v1"
+TURNITIN_API_KEY="your_api_key"
+TURNITIN_API_SECRET="your_api_secret"
+
 # --- AWS S3 Credentials for Dataset Management ---
 # Replace placeholders below with your actual values
 S3_BUCKET_NAME="ai-tutor-datasets-rohith"
@@ -21409,7 +21557,6 @@ The first step is to record a 5-minute improvised video of yourself answering th
     mindmap: {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
-            // --- THIS IS THE FIX ---
             baseTemplate += `
 **TASK:** Generate a mind map in Mermaid.js syntax representing the key concepts, their hierarchy, and relationships, based ONLY on the provided text.
 
@@ -21419,6 +21566,26 @@ The first step is to record a 5-minute improvised video of yourself answering th
 3.  **Edges:** Show relationships using \`-->\`.
 4.  **Hierarchy:** The central theme should be the primary node.
 5.  **Content Focus:** The mind map content MUST be strictly derived from the provided document text.
+
+
+Mermaid Code Safety Instructions (Follow Exactly):
+- Always wrap node labels in double quotes "..." if they contain special characters like: parentheses (), curly braces {}, colons :, commas ,, ampersands &, pipes |, <, >, #, +, -, /, *, %, !, @, ?, =, or multiple spaces.
+- Use {} only when you intend a decision diamond shape — never for decorative text.
+- Node shapes:
+  - [ ] = rectangle
+  - ( ) = rounded rectangle
+  - { } = diamond (decision)
+  - (( )) = circle/terminator
+- Arrows:
+  - --> = normal arrow
+  - --- = no arrow
+  - -.-> = dotted arrow
+  - Never put spaces inside arrow symbols.
+- Node IDs: only use letters, numbers, and underscores _. No spaces. Example: Start_Node["Start Here"].
+- Escape quotes inside labels as \". 
+- For multi-line labels, use <br> for line breaks.
+- Every node used in an arrow must be defined exactly once. No dangling or duplicate IDs.
+- Avoid Markdown syntax inside labels unless the entire label is quoted.
 
 **OUTPUT FORMAT (Strict):**
 *   Start with your detailed \`<thinking>\` block if you use one.
@@ -34709,10 +34876,25 @@ import os
 import logging
 from dotenv import load_dotenv
 from pythonjsonlogger import jsonlogger
+from datetime import datetime, timezone
 
 # --- Load .env from the parent 'server' directory ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+
+class JsonFormatterWithMilliseconds(jsonlogger.JsonFormatter):
+    """
+    A custom JSON formatter that correctly formats timestamps with milliseconds and a 'Z' for UTC.
+    This overrides the default formatTime method which uses a function that doesn't support %f.
+    """
+    def formatTime(self, record, datefmt=None):
+        # Use the record's creation time and make it timezone-aware (UTC)
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        
+        # Format it to ISO 8601 with milliseconds, then replace the timezone info with 'Z'
+        # Example: 2024-01-01T12:34:56.123456+00:00 -> 2024-01-01T12:34:56.123Z
+        return dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 def setup_logging():
     """Configure logging to output structured, standardized JSON to a dedicated log file."""
@@ -34726,8 +34908,7 @@ def setup_logging():
     # --- CHANGE 1: Dedicated log file ---
     log_file_path = os.path.join(log_dir, 'python-rag.log')
     
-    # --- CHANGE 2: Rename fields to match the unified schema ---
-    formatter = jsonlogger.JsonFormatter(
+    formatter = JsonFormatterWithMilliseconds(
         '%(asctime)s %(levelname)s %(name)s %(lineno)d %(message)s %(service)s',
         rename_fields={
             'asctime': '@timestamp',
@@ -34735,8 +34916,7 @@ def setup_logging():
             'name': 'log.logger',
             'lineno': 'log.origin.file.line',
             'service': 'service.name'
-        },
-        datefmt='%Y-%m-%dT%H:%M:%S.%fZ' 
+        }
     )
     
     class ServiceContextFilter(logging.Filter):
@@ -36712,7 +36892,6 @@ transformers==4.41.2
 datasets==2.19.0
 accelerate==0.30.1
 bitsandbytes==0.43.1
-
 ```
 
 `server/rag_service/speech_enhancer.py`
@@ -44065,53 +44244,6 @@ async function performWebSearch(query) {
 }
 
 module.exports = { performWebSearch };
-```
-
-`server/syllabi/embedded_systems.md`
-
-```markdown
-# Embedded Systems Syllabus
-
-## Course Description
-Introduction to the design and analysis of embedded systems. Hardware and software co-design.
-
-## Key Topics
-*   Microcontroller architecture (ARM Cortex-M focus)
-*   Interfacing: GPIO, Timers, ADC, DAC, Serial Communication (UART, SPI, I2C)
-*   Real-Time Operating Systems (RTOS) concepts
-*   Interrupts and Exception Handling
-*   Low-level C programming and debugging
-
-## Lab Work
-Hands-on labs using development boards.
-
-## Requirements
-*   Basic C programming knowledge.
-*   Understanding of digital logic fundamentals.
-
-```
-
-`server/syllabi/machine_learning.md`
-
-```markdown
-# Machine Learning Syllabus
-
-## Course Overview
-This course provides a broad introduction to machine learning and statistical pattern recognition.
-
-## Topics Covered
-*   Supervised learning (parametric/non-parametric algorithms, support vector machines, kernels, neural networks).
-*   Unsupervised learning (clustering, dimensionality reduction, recommender systems).
-*   Best practices in machine learning (bias/variance theory; innovation process in machine learning and AI).
-
-## Prerequisites
-*   Strong foundation in probability, linear algebra, and calculus.
-*   Proficiency in Python programming.
-
-## Recommended Texts
-*   "Pattern Recognition and Machine Learning" by Christopher M. Bishop
-*   "The Elements of Statistical Learning" by Hastie, Tibshirani, Friedman
-
 ```
 
 `server/utils/assetCleanup.js`
