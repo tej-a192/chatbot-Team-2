@@ -283,9 +283,7 @@ const StudyPlanPage = ({ handleNewChat }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     
-    // --- MODIFICATION START ---
     const [selectedStudyPlan, setSelectedStudyPlan] = useState(null); // New state to hold the selected plan object for detail view
-    // --- MODIFICATION END ---
     
     const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
     const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
@@ -485,10 +483,10 @@ const StudyPlanPage = ({ handleNewChat }) => {
                                                         <span className={`text-xs font-medium ${statusColor}`}>
                                                             {statusText}
                                                         </span>
-                                                        <IconButton
+                                                       <IconButton
                                                             icon={Trash2}
                                                             onClick={(e) => {
-                                                                e.stopPropagation(); // Prevent card selection
+                                                                e.stopPropagation();
                                                                 setPlanToDelete(path);
                                                                 setShowDeleteConfirmModal(true);
                                                             }}
@@ -499,7 +497,6 @@ const StudyPlanPage = ({ handleNewChat }) => {
                                                         />
                                                     </div>
                                                 </div>
-                                                {/* <<< MODIFIED: Removed the AnimatePresence and module display from here */}
                                             </motion.div>
                                         );
                                     })}

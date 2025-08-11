@@ -92,6 +92,8 @@ function AdminDashboardPage() {
     const [isUserChatsModalOpen, setIsUserChatsModalOpen] = useState(false);
     const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
     const [isDatasetModalOpen, setIsDatasetModalOpen] = useState(false); // <<< NEW STATE for Dataset Modal
+    const [showDeleteDocModal, setShowDeleteDocModal] = useState(false);
+    const [docToDelete, setDocToDelete] = useState(null); 
     
 
     const adminLogoutHandler = () => {
@@ -136,19 +138,23 @@ function AdminDashboardPage() {
 
     useEffect(() => { fetchAdminData(); }, [fetchAdminData]);
 
-    const handleDeleteDocument = async (serverFilename, originalName) => {
-        if (!window.confirm(`Are you sure you want to delete admin document "${originalName}"?`)) return;
-        const toastId = toast.loading(`Deleting "${originalName}"...`);
+    const handleDeleteDocument = async () => {
+        if (!docToDelete) return;
+
+        const toastId = toast.loading(`Deleting "${docToDelete.originalName}"...`);
         try {
             const authHeaders = adminApi.getFixedAdminAuthHeaders();
-            await adminApi.deleteAdminDocument(serverFilename, authHeaders);
-            toast.success(`Document "${originalName}" deleted.`, { id: toastId });
+            await adminApi.deleteAdminDocument(docToDelete.serverFilename, authHeaders);
+            toast.success(`Document "${docToDelete.originalName}" deleted.`, { id: toastId });
             fetchAdminData(true);
-            if (isAnalysisModalOpen && currentDocForModal?.serverFilename === serverFilename) {
+            if (isAnalysisModalOpen && currentDocForModal?.serverFilename === docToDelete.serverFilename) {
                 setIsAnalysisModalOpen(false);
             }
         } catch (err) {
-            toast.error(err.message || `Failed to delete "${originalName}".`, { id: toastId });
+            toast.error(err.message || `Failed to delete "${docToDelete.originalName}".`, { id: toastId });
+        } finally {
+            setShowDeleteDocModal(false);
+            setDocToDelete(null);
         }
     };
     
@@ -242,9 +248,8 @@ function AdminDashboardPage() {
                                                     <td className="px-3 sm:px-4 py-2"> {(doc.hasFaq || doc.hasTopics || doc.hasMindmap) ? ( <span className="flex items-center text-green-600 dark:text-green-400 text-xs"><CheckCircle size={14} className="mr-1"/> Generated</span> ) : (doc.analysisUpdatedAt ? <span className="text-gray-500 dark:text-gray-400 text-xs">Empty/Skipped</span> : <span className="text-yellow-500 dark:text-yellow-400 text-xs">Pending</span>)} </td>
                                                     <td className="px-1 sm:px-4 py-2 text-center whitespace-nowrap">
                                                         <IconButton icon={Eye} title="View Analysis" size="sm" variant="ghost" className="text-primary hover:text-primary-dark mr-0.5 sm:mr-1" onClick={() => handleViewAnalysis(doc)} disabled={isLoadingAnalysis && currentDocForModal?.serverFilename === doc.serverFilename} />
-                                                        <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteDocument(doc.serverFilename, doc.originalName)} />
-                                                    </td>
-                                                </tr>
+                                                        <IconButton icon={Trash2} title="Delete Document" size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => { setDocToDelete({ serverFilename: doc.serverFilename, originalName: doc.originalName }); setShowDeleteDocModal(true);  }} />                                                    </td>
+                                                </tr>    
                                             ))}
                                         </tbody>
                                     </table>
@@ -296,6 +301,22 @@ function AdminDashboardPage() {
             {/* <<< NEW MODAL FOR DATASETS --- */}
             <Modal isOpen={isDatasetModalOpen} onClose={() => setIsDatasetModalOpen(false)} title="Secure Dataset Management" size="5xl">
                 <DatasetManager />
+            </Modal>
+            <Modal
+                isOpen={showDeleteDocModal}
+                onClose={() => setShowDeleteDocModal(false)}
+                title="Confirm Document Deletion"
+                size="md"
+                footerContent={
+                    <>
+                        <Button variant="secondary" onClick={() => setShowDeleteDocModal(false)}>Cancel</Button>
+                        <Button variant="danger" onClick={handleDeleteDocument}>Confirm Delete</Button>
+                    </>
+                }
+            >
+                <p className="py-4">
+                    Are you sure you want to permanently delete the document "<strong>{docToDelete?.originalName}</strong>"? This action will remove its analysis and associated data.
+                </p>
             </Modal>
         </div>
     );
