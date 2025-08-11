@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const LearningPath = require('../models/LearningPath');
+const User = require('../models/User'); // <<< THIS IS THE FIX
 const { createLearningPath } = require('../services/learning/curriculumOrchestrator');
 const { auditLog } = require('../utils/logger');
 
@@ -12,22 +13,22 @@ router.post('/generate', async (req, res) => {
     const { goal, context } = req.body;
     const userId = req.user._id;
 
-
     if (!goal) {
         return res.status(400).json({ message: 'A learning goal is required.' });
     }
 
     try {
-        
+        // This function is now called only ONCE.
         const newPathOrQuestions = await createLearningPath(userId, goal, context);
         
         auditLog(req, 'STUDY_PLAN_GENERATION_SUCCESS', {
             goal: goal,
             isClarificationNeeded: newPathOrQuestions.isQuestionnaire || false
         });
+        
+        // Return the result directly.
+        res.status(201).json(newPathOrQuestions);
 
-        const newPath = await createLearningPath(userId, goal, context);
-        res.status(201).json(newPath);
     } catch (error) {
         auditLog(req, 'STUDY_PLAN_GENERATION_FAILURE', {
             goal: goal,
@@ -64,7 +65,6 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
     }
 
     try {
-        // Find the learning path ensuring it belongs to the current user
         const learningPath = await LearningPath.findOne({ _id: pathId, userId: userId });
 
         if (!learningPath) {
@@ -76,18 +76,14 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
             return res.status(404).json({ message: 'Module not found in this learning path.' });
         }
 
-        // Update the status of the specific module
         learningPath.modules[moduleIndex].status = status;
 
-        // Business Logic: If a module is completed, unlock the next one
         if (status === 'completed' && moduleIndex + 1 < learningPath.modules.length) {
-            // Check if the next module is currently locked
             if (learningPath.modules[moduleIndex + 1].status === 'locked') {
                 learningPath.modules[moduleIndex + 1].status = 'not_started';
             }
         }
 
-        // Mark the document as modified before saving
         learningPath.markModified('modules');
         await learningPath.save();
         
@@ -96,7 +92,6 @@ router.put('/:pathId/modules/:moduleId', async (req, res) => {
             moduleId: moduleId,
             newStatus: status
         });
-        // Return the entire updated path so the frontend can refresh its state
         res.status(200).json(learningPath);
 
     } catch (error) {
@@ -114,14 +109,12 @@ router.delete('/:pathId', async (req, res) => {
     const userId = req.user._id;
 
     try {
-        // Find and delete the learning path, ensuring it belongs to the current user
         const result = await LearningPath.deleteOne({ _id: pathId, userId: userId });
 
         if (result.deletedCount === 0) {
             return res.status(404).json({ message: 'Learning path not found or you do not have permission to delete it.' });
         }
 
-        // Also remove the reference from the User's learningPaths array (optional but good cleanup)
         await User.updateOne({ _id: userId }, { $pull: { learningPaths: pathId } });
 
         auditLog(req, 'STUDY_PLAN_DELETED', {
