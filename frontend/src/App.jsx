@@ -24,6 +24,8 @@ import Button from './components/core/Button.jsx';
 import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
 import LandingPage from './components/landing/LandingPage.jsx';
 import OnboardingFlow from './components/onboarding/OnboardingFlow.jsx';
+import AnalyticsDashboardPage from './components/admin/AnalyticsDashboardPage.jsx';
+
 
 function SessionLoadingModal() {
     return (
@@ -339,6 +341,7 @@ function App() {
                 {isAdminSessionActive ? (
                     <>
                         <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+                        <Route path="/admin/analytics" element={<AdminProtectedRoute><AnalyticsDashboardPage /></AdminProtectedRoute>} />
                         <Route path="/*" element={<Navigate to="/admin/dashboard" replace />} />
                     </>
                 ) : regularUserToken && regularUser ? (

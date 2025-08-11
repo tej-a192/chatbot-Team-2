@@ -97,7 +97,6 @@ The first step is to record a 5-minute improvised video of yourself answering th
     mindmap: {
         getPrompt: (docTextForLlm) => {
             let baseTemplate = ANALYSIS_THINKING_PREFIX_TEMPLATE.replace('{doc_text_for_llm}', docTextForLlm);
-            // --- THIS IS THE FIX ---
             baseTemplate += `
 **TASK:** Generate a mind map in Mermaid.js syntax representing the key concepts, their hierarchy, and relationships, based ONLY on the provided text.
 
@@ -107,6 +106,26 @@ The first step is to record a 5-minute improvised video of yourself answering th
 3.  **Edges:** Show relationships using \`-->\`.
 4.  **Hierarchy:** The central theme should be the primary node.
 5.  **Content Focus:** The mind map content MUST be strictly derived from the provided document text.
+
+
+Mermaid Code Safety Instructions (Follow Exactly):
+- Always wrap node labels in double quotes "..." if they contain special characters like: parentheses (), curly braces {}, colons :, commas ,, ampersands &, pipes |, <, >, #, +, -, /, *, %, !, @, ?, =, or multiple spaces.
+- Use {} only when you intend a decision diamond shape — never for decorative text.
+- Node shapes:
+  - [ ] = rectangle
+  - ( ) = rounded rectangle
+  - { } = diamond (decision)
+  - (( )) = circle/terminator
+- Arrows:
+  - --> = normal arrow
+  - --- = no arrow
+  - -.-> = dotted arrow
+  - Never put spaces inside arrow symbols.
+- Node IDs: only use letters, numbers, and underscores _. No spaces. Example: Start_Node["Start Here"].
+- Escape quotes inside labels as \". 
+- For multi-line labels, use <br> for line breaks.
+- Every node used in an arrow must be defined exactly once. No dangling or duplicate IDs.
+- Avoid Markdown syntax inside labels unless the entire label is quoted.
 
 **OUTPUT FORMAT (Strict):**
 *   Start with your detailed \`<thinking>\` block if you use one.

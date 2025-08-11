@@ -94,6 +94,26 @@ export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get',
 
 export const deleteDataset = (datasetId) => makeAdminApiRequest('delete', `/datasets/${datasetId}`);
 
+export const getUserEngagementStats = () => makeAdminApiRequest('get', '/analytics/user-engagement');
+
+export const getContentInsightStats = () => makeAdminApiRequest('get', '/analytics/content-insights');
+
+export const getFeatureUsageStats = () => makeAdminApiRequest('get', '/analytics/feature-usage');
+
+export const getCodeExecutorUsage = () => makeAdminApiRequest('get', '/analytics/code-executor-usage');
+
+export const getLlmUsageStats = () => makeAdminApiRequest('get', '/analytics/llm-usage');
+
+export const getPptxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/pptx-generated-count');
+
+export const getDocxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/docx-generated-count');
+
+export const getActiveUsersToday = () => makeAdminApiRequest('get', '/analytics/active-users-today');
+
+export const getTotalQueries = () => makeAdminApiRequest('get', '/analytics/total-queries');
+
+export const getTotalSources = () => makeAdminApiRequest('get', '/analytics/total-sources');
+
 export const startFineTuningJob = (payload) => {
     // This function is now using the robust makeAdminApiRequest helper.
     // The endpoint is relative to /api/admin, so we just need /finetuning/start

@@ -1,7 +1,6 @@
 // server/config/elasticsearchClient.js
 const { Client } = require('@elastic/elasticsearch');
 
-// The Elasticsearch container is available at this address from our Node.js app
 const ELASTICSEARCH_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
 let esClient;

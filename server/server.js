@@ -26,6 +26,8 @@ const { ipFilterMiddleware } = require("./middleware/ipFilterMiddleware");
 const { connectRedis } = require("./config/redisClient");
 const { logger } = require('./utils/logger');
 
+logger.info('--- WINSTON LOGGER INITIALIZED IN SERVER.JS ---');
+
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
 const authRoutes = require("./routes/auth");
@@ -46,6 +48,7 @@ const knowledgeSourceRoutes = require("./routes/knowledgeSource");
 const analyticsRoutes = require('./routes/analytics');
 const feedbackRoutes = require('./routes/feedback');
 const finetuningRoutes = require('./routes/finetuning');
+
 
 // --- Configuration & Express App Setup ---
 const port = process.env.PORT || 5001;
@@ -86,8 +89,9 @@ app.use("/api/auth", authRoutes);
 // --- Admin Routes ---
 // Apply the fixed admin auth middleware to the single MASTER admin router.
 // This ensures all routes defined in ./routes/admin/* are protected correctly.
-app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
+app.use('/api/admin/analytics', fixedAdminAuthMiddleware, analyticsRoutes);
 app.use('/api/admin/finetuning', fixedAdminAuthMiddleware, finetuningRoutes);
+app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter); // General route goes LAST
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);

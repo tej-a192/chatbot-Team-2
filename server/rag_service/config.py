@@ -3,13 +3,28 @@ import os
 import logging
 from dotenv import load_dotenv
 from pythonjsonlogger import jsonlogger
+from datetime import datetime, timezone
 
 # --- Load .env from the parent 'server' directory ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
+
+class JsonFormatterWithMilliseconds(jsonlogger.JsonFormatter):
+    """
+    A custom JSON formatter that correctly formats timestamps with milliseconds and a 'Z' for UTC.
+    This overrides the default formatTime method which uses a function that doesn't support %f.
+    """
+    def formatTime(self, record, datefmt=None):
+        # Use the record's creation time and make it timezone-aware (UTC)
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        
+        # Format it to ISO 8601 with milliseconds, then replace the timezone info with 'Z'
+        # Example: 2024-01-01T12:34:56.123456+00:00 -> 2024-01-01T12:34:56.123Z
+        return dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
 def setup_logging():
-    """Configure logging to output structured JSON to the SINGLE combined log file."""
+    """Configure logging to output structured, standardized JSON to a dedicated log file."""
     root_logger = logging.getLogger()
     if root_logger.handlers:
         for handler in root_logger.handlers:
@@ -17,25 +32,37 @@ def setup_logging():
 
     log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, 'app.log')
+    # --- CHANGE 1: Dedicated log file ---
+    log_file_path = os.path.join(log_dir, 'python-rag.log')
     
-    formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
+    formatter = JsonFormatterWithMilliseconds(
+        '%(asctime)s %(levelname)s %(name)s %(lineno)d %(message)s %(service)s',
+        rename_fields={
+            'asctime': '@timestamp',
+            'levelname': 'log.level',
+            'name': 'log.logger',
+            'lineno': 'log.origin.file.line',
+            'service': 'service.name'
+        }
     )
     
     class ServiceContextFilter(logging.Filter):
         def filter(self, record):
+            # Standardize log level to lowercase
+            record.levelname = record.levelname.lower()
             record.service = "ai-tutor-python-rag"
             return True
 
-    root_logger.addFilter(ServiceContextFilter())
+    service_filter = ServiceContextFilter()
     
     file_handler = logging.FileHandler(log_file_path, mode='a')
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(service_filter)
     root_logger.addHandler(file_handler)
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(service_filter)
     root_logger.addHandler(console_handler)
     
     LOGGING_LEVEL = os.getenv('LOGGING_LEVEL', 'INFO').upper()
@@ -43,10 +70,9 @@ def setup_logging():
     
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    
-    # Use a temporary logger to announce initialization
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     init_logger = logging.getLogger(__name__)
-    init_logger.info(f"Python logging initialized. Appending to: {log_file_path}")
+    init_logger.info(f"Python logging initialized and standardized. Appending to: {log_file_path}")
 
 setup_logging()
 

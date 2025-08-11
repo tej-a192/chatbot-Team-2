@@ -130,11 +130,15 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      # --- ADD THIS ENTIRE SECTION ---
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      # --- END OF ADDED SECTION ---
     depends_on:
       - prometheus
     networks:
       - ai_tutor_network
     restart: unless-stopped
+
 
 volumes:
   qdrant_data:
@@ -153,31 +157,53 @@ networks:
 `filebeat.yml`
 
 ```yaml
+# filebeat.yml
+
 filebeat.inputs:
-- type: filestream  # Using the modern, recommended input type
-  id: my-app-logs
+# --- Input for Node.js logs ---
+- type: filestream
+  id: nodejs-backend-logs
   enabled: true
   paths:
-    - /usr/share/filebeat/logs/app.log
+    - /usr/share/filebeat/logs/nodejs-backend.log
+  tags: ["nodejs-backend"]
 
-# This section is the key. We remove all JSON parsing from Filebeat.
-# It will now treat each line as a simple text message.
-# The 'message' field will contain the raw JSON string.
-parsers:
-  - ndjson:
-      target: "" # Don't output under a json key, but parse it
-      keys_under_root: true
+# --- Input for Python RAG logs ---
+- type: filestream
+  id: python-rag-logs
+  enabled: true
+  paths:
+    - /usr/share/filebeat/logs/python-rag.log
+  tags: ["python-rag"]
+
+# --- Universal JSON Processor (No changes here, it's correct) ---
+processors:
+  - decode_json_fields:
+      fields: ["message"]
+      target: ""
+      add_error_key: true
+      process_array: false
       overwrite_keys: true
+
+# --- THIS IS THE FIX ---
+# We are simplifying the output configuration. By default, Filebeat 8.x
+# is optimized to work with data streams. We will let it use its
+# default behavior, which is more robust.
 
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]
-  index: "ai-tutor-logs-%{+yyyy.MM.dd}"
+  # We remove the manual 'index:' line. Filebeat will now use its default
+  # data stream logic, which is logs-generic-default.
+  # This avoids the template conflict you were seeing.
 
-setup.template.name: "ai-tutor-logs"
-setup.template.pattern: "ai-tutor-logs-*"
+# We remove the manual setup.template.* lines as they are causing the conflict
+# with the data stream setup. Filebeat will manage this automatically.
+setup.ilm.enabled: true
+setup.ilm.overwrite: true
 
 setup.kibana:
   host: "kibana:5601"
+
 ```
 
 `files_md.sh`
@@ -8036,18 +8062,24 @@ export default AdminProtectedRoute;
 // frontend/src/components/admin/AnalyticsDashboardPage.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Home, Loader2, AlertTriangle, Users, UserPlus, AreaChart } from 'lucide-react';
+import { Home, Loader2, AlertTriangle, Users, UserCheck, MessagesSquare, UploadCloud, FileBarChart2, FileText, BarChart3, PieChart } from 'lucide-react';
 import * as adminApi from '../../services/adminApi.js';
 import toast from 'react-hot-toast';
 import AnalyticsKpiCard from './AnalyticsKpiCard.jsx';
 import UserSignupsChart from './UserSignupsChart.jsx';
 import FeatureUsageChart from './FeatureUsageChart.jsx';
-import ContentInsightsChart from './ContentInsightsChart.jsx'; // <<< NEW IMPORT
+import ContentInsightsChart from './ContentInsightsChart.jsx';
+import LlmUsageChart from './LlmUsageChart.jsx';
+import ExternalServicesNav from './ExternalServicesNav.jsx'; // <<< NEW: Import the component
 
 const AnalyticsDashboardPage = () => {
+    const [kpiData, setKpiData] = useState(null);
     const [userEngagementData, setUserEngagementData] = useState(null);
     const [featureUsageData, setFeatureUsageData] = useState(null);
-    const [contentInsightsData, setContentInsightsData] = useState(null); // <<< NEW STATE
+    const [contentInsightsData, setContentInsightsData] = useState(null);
+    const [llmUsageData, setLlmUsageData] = useState(null);
+    const [generatedContentData, setGeneratedContentData] = useState(null);
+
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -8056,14 +8088,38 @@ const AnalyticsDashboardPage = () => {
             setIsLoading(true);
             setError('');
             try {
-                const [engagementStats, featureStats, contentStats] = await Promise.all([
+                const [
+                    kpiStats,
+                    engagementStats, 
+                    featureStats, 
+                    contentStats,
+                    llmStats,
+                    pptxStats,
+                    docxStats
+                ] = await Promise.all([
+                    Promise.all([
+                        adminApi.getTotalQueries(),
+                        adminApi.getActiveUsersToday(),
+                        adminApi.getTotalSources()
+                    ]).then(([queries, activeUsers, sources]) => ({
+                        totalQueries: queries.count,
+                        activeUsersToday: activeUsers.count,
+                        totalSources: sources.count
+                    })),
                     adminApi.getUserEngagementStats(),
                     adminApi.getFeatureUsageStats(),
-                    adminApi.getContentInsightStats() // <<< NEW API CALL
+                    adminApi.getContentInsightStats(),
+                    adminApi.getLlmUsageStats(),
+                    adminApi.getPptxGeneratedCount(),
+                    adminApi.getDocxGeneratedCount()
                 ]);
+                
+                setKpiData(kpiStats);
                 setUserEngagementData(engagementStats);
                 setFeatureUsageData(featureStats);
-                setContentInsightsData(contentStats); // <<< SET NEW STATE
+                setContentInsightsData(contentStats);
+                setLlmUsageData(llmStats);
+                setGeneratedContentData({ pptx: pptxStats.count, docx: docxStats.count });
             } catch (err) {
                 const errorMessage = err.message || "Failed to fetch analytics data.";
                 setError(errorMessage);
@@ -8075,67 +8131,94 @@ const AnalyticsDashboardPage = () => {
         fetchData();
     }, []);
     
-    // (renderUserEngagementSection and renderSignupChartSection remain the same)
-    const renderUserEngagementSection = () => {
+    const renderTopLevelKpis = () => {
+        if (!kpiData || !userEngagementData) return null;
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <AnalyticsKpiCard title="Total Registered Users" value={userEngagementData.totalUsers} icon={Users} colorClass="blue" />
+                <AnalyticsKpiCard title="Active Users (Today)" value={kpiData.activeUsersToday} icon={UserCheck} colorClass="indigo" />
+                <AnalyticsKpiCard title="Total User Queries" value={kpiData.totalQueries} icon={MessagesSquare} colorClass="green" />
+                <AnalyticsKpiCard title="Total Sources Ingested" value={kpiData.totalSources} icon={UploadCloud} colorClass="yellow" />
+            </div>
+        );
+    };
+
+    const renderUserGrowthSection = () => {
         if (!userEngagementData) return null;
         return (
             <section>
-                <h2 className="text-xl font-semibold mb-4 text-text-light dark:text-text-dark">User Engagement</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <AnalyticsKpiCard title="Total Registered Users" value={userEngagementData.totalUsers} icon={Users} colorClass="blue" />
-                    <AnalyticsKpiCard title="New Signups (Last 7 Days)" value={userEngagementData.newSignupsLast7Days} icon={UserPlus} colorClass="green" />
-                    <AnalyticsKpiCard title="Active Users (Coming Soon)" value={"N/A"} icon={AreaChart} colorClass="indigo" />
+                <h2 className="text-xl font-semibold mb-4 text-text-light dark:text-text-dark flex items-center gap-2"><BarChart3/> User Growth & Engagement</h2>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2">
+                        {userEngagementData.dailySignupsLast30Days.length > 0 ? (
+                            <UserSignupsChart data={userEngagementData.dailySignupsLast30Days} />
+                        ) : (
+                            <div className="card-base p-4 h-80 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
+                                No new user signups in the last 30 days.
+                            </div>
+                        )}
+                    </div>
+                    <div className="space-y-6">
+                         <AnalyticsKpiCard title="New Signups (Last 7 Days)" value={userEngagementData.newSignupsLast7Days} icon={UserCheck} colorClass="green" />
+                         <AnalyticsKpiCard title="All-Time Signups" value={userEngagementData.totalUsers} icon={Users} colorClass="blue" />
+                    </div>
+                </div>
+            </section>
+        );
+    };
+
+    const renderFeatureAdoptionSection = () => {
+        if (!featureUsageData || !llmUsageData) return null;
+        return (
+             <section>
+                <h2 className="text-xl font-semibold mb-4 text-text-light dark:text-text-dark flex items-center gap-2"><PieChart/> Feature & Tool Adoption</h2>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>
+                        {featureUsageData.length > 0 ? (
+                            <FeatureUsageChart data={featureUsageData} />
+                        ) : (
+                            <div className="card-base p-4 h-96 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
+                                No feature usage data has been logged yet.
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                         {llmUsageData.length > 0 ? (
+                            <LlmUsageChart data={llmUsageData} />
+                        ) : (
+                            <div className="card-base p-4 h-96 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
+                                No LLM usage data has been logged yet.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </section>
         );
     };
     
-    const renderSignupChartSection = () => {
-        if (!userEngagementData?.dailySignupsLast30Days) return null;
-        return (
-            <section className="mt-8">
-                 {userEngagementData.dailySignupsLast30Days.length > 0 ? (
-                    <UserSignupsChart data={userEngagementData.dailySignupsLast30Days} />
-                ) : (
-                    <div className="card-base p-4 h-80 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
-                        No new user signups in the last 30 days.
-                    </div>
-                )}
-            </section>
-        );
-    };
-
-    const renderFeatureUsageSection = () => {
-        if (!featureUsageData) return null;
-        return (
-             <section className="mt-8">
-                 {featureUsageData.length > 0 ? (
-                    <FeatureUsageChart data={featureUsageData} />
-                ) : (
-                    <div className="card-base p-4 h-96 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
-                        No feature usage data has been logged yet.
-                    </div>
-                )}
-            </section>
-        );
-    };
-
-    // <<< NEW RENDER FUNCTION FOR CONTENT INSIGHTS >>>
     const renderContentInsightsSection = () => {
-        if (!contentInsightsData) return null;
+        if (!contentInsightsData || !generatedContentData) return null;
         return (
-            <section className="mt-8">
-                {contentInsightsData.length > 0 ? (
-                    <ContentInsightsChart data={contentInsightsData} />
-                ) : (
-                    <div className="card-base p-4 h-96 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
-                        No document/subject specific chats have been logged yet.
+            <section>
+                 <h2 className="text-xl font-semibold mb-4 text-text-light dark:text-text-dark flex items-center gap-2"><FileText/> Content & Document Insights</h2>
+                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2">
+                        {contentInsightsData.length > 0 ? (
+                            <ContentInsightsChart data={contentInsightsData} />
+                        ) : (
+                            <div className="card-base p-4 h-96 flex items-center justify-center text-text-muted-light dark:text-text-muted-dark">
+                                No document/subject specific chats have been logged yet.
+                            </div>
+                        )}
                     </div>
-                )}
+                    <div className="space-y-6">
+                        <AnalyticsKpiCard title="PPTX Generated" value={generatedContentData.pptx} icon={FileBarChart2} colorClass="orange" />
+                        <AnalyticsKpiCard title="DOCX Generated" value={generatedContentData.docx} icon={FileText} colorClass="sky" />
+                    </div>
+                </div>
             </section>
         );
     };
-
 
     return (
         <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-sans">
@@ -8159,16 +8242,14 @@ const AnalyticsDashboardPage = () => {
                         </div>
                     )}
                     {!isLoading && !error && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                            <div className="space-y-8">
-                                {renderUserEngagementSection()}
-                                {renderSignupChartSection()}
-                            </div>
-                            <div className="space-y-8">
-                                {renderFeatureUsageSection()}
-                                {renderContentInsightsSection()}
-                            </div>
-                        </div>
+                        <>
+                            {/* <<< NEW: Added the external services navigation bar here >>> */}
+                            <ExternalServicesNav />
+                            {renderTopLevelKpis()}
+                            {renderUserGrowthSection()}
+                            {renderFeatureAdoptionSection()}
+                            {renderContentInsightsSection()}
+                        </>
                     )}
                 </div>
             </main>
@@ -8205,6 +8286,15 @@ const AnalyticsKpiCard = ({ title, value, icon: Icon, colorClass = 'blue' }) => 
             iconBg: 'bg-yellow-500/10',
             iconText: 'text-yellow-500',
         },
+        // --- NEW COLORS FOR ADDITIONAL KPIS ---
+        orange: {
+            iconBg: 'bg-orange-500/10',
+            iconText: 'text-orange-500',
+        },
+        sky: {
+            iconBg: 'bg-sky-500/10',
+            iconText: 'text-sky-500',
+        }
     };
 
     const styles = colorStyles[colorClass] || colorStyles.blue;
@@ -8221,7 +8311,7 @@ const AnalyticsKpiCard = ({ title, value, icon: Icon, colorClass = 'blue' }) => 
             </div>
             <div>
                 <p className="text-sm font-medium text-text-muted-light dark:text-text-muted-dark">{title}</p>
-                <p className="text-3xl font-bold text-text-light dark:text-text-dark">{value}</p>
+                <p className="text-3xl font-bold text-text-light dark:text-text-dark">{typeof value === 'number' ? value.toLocaleString() : value}</p>
             </div>
         </motion.div>
     );
@@ -8345,7 +8435,6 @@ const ContentInsightsChart = ({ data }) => {
     const { theme } = useTheme();
     const isDarkMode = theme === 'dark';
 
-    // Sort data to show most used documents at the top
     const sortedData = [...data].sort((a, b) => b.count - a.count);
     const chartLabels = sortedData.map(d => d.documentName);
     const chartDataPoints = sortedData.map(d => d.count);
@@ -8686,55 +8775,114 @@ function DatasetManager() {
 export default DatasetManager;
 ```
 
+`frontend/src/components/admin/ExternalServicesNav.jsx`
+
+```javascript
+// frontend/src/components/admin/ExternalServicesNav.jsx
+import React from 'react';
+import { BarChart3, LayoutDashboard, Search, Bug, DatabaseZap, Share2 } from 'lucide-react';
+import Button from '../core/Button';
+
+// URLs for the external services. Kibana is used for Elasticsearch logs.
+const services = [
+    {
+        name: 'Prometheus',
+        url: 'http://localhost:9090/targets',
+        icon: BarChart3,
+        description: 'View application performance metrics and alerts.'
+    },
+    {
+        name: 'Grafana',
+        url: 'http://localhost:3000',
+        icon: LayoutDashboard,
+        description: 'Visualize metrics in custom dashboards.'
+    },
+    {
+        name: 'Kibana',
+        url: 'http://localhost:5601',
+        icon: Search,
+        description: 'Explore, search, and visualize application logs.'
+    },
+    {
+        name: 'Sentry',
+        // This URL is constructed based on your SENTRY_DSN.
+        // Org ID: o4509804762497024, Project ID: 4509804765577216
+        url: 'https://o4509804762497024.sentry.io/issues/?project=4509804765577216',
+        icon: Bug,
+        description: 'Monitor and debug application errors and crashes.'
+    },
+    {
+        name: 'Qdrant',
+        url: 'http://localhost:6333/dashboard',
+        icon: DatabaseZap,
+        description: 'Inspect the vector database and collections.'
+    },
+    {
+        name: 'Neo4j Browser',
+        url: 'http://localhost:7474',
+        icon: Share2,
+        description: 'Query and visualize the knowledge graph database.'
+    }
+];
+
+const ExternalServicesNav = () => {
+    return (
+        <div className="card-base p-4 mb-8">
+            <h3 className="text-md font-semibold mb-3 text-text-light dark:text-text-dark">
+                Monitoring & Service Dashboards
+            </h3>
+            <div className="flex flex-wrap items-center gap-3">
+                {services.map(service => (
+                    <a
+                        href={service.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        key={service.name}
+                        title={service.description}
+                    >
+                        <Button variant="outline" size="sm" leftIcon={<service.icon size={14} />}>
+                            {service.name}
+                        </Button>
+                    </a>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export default ExternalServicesNav;
+```
+
 `frontend/src/components/admin/FeatureUsageChart.jsx`
 
 ```javascript
 // frontend/src/components/admin/FeatureUsageChart.jsx
 import React from 'react';
 import { Bar } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { useTheme } from '../../hooks/useTheme';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const FeatureUsageChart = ({ data }) => {
     const { theme } = useTheme();
     const isDarkMode = theme === 'dark';
 
-    const chartLabels = data.map(d => d.feature);
-    const chartDataPoints = data.map(d => d.count);
+    const sortedData = [...data].sort((a, b) => b.count - a.count);
+    const chartLabels = sortedData.map(d => d.feature);
+    const chartDataPoints = sortedData.map(d => d.count);
 
     const chartOptions = {
-        indexAxis: 'y', // This makes the bar chart horizontal
+        indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-            legend: {
-                display: false,
-            },
+            legend: { display: false },
             title: {
                 display: true,
                 text: 'Most Used Tools & Features',
                 color: isDarkMode ? '#E2E8F0' : '#0F172A',
-                font: {
-                    size: 16,
-                    weight: 'bold',
-                }
+                font: { size: 16, weight: 'bold' }
             },
             tooltip: {
                  backgroundColor: isDarkMode ? '#334155' : '#FFFFFF',
@@ -8745,37 +8893,26 @@ const FeatureUsageChart = ({ data }) => {
         scales: {
             x: {
                 beginAtZero: true,
-                ticks: {
-                    color: isDarkMode ? '#94A3B8' : '#64748B',
-                    precision: 0,
-                },
-                grid: {
-                    color: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-                },
+                ticks: { color: isDarkMode ? '#94A3B8' : '#64748B', precision: 0 },
+                grid: { color: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' },
             },
             y: {
-                ticks: {
-                    color: isDarkMode ? '#94A3B8' : '#64748B',
-                },
-                grid: {
-                    display: false,
-                },
+                ticks: { color: isDarkMode ? '#94A3B8' : '#64748B' },
+                grid: { display: false },
             },
         },
     };
 
     const barChartData = {
         labels: chartLabels,
-        datasets: [
-            {
-                label: 'Usage Count',
-                data: chartDataPoints,
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                borderColor: 'rgba(59, 130, 246, 1)',
-                borderWidth: 1,
-                borderRadius: 4,
-            },
-        ],
+        datasets: [{
+            label: 'Usage Count',
+            data: chartDataPoints,
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            borderColor: 'rgba(59, 130, 246, 1)',
+            borderWidth: 1,
+            borderRadius: 4,
+        }],
     };
 
     return (
@@ -8935,6 +9072,82 @@ const ConfigFormModal = ({ isOpen, onClose, onSuccess, config }) => {
 };
 
 export default LLMConfigManager;
+```
+
+`frontend/src/components/admin/LlmUsageChart.jsx`
+
+```javascript
+// frontend/src/components/admin/LlmUsageChart.jsx
+import React from 'react';
+import { Pie } from 'react-chartjs-2';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { useTheme } from '../../hooks/useTheme';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
+
+const LlmUsageChart = ({ data }) => {
+    const { theme } = useTheme();
+    const isDarkMode = theme === 'dark';
+
+    const chartLabels = data.map(d => d.provider.charAt(0).toUpperCase() + d.provider.slice(1));
+    const chartDataPoints = data.map(d => d.count);
+    
+    // Define a consistent color map for providers
+    const colorMap = {
+        gemini: 'rgba(59, 130, 246, 0.7)', // blue-500
+        ollama: 'rgba(16, 185, 129, 0.7)', // emerald-500
+        'fine-tuned': 'rgba(239, 68, 68, 0.7)', // red-500
+    };
+    const borderColorMap = {
+        gemini: 'rgba(59, 130, 246, 1)',
+        ollama: 'rgba(16, 185, 129, 1)',
+        'fine-tuned': 'rgba(239, 68, 68, 1)',
+    };
+
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'top',
+                labels: {
+                    color: isDarkMode ? '#E2E8F0' : '#0F172A',
+                    font: { size: 12 },
+                },
+            },
+            title: {
+                display: true,
+                text: 'LLM Provider Usage Distribution',
+                color: isDarkMode ? '#E2E8F0' : '#0F172A',
+                font: { size: 16, weight: 'bold' }
+            },
+            tooltip: {
+                 backgroundColor: isDarkMode ? '#334155' : '#FFFFFF',
+                 titleColor: isDarkMode ? '#E2E8F0' : '#0F172A',
+                 bodyColor: isDarkMode ? '#CBD5E1' : '#475569',
+            }
+        },
+    };
+
+    const pieChartData = {
+        labels: chartLabels,
+        datasets: [{
+            label: 'Query Count',
+            data: chartDataPoints,
+            backgroundColor: data.map(d => colorMap[d.provider] || 'rgba(107, 114, 128, 0.7)'),
+            borderColor: data.map(d => borderColorMap[d.provider] || 'rgba(107, 114, 128, 1)'),
+            borderWidth: 1,
+        }],
+    };
+
+    return (
+        <div className="card-base p-4 h-96">
+            <Pie options={chartOptions} data={pieChartData} />
+        </div>
+    );
+};
+
+export default LlmUsageChart;
 ```
 
 `frontend/src/components/admin/ModelFeedbackStats.jsx`
@@ -9211,8 +9424,6 @@ const UserSignupsChart = ({ data }) => {
                 backgroundColor: isDarkMode ? '#334155' : '#FFFFFF',
                 titleColor: isDarkMode ? '#E2E8F0' : '#0F172A',
                 bodyColor: isDarkMode ? '#CBD5E1' : '#475569',
-                borderColor: isDarkMode ? '#475569' : '#E2E8F0',
-                borderWidth: 1,
             },
         },
         scales: {
@@ -9220,7 +9431,7 @@ const UserSignupsChart = ({ data }) => {
                 beginAtZero: true,
                 ticks: {
                     color: isDarkMode ? '#94A3B8' : '#64748B',
-                    precision: 0, // Ensure only whole numbers are shown
+                    precision: 0,
                 },
                 grid: {
                     color: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
@@ -9229,17 +9440,10 @@ const UserSignupsChart = ({ data }) => {
             x: {
                 ticks: {
                     color: isDarkMode ? '#94A3B8' : '#64748B',
-                    maxRotation: 45,
-                    minRotation: 45,
                 },
                 grid: {
                     display: false,
                 },
-            },
-        },
-        elements: {
-            line: {
-                tension: 0.3,
             },
         },
     };
@@ -9250,19 +9454,10 @@ const UserSignupsChart = ({ data }) => {
             {
                 label: 'New Signups',
                 data: chartDataPoints,
-                borderColor: '#3b82f6', // primary color
-                backgroundColor: (context) => {
-                    const ctx = context.chart.ctx;
-                    const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-                    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.4)');
-                    gradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
-                    return gradient;
-                },
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
                 fill: true,
                 pointBackgroundColor: '#3b82f6',
-                pointBorderColor: '#fff',
-                pointHoverBackgroundColor: '#fff',
-                pointHoverBorderColor: '#3b82f6',
             },
         ],
     };
@@ -19130,6 +19325,19 @@ export const getContentInsightStats = () => makeAdminApiRequest('get', '/analyti
 
 export const getFeatureUsageStats = () => makeAdminApiRequest('get', '/analytics/feature-usage');
 
+export const getCodeExecutorUsage = () => makeAdminApiRequest('get', '/analytics/code-executor-usage');
+
+export const getLlmUsageStats = () => makeAdminApiRequest('get', '/analytics/llm-usage');
+
+export const getPptxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/pptx-generated-count');
+
+export const getDocxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/docx-generated-count');
+
+export const getActiveUsersToday = () => makeAdminApiRequest('get', '/analytics/active-users-today');
+
+export const getTotalQueries = () => makeAdminApiRequest('get', '/analytics/total-queries');
+
+export const getTotalSources = () => makeAdminApiRequest('get', '/analytics/total-sources');
 
 export const startFineTuningJob = (payload) => {
     // This function is now using the robust makeAdminApiRequest helper.
@@ -19759,6 +19967,32 @@ export default defineConfig({
 
 ```
 
+`grafana/provisioning/dashboards/dashboard.json`
+
+```json
+
+```
+
+`grafana/provisioning/dashboards/dashboard.yml`
+
+```yaml
+apiVersion
+```
+
+`grafana/provisioning/datasources/datasource.yml`
+
+```yaml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+```
+
 `package-lock.json`
 
 ```json
@@ -20147,7 +20381,6 @@ module.exports = connectDB;
 // server/config/elasticsearchClient.js
 const { Client } = require('@elastic/elasticsearch');
 
-// The Elasticsearch container is available at this address from our Node.js app
 const ELASTICSEARCH_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
 let esClient;
@@ -34482,7 +34715,7 @@ dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 def setup_logging():
-    """Configure logging to output structured JSON to the SINGLE combined log file."""
+    """Configure logging to output structured, standardized JSON to a dedicated log file."""
     root_logger = logging.getLogger()
     if root_logger.handlers:
         for handler in root_logger.handlers:
@@ -34490,25 +34723,39 @@ def setup_logging():
 
     log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, 'app.log')
+    # --- CHANGE 1: Dedicated log file ---
+    log_file_path = os.path.join(log_dir, 'python-rag.log')
     
+    # --- CHANGE 2: Rename fields to match the unified schema ---
     formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(lineno)d %(message)s %(service)s'
+        '%(asctime)s %(levelname)s %(name)s %(lineno)d %(message)s %(service)s',
+        rename_fields={
+            'asctime': '@timestamp',
+            'levelname': 'log.level',
+            'name': 'log.logger',
+            'lineno': 'log.origin.file.line',
+            'service': 'service.name'
+        },
+        datefmt='%Y-%m-%dT%H:%M:%S.%fZ' 
     )
     
     class ServiceContextFilter(logging.Filter):
         def filter(self, record):
+            # Standardize log level to lowercase
+            record.levelname = record.levelname.lower()
             record.service = "ai-tutor-python-rag"
             return True
 
-    root_logger.addFilter(ServiceContextFilter())
+    service_filter = ServiceContextFilter()
     
     file_handler = logging.FileHandler(log_file_path, mode='a')
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(service_filter)
     root_logger.addHandler(file_handler)
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(service_filter)
     root_logger.addHandler(console_handler)
     
     LOGGING_LEVEL = os.getenv('LOGGING_LEVEL', 'INFO').upper()
@@ -34516,10 +34763,9 @@ def setup_logging():
     
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    
-    # Use a temporary logger to announce initialization
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     init_logger = logging.getLogger(__name__)
-    init_logger.info(f"Python logging initialized. Appending to: {log_file_path}")
+    init_logger.info(f"Python logging initialized and standardized. Appending to: {log_file_path}")
 
 setup_logging()
 
@@ -37672,65 +37918,256 @@ module.exports = router;
 // server/routes/analytics.js
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
 const { logger } = require('../utils/logger');
 const esClient = require('../config/elasticsearchClient');
+const User = require('../models/User');
+const KnowledgeSource = require('../models/KnowledgeSource');
 
-// @route   GET /api/admin/analytics/user-engagement
-// @desc    Get statistics about user engagement and signups
-// @access  Admin
+
+router.get('/total-queries', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.count({
+            index: 'filebeat-*',
+            body: {
+                // --- THIS IS THE VALIDATED QUERY FROM KIBANA ---
+                query: {
+                    "match_phrase": {
+                      "message": "User Event: CHAT_MESSAGE_SENT"
+                    }
+                }
+            }
+        });
+
+        res.json({
+            title: "Total User Queries",
+            count: response.count
+        });
+
+    } catch (error) {
+        logger.error('Elasticsearch query for total queries failed', { 
+            errorMessage: error.message, 
+            meta: error.meta?.body 
+        });
+        res.status(500).json({ message: "Failed to retrieve total query analytics." });
+    }
+});
+
+router.get('/total-users', async (req, res) => {
+    try {
+        const count = await User.countDocuments();
+
+        res.json({
+            title: "Total Registered Users",
+            count: count
+        });
+
+    } catch (error) {
+        logger.error('MongoDB query for total users failed', { 
+            errorMessage: error.message
+        });
+        res.status(500).json({ message: "Failed to retrieve total users analytics." });
+    }
+});
+
+router.get('/active-users-today', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.search({
+            index: 'filebeat-*',
+            body: {
+                size: 0,
+                query: {
+                    range: {
+                        "@timestamp": {
+                            "gte": "now-24h/h",
+                            "lte": "now/h"
+                        }
+                    }
+                },
+                aggs: {
+                    unique_active_users: {
+                        "cardinality": {
+                            "script": {
+                                "source": `
+                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
+                                        String payload = doc['payload'].value;
+                                        if (payload == null) return null;
+                                        def m = /"userId":"([^"]+)"/.matcher(payload);
+                                        if (m.find()) {
+                                            String userId = m.group(1);
+                                            if (userId != 'SYSTEM') {
+                                                return userId;
+                                            }
+                                        }
+                                    }
+                                    return null;
+                                `,
+                                "lang": "painless"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const activeUserCount = response.aggregations?.unique_active_users?.value || 0;
+
+        res.json({
+            title: "Active Users (Today)",
+            count: activeUserCount
+        });
+
+    } catch (error) {
+        logger.error('Elasticsearch query for active users failed', { 
+            errorMessage: error.message, 
+            meta: error.meta?.body 
+        });
+        res.status(500).json({ message: "Failed to retrieve active users analytics." });
+    }
+});
+
+
+router.get('/total-sources', async (req, res) => {
+    try {
+        // This query efficiently counts all documents in the KnowledgeSource collection.
+        const count = await KnowledgeSource.countDocuments();
+
+        res.json({
+            title: "Total Sources Ingested",
+            count: count
+        });
+
+    } catch (error) {
+        logger.error('MongoDB query for total sources failed', { 
+            errorMessage: error.message
+        });
+        res.status(500).json({ message: "Failed to retrieve total sources analytics." });
+    }
+});
+
 router.get('/user-engagement', async (req, res) => {
     try {
-        const totalUsers = await User.countDocuments();
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const newSignups = await User.countDocuments({ createdAt: { $gte: sevenDaysAgo } });
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const dailySignups = await User.aggregate([
-            { $match: { createdAt: { $gte: thirtyDaysAgo } } },
-            {
-                $group: {
-                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    count: { $sum: 1 }
+
+        const [totalUsers, newSignupsResponse, dailySignupsResponse] = await Promise.all([
+            User.countDocuments(),
+            esClient.count({
+                index: 'filebeat-*',
+                body: {
+                    query: {
+                        bool: {
+                            must: [
+                                // --- THIS IS THE FIX ---
+                                { "match_phrase": { "message": "User Event: USER_SIGNUP_SUCCESS" } },
+                                { "range": { "@timestamp": { "gte": sevenDaysAgo.toISOString() } } }
+                            ]
+                        }
+                    }
                 }
-            },
-            { $sort: { _id: 1 } }
+            }),
+            esClient.search({
+                index: 'filebeat-*',
+                body: {
+                    size: 0,
+                    query: {
+                        bool: {
+                            must: [
+                                // --- THIS IS THE FIX ---
+                                { "match_phrase": { "message": "User Event: USER_SIGNUP_SUCCESS" } },
+                                { "range": { "@timestamp": { "gte": thirtyDaysAgo.toISOString() } } }
+                            ]
+                        }
+                    },
+                    aggs: {
+                        signups_over_time: {
+                            date_histogram: {
+                                field: "@timestamp",
+                                calendar_interval: "1d",
+                                min_doc_count: 0,
+                                extended_bounds: {
+                                    min: thirtyDaysAgo.toISOString(),
+                                    max: new Date().toISOString()
+                                }
+                            }
+                        }
+                    }
+                }
+            })
         ]);
+
+        const dailySignups = dailySignupsResponse.aggregations.signups_over_time.buckets.map(bucket => ({
+            date: bucket.key_as_string.split('T')[0],
+            count: bucket.doc_count
+        }));
+
         res.json({
             totalUsers,
-            newSignupsLast7Days: newSignups,
-            dailySignupsLast30Days: dailySignups.map(item => ({ date: item._id, count: item.count }))
+            newSignupsLast7Days: newSignupsResponse.count,
+            dailySignupsLast30Days: dailySignups
         });
     } catch (error) {
-        logger.error('Error fetching user engagement analytics', { errorMessage: error.message });
+        logger.error('Error fetching user engagement analytics', { errorMessage: error.message, meta: error.meta?.body });
         res.status(500).json({ message: 'Failed to retrieve user engagement analytics.' });
     }
 });
 
-// @route   GET /api/admin/analytics/feature-usage
-// @desc    Get aggregated counts of different tool/feature usage from audit logs
-// @access  Admin
+
 router.get('/feature-usage', async (req, res) => {
     if (!esClient) {
         return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
     }
     try {
-        const { body } = await esClient.search({
-            index: 'ai-tutor-logs-*',
+        const response = await esClient.search({
+            index: 'filebeat-*',
             body: {
                 size: 0,
-                query: { "prefix": { "eventType.keyword": "TOOL_USAGE_" } },
+                query: {
+                    "wildcard": {
+                        // We search inside the payload string for our event type prefix
+                        "payload": "*TOOL_USAGE_*"
+                    }
+                },
                 aggs: {
-                    feature_counts: { "terms": { "field": "eventType.keyword", "size": 20 } }
+                    feature_counts: {
+                        "terms": {
+                            "script": {
+                                // This script extracts the eventType from the payload string
+                                "source": `
+                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
+                                        def payload = doc['payload'].value;
+                                        def m = /"eventType":"([^"]+)"/.matcher(payload);
+                                        if (m.find()) {
+                                            return m.group(1);
+                                        }
+                                    }
+                                    return 'N/A';
+                                `,
+                                "lang": "painless"
+                            },
+                            "size": 20
+                        }
+                    }
                 }
             }
         });
-        if (body && body.aggregations && body.aggregations.feature_counts) {
-            const formattedData = body.aggregations.feature_counts.buckets.map(bucket => ({
-                feature: bucket.key.replace('TOOL_USAGE_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                count: bucket.doc_count
-            }));
+
+        if (response && response.aggregations && response.aggregations.feature_counts) {
+            const formattedData = response.aggregations.feature_counts.buckets
+                // Filter out any logs that matched the wildcard but couldn't be parsed
+                .filter(bucket => bucket.key.startsWith('TOOL_USAGE_'))
+                .map(bucket => ({
+                    // Clean up the name for display on the chart
+                    feature: bucket.key.replace('TOOL_USAGE_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                    count: bucket.doc_count
+                }));
             res.json(formattedData);
         } else {
             res.json([]);
@@ -37741,32 +38178,39 @@ router.get('/feature-usage', async (req, res) => {
     }
 });
 
-// @route   GET /api/admin/analytics/content-insights
-// @desc    Get aggregated counts of document/subject usage in chats
-// @access  Admin
+
 router.get('/content-insights', async (req, res) => {
     if (!esClient) {
         return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
     }
     try {
-        const { body } = await esClient.search({
-            index: 'ai-tutor-logs-*',
+        const response = await esClient.search({
+            index: 'filebeat-*',
             body: {
                 size: 0,
                 query: {
-                    "bool": {
-                        "must": [
-                            { "term": { "eventType.keyword": "CHAT_MESSAGE_SENT" } },
-                            // *** FINAL FIX: Target the .keyword field that Filebeat creates for aggregation ***
-                            { "exists": { "field": "payload.documentContext.keyword" } }
-                        ]
+                    "query_string": {
+                        "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*documentContext* AND NOT payload:*documentContext*null*"
                     }
                 },
                 aggs: {
                     document_counts: {
                         "terms": {
-                             // *** FINAL FIX: Aggregate on the .keyword field for exact matching ***
-                            "field": "payload.documentContext.keyword",
+                            "script": {
+                                "source": `
+                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
+                                        String payloadStr = doc['payload'].value;
+                                        if (payloadStr == null) return 'N/A';
+                                        
+                                        def m = /"payload":\\{.*?"documentContext":"([^"]+)"/.matcher(payloadStr);
+                                        if (m.find()) {
+                                            return m.group(1);
+                                        }
+                                    }
+                                    return 'N/A';
+                                `,
+                                "lang": "painless"
+                            },
                             "size": 10
                         }
                     }
@@ -37774,23 +38218,147 @@ router.get('/content-insights', async (req, res) => {
             }
         });
 
-        if (body && body.aggregations && body.aggregations.document_counts) {
-            const formattedData = body.aggregations.document_counts.buckets.map(bucket => ({
-                documentName: bucket.key,
-                count: bucket.doc_count
-            }));
+        if (response && response.aggregations && response.aggregations.document_counts) {
+            const formattedData = response.aggregations.document_counts.buckets
+                .filter(bucket => bucket.key !== 'N/A')
+                .map(bucket => ({
+                    documentName: bucket.key,
+                    count: bucket.doc_count
+                }));
             res.json(formattedData);
         } else {
             res.json([]);
         }
     } catch (error) {
-        logger.error('Elasticsearch query for content insights failed', {
-            errorMessage: error.message,
-            meta: error.meta?.body
-        });
+        logger.error('Elasticsearch query for content insights failed', { errorMessage: error.message, meta: error.meta?.body });
         res.status(500).json({ message: "Failed to retrieve content insights analytics." });
     }
 });
+
+
+router.get('/llm-usage', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.search({
+            index: 'filebeat-*',
+            body: {
+                size: 0,
+                query: {
+                    "query_string": {
+                        "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*llmProvider*"
+                    }
+                },
+                aggs: {
+                    llm_provider_counts: {
+                        "terms": {
+                            "script": {
+                                "source": `
+                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
+                                        String payloadStr = doc['payload'].value;
+                                        if (payloadStr == null) return 'N/A';
+                                        
+                                        def m = /"llmProvider":"([^"]+)"/.matcher(payloadStr);
+                                        if (m.find()) {
+                                            return m.group(1);
+                                        }
+                                    }
+                                    return 'N/A';
+                                `,
+                                "lang": "painless"
+                            },
+                            "size": 10
+                        }
+                    }
+                }
+            }
+        });
+
+        if (response && response.aggregations && response.aggregations.llm_provider_counts) {
+            const formattedData = response.aggregations.llm_provider_counts.buckets
+                .filter(bucket => bucket.key !== 'N/A')
+                .map(bucket => ({
+                    provider: bucket.key,
+                    count: bucket.doc_count
+                }));
+            res.json(formattedData);
+        } else {
+            res.json([]);
+        }
+    } catch (error) {
+        logger.error('Elasticsearch query for LLM usage failed', { errorMessage: error.message, meta: error.meta?.body });
+        res.status(500).json({ message: "Failed to retrieve LLM usage analytics." });
+    }
+});
+
+
+router.get('/pptx-generated-count', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.count({
+            index: 'filebeat-*',
+            body: {
+                query: {
+                    "query_string": {
+                        "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*pptx*"
+                    }
+                }
+            }
+        });
+        res.json({ title: "PPTX Generated", count: response.count });
+    } catch (error) {
+        logger.error('Elasticsearch query for PPTX count failed', { errorMessage: error.message });
+        res.status(500).json({ message: "Failed to retrieve PPTX generation analytics." });
+    }
+});
+
+router.get('/docx-generated-count', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.count({
+            index: 'filebeat-*',
+            body: {
+                query: {
+                    "query_string": {
+                        "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*docx*"
+                    }
+                }
+            }
+        });
+        res.json({ title: "DOCX Generated", count: response.count });
+    } catch (error) {
+        logger.error('Elasticsearch query for DOCX count failed', { errorMessage: error.message });
+        res.status(500).json({ message: "Failed to retrieve DOCX generation analytics." });
+    }
+});
+
+router.get('/total-queries', async (req, res) => {
+    if (!esClient) {
+        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
+    }
+    try {
+        const response = await esClient.count({
+            index: 'filebeat-*',
+            body: {
+                query: {
+                    "match_phrase": {
+                      "message": "User Event: CHAT_MESSAGE_SENT"
+                    }
+                }
+            }
+        });
+        res.json({ title: "Total User Queries", count: response.count });
+    } catch (error) {
+        logger.error('Elasticsearch query for total queries failed', { errorMessage: error.message });
+        res.status(500).json({ message: "Failed to retrieve total query analytics." });
+    }
+});
+
 
 module.exports = router;
 ```
@@ -38038,7 +38606,8 @@ router.post('/message', async (req, res) => {
         useWebSearch: !!useWebSearch,
         useAcademicSearch: !!useAcademicSearch,
         criticalThinkingEnabled: !!criticalThinkingEnabled,
-        documentContext: documentContextName || null
+        documentContext: documentContextName || null,
+        llmProvider: userId?.preferredLlmProvider || 'gemini'
     });
 
 
@@ -40522,11 +41091,6 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
 
-    auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
-        textLength: text ? text.length : 0,
-        checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
-    });
-
     if (!text || text.trim().length < 50) {
         return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
     }
@@ -40541,6 +41105,10 @@ router.post('/analyze-integrity/submit', async (req, res) => {
         // --- THIS IS THE FIX: Changed 'facts' to 'readability' ---
         const checks = ['plagiarism', 'bias', 'readability'];
 
+        auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
+            textLength: text ? text.length : 0,
+            checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
+        });
         const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
             text,
             checks,
@@ -41025,6 +41593,8 @@ const { ipFilterMiddleware } = require("./middleware/ipFilterMiddleware");
 const { connectRedis } = require("./config/redisClient");
 const { logger } = require('./utils/logger');
 
+logger.info('--- WINSTON LOGGER INITIALIZED IN SERVER.JS ---');
+
 // --- Route Imports ---
 const networkRoutes = require("./routes/network");
 const authRoutes = require("./routes/auth");
@@ -41086,9 +41656,9 @@ app.use("/api/auth", authRoutes);
 // --- Admin Routes ---
 // Apply the fixed admin auth middleware to the single MASTER admin router.
 // This ensures all routes defined in ./routes/admin/* are protected correctly.
-app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter);
-app.use('/api/admin/finetuning', fixedAdminAuthMiddleware, finetuningRoutes);
 app.use('/api/admin/analytics', fixedAdminAuthMiddleware, analyticsRoutes);
+app.use('/api/admin/finetuning', fixedAdminAuthMiddleware, finetuningRoutes);
+app.use("/api/admin", fixedAdminAuthMiddleware, adminMasterRouter); // General route goes LAST
 
 // All subsequent routes are protected by the general JWT authMiddleware
 app.use(authMiddleware);
@@ -43755,35 +44325,40 @@ module.exports = { encrypt, decrypt };
 const winston = require('winston');
 const path = require('path');
 
-// This path is correct
-const logFilePath = path.join(__dirname, '..', 'logs', 'app.log'); // <-- Make sure this is app.log
-// --- THIS IS THE CORRECT, SIMPLIFIED FORMAT ---
-const logFormat = winston.format.combine(
+const logFilePath = path.join(__dirname, '..', 'logs', 'nodejs-backend.log');
+
+const unifiedLogFormat = winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    // This custom formatter ensures the message and metadata are structured consistently
-    winston.format.printf(({ level, message, timestamp, service, ...metadata }) => {
+    winston.format.printf(({ level, message, timestamp, stack, ...metadata }) => {
         const logObject = {
-            level,
-            timestamp,
-            service: service || 'ai-tutor-nodejs-backend', // Ensure service name is always present
-            message, // The primary message string
-            ...metadata // Spread the rest of the metadata
+            '@timestamp': timestamp,
+            'log.level': level,
+            'service.name': 'ai-tutor-nodejs-backend',
+            message,
         };
+
+        if (stack) {
+            logObject.error = { stack_trace: stack };
+        }
+        
+        if (Object.keys(metadata).length > 0) {
+            delete metadata.service; 
+            logObject.payload = JSON.stringify(metadata);
+        }
+
         return JSON.stringify(logObject);
     })
-);// --- END CORRECTION ---
+);
 
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
-    format: logFormat,
-    defaultMeta: { service: 'ai-tutor-nodejs-backend' },
+    format: unifiedLogFormat,
     transports: [
         new winston.transports.Console(),
         new winston.transports.File({
             filename: logFilePath,
-            maxsize: 5242880, // 5MB
+            maxsize: 5242880,
             maxFiles: 5,
         })
     ],
@@ -43799,6 +44374,7 @@ const logger = winston.createLogger({
  */
 function auditLog(req, eventType, payload) {
   // Gracefully handle system events where req.user might not exist
+  console.log(`--- AUDIT LOG CALLED: ${eventType} ---`);
   const userId = req.user?._id?.toString() || 'SYSTEM';
   const username = req.user?.email || 'N/A';
   

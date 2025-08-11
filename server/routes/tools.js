@@ -251,11 +251,6 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
 router.post('/analyze-integrity/submit', async (req, res) => {
     const { text } = req.body;
 
-    auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
-        textLength: text ? text.length : 0,
-        checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
-    });
-
     if (!text || text.trim().length < 50) {
         return res.status(400).json({ message: 'A minimum of 50 characters of text is required for analysis.' });
     }
@@ -270,6 +265,10 @@ router.post('/analyze-integrity/submit', async (req, res) => {
         // --- THIS IS THE FIX: Changed 'facts' to 'readability' ---
         const checks = ['plagiarism', 'bias', 'readability'];
 
+        auditLog(req, 'TOOL_USAGE_INTEGRITY_CHECKER', {
+            textLength: text ? text.length : 0,
+            checksRequested: checks || ['plagiarism', 'bias', 'readability'] // Default if not provided
+        });
         const response = await axios.post(`${pythonServiceUrl}/analyze_integrity`, {
             text,
             checks,

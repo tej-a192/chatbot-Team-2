@@ -1,25 +1,46 @@
+# filebeat.yml
+
 filebeat.inputs:
-- type: filestream  # Using the modern, recommended input type
-  id: my-app-logs
+# --- Input for Node.js logs ---
+- type: filestream
+  id: nodejs-backend-logs
   enabled: true
   paths:
-    - /usr/share/filebeat/logs/app.log
+    - /usr/share/filebeat/logs/nodejs-backend.log
+  tags: ["nodejs-backend"]
 
-# This section is the key. We remove all JSON parsing from Filebeat.
-# It will now treat each line as a simple text message.
-# The 'message' field will contain the raw JSON string.
-parsers:
-  - ndjson:
-      target: "" # Don't output under a json key, but parse it
-      keys_under_root: true
+# --- Input for Python RAG logs ---
+- type: filestream
+  id: python-rag-logs
+  enabled: true
+  paths:
+    - /usr/share/filebeat/logs/python-rag.log
+  tags: ["python-rag"]
+
+# --- Universal JSON Processor (No changes here, it's correct) ---
+processors:
+  - decode_json_fields:
+      fields: ["message"]
+      target: ""
+      add_error_key: true
+      process_array: false
       overwrite_keys: true
+
+# --- THIS IS THE FIX ---
+# We are simplifying the output configuration. By default, Filebeat 8.x
+# is optimized to work with data streams. We will let it use its
+# default behavior, which is more robust.
 
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]
-  index: "ai-tutor-logs-%{+yyyy.MM.dd}"
+  # We remove the manual 'index:' line. Filebeat will now use its default
+  # data stream logic, which is logs-generic-default.
+  # This avoids the template conflict you were seeing.
 
-setup.template.name: "ai-tutor-logs"
-setup.template.pattern: "ai-tutor-logs-*"
+# We remove the manual setup.template.* lines as they are causing the conflict
+# with the data stream setup. Filebeat will manage this automatically.
+setup.ilm.enabled: true
+setup.ilm.overwrite: true
 
 setup.kibana:
   host: "kibana:5601"

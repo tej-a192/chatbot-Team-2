@@ -59,7 +59,8 @@ router.post('/message', async (req, res) => {
         useWebSearch: !!useWebSearch,
         useAcademicSearch: !!useAcademicSearch,
         criticalThinkingEnabled: !!criticalThinkingEnabled,
-        documentContext: documentContextName || null
+        documentContext: documentContextName || null,
+        llmProvider: userId?.preferredLlmProvider || 'gemini'
     });
 
 

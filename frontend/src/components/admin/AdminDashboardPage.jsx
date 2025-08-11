@@ -13,7 +13,7 @@ import LLMConfigManager from './LLMConfigManager.jsx';
 import ModelFeedbackStats from './ModelFeedbackStats.jsx'; 
 import DatasetManager from './DatasetManager.jsx'; // <<< NEW IMPORT
 
-import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog, Database } from 'lucide-react'; // <<< ADDED Database ICON
+import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle, Cog, Database, BarChart2  } from 'lucide-react'; // <<< ADDED Database ICON
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
@@ -200,9 +200,10 @@ function AdminDashboardPage() {
                 <h1 className="text-2xl font-bold">Professor's Dashboard</h1>
                 <div className="flex items-center gap-2">
                     <IconButton icon={RefreshCw} onClick={() => fetchAdminData(true)} title="Refresh Admin Data" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
+                    <IconButton icon={BarChart2} onClick={() => navigate('/admin/analytics')} title="Platform Analytics" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Shield} onClick={() => setIsSecurityModalOpen(true)} title="Security Center & API Requests" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Users} onClick={() => setIsUserChatsModalOpen(true)} title="User Management & Chats" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
-                    <IconButton icon={Database} onClick={() => setIsDatasetModalOpen(true)} title="Dataset Management" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/> {/* <<< NEW BUTTON */}
+                    <IconButton icon={Database} onClick={() => setIsDatasetModalOpen(true)} title="Dataset Management" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <IconButton icon={Cog} onClick={() => setIsLlmModalOpen(true)} title="LLM Configuration" variant="ghost" size="md" className="text-text-muted-light dark:text-text-muted-dark hover:text-primary"/>
                     <Button onClick={adminLogoutHandler} variant="danger" size="sm" leftIcon={<LogOut size={16}/>}> Logout Admin </Button>
                 </div>

@@ -134,4 +134,11 @@
   .animated-underline::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, theme('colors.orange.500'), theme('colors.red.500'), theme('colors.amber.400'), transparent); animation: sweep-underline 4s linear infinite; }
   @keyframes fire-flicker { 0%, 100% { transform: scale(1, 1); box-shadow: 0 0 4px 0px theme('colors.red.500'), 0 0 6px 0px theme('colors.orange.400'); } 50% { transform: scale(1.05, 1.05); box-shadow: 0 0 8px 2px theme('colors.red.500' / 0.7), 0 0 12px 3px theme('colors.orange.400' / 0.7); } }
   .fire-tag-animation { animation: fire-flicker 2.5s ease-in-out infinite; }
+
+  .processing-overlay {
+    pointer-events: none; /* Disables all click/hover events */
+    opacity: 0.6;         /* Reduces opacity for visual feedback */
+    transition: opacity 0.3s ease-in-out; /* Smooth transition */
+  }
+
 }

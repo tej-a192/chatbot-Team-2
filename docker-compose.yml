@@ -121,11 +121,15 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      # --- ADD THIS ENTIRE SECTION ---
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      # --- END OF ADDED SECTION ---
     depends_on:
       - prometheus
     networks:
       - ai_tutor_network
     restart: unless-stopped
+
 
 volumes:
   qdrant_data:

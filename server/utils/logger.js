@@ -2,35 +2,40 @@
 const winston = require('winston');
 const path = require('path');
 
-// This path is correct
-const logFilePath = path.join(__dirname, '..', 'logs', 'app.log'); // <-- Make sure this is app.log
-// --- THIS IS THE CORRECT, SIMPLIFIED FORMAT ---
-const logFormat = winston.format.combine(
+const logFilePath = path.join(__dirname, '..', 'logs', 'nodejs-backend.log');
+
+const unifiedLogFormat = winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    // This custom formatter ensures the message and metadata are structured consistently
-    winston.format.printf(({ level, message, timestamp, service, ...metadata }) => {
+    winston.format.printf(({ level, message, timestamp, stack, ...metadata }) => {
         const logObject = {
-            level,
-            timestamp,
-            service: service || 'ai-tutor-nodejs-backend', // Ensure service name is always present
-            message, // The primary message string
-            ...metadata // Spread the rest of the metadata
+            '@timestamp': timestamp,
+            'log.level': level,
+            'service.name': 'ai-tutor-nodejs-backend',
+            message,
         };
+
+        if (stack) {
+            logObject.error = { stack_trace: stack };
+        }
+        
+        if (Object.keys(metadata).length > 0) {
+            delete metadata.service; 
+            logObject.payload = JSON.stringify(metadata);
+        }
+
         return JSON.stringify(logObject);
     })
-);// --- END CORRECTION ---
+);
 
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
-    format: logFormat,
-    defaultMeta: { service: 'ai-tutor-nodejs-backend' },
+    format: unifiedLogFormat,
     transports: [
         new winston.transports.Console(),
         new winston.transports.File({
             filename: logFilePath,
-            maxsize: 5242880, // 5MB
+            maxsize: 5242880,
             maxFiles: 5,
         })
     ],
@@ -46,6 +51,7 @@ const logger = winston.createLogger({
  */
 function auditLog(req, eventType, payload) {
   // Gracefully handle system events where req.user might not exist
+  console.log(`--- AUDIT LOG CALLED: ${eventType} ---`);
   const userId = req.user?._id?.toString() || 'SYSTEM';
   const username = req.user?.email || 'N/A';
   
