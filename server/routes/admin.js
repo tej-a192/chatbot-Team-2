@@ -410,7 +410,7 @@ router.post(
           path.resolve(__dirname, "..", "workers", "kgWorker.js"),
           {
             workerData: {
-              adminDocumentId: adminDocRecord._id.toString(),
+              sourceId: adminDocRecord._id.toString(), // <-- This is the new, correct property
               userId: "admin",
               originalName: originalName,
               chunksForKg: ragResult.chunksForKg,
