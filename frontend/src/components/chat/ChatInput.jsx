@@ -30,46 +30,71 @@ function ChatInput({
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
 
-    // --- SIMPLIFIED COACH LOGIC ---
     const [isCoaching, setIsCoaching] = useState(false);
 
     const handleRequestPromptCoaching = async () => {
         const trimmedInput = inputValue.trim();
 
-        // --- NEW: Frontend Validation ---
-        if (!trimmedInput) return; // General check to prevent action on empty input
+        if (!trimmedInput) return;
         
         if (trimmedInput.length < 3) {
             toast("Prompt is too short for coaching. Please provide a bit more detail.", {
                 icon: '❤️',
-                style: {
-                    background: '#FBBF24',
-                    color: '#ffffff',
-                },
+                style: { background: '#FBBF24', color: '#ffffff' },
             });
-            return; // Stop the function here
+            return;
         }
-        // --- END: Frontend Validation ---
         
         if (isCoaching) return;
 
         setIsCoaching(true);
-        const toastId = toast.loading('Asking the coach for advice...');
+
+        const promise = api.analyzePrompt(trimmedInput);
+
+        toast.promise(
+            promise,
+            {
+                loading: 'Asking the coach for advice...',
+                success: 'Suggestion received!',
+                error: (err) => err.message || "The Prompt Coach is unavailable.",
+            }
+        );
+
         try {
-            const response = await api.analyzePrompt(trimmedInput);
-            // Tell the parent to open the modal with the new data
+            const response = await promise;
             openCoachModalWithData({
                 original: trimmedInput,
                 improved: response.improvedPrompt,
                 explanation: response.explanation
             });
             setCoachModalOpen(true);
-            toast.success('Suggestion received!', { id: toastId });
         } catch (error) {
-            toast.error(error.message || "The Prompt Coach is unavailable.", { id: toastId });
+            // toast.promise already handled displaying the error.
+            console.error("Error requesting prompt coaching:", error.message);
         } finally {
             setIsCoaching(false);
         }
+    };
+
+    const handlePaste = (e) => {
+        e.preventDefault();
+
+        const pastedText = e.clipboardData.getData('text/plain');
+
+        const trimmedText = pastedText.trim();
+
+        const textarea = textareaRef.current;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+
+        const newValue = inputValue.substring(0, start) + trimmedText + inputValue.substring(end);
+        setInputValue(newValue);
+
+        setTimeout(() => {
+            const newCursorPosition = start + trimmedText.length;
+            textarea.selectionStart = newCursorPosition;
+            textarea.selectionEnd = newCursorPosition;
+        }, 0);
     };
 
     useEffect(() => {
@@ -194,6 +219,7 @@ function ChatInput({
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
                     placeholder={isLoading ? "Waiting for response..." : "Type your message or ask a question..."}
                     className="input-field flex-1 p-2.5 resize-none min-h-[44px] max-h-32 custom-scrollbar text-sm" 
                     rows="1"

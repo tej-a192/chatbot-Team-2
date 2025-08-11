@@ -208,34 +208,35 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
 
         setGeneratingDocType(docType);
-        const toastId = toast.loading(`Generating ${docType.toUpperCase()} document...`);
+        
+        const fullMarkdownContent = `## ${title}\n\n**Source Document:** \`${selectedDocumentFilename}\`\n\n---\n\n${analysisContent}`;
+        
+        const promise = api.generateDocument({
+            markdownContent: fullMarkdownContent,
+            docType: docType,
+            sourceDocumentName: selectedDocumentFilename
+        });
+
+        toast.promise(
+            promise,
+            {
+                loading: `Generating your ${docType.toUpperCase()} document... This may take a moment.`,
+                success: (data) => `Successfully downloaded '${data.filename}'!`,
+                error: (err) => `Download failed: ${err.message}`,
+            }
+        );
 
         try {
-            const fullMarkdownContent = `## ${title}\n\n**Source Document:** \`${selectedDocumentFilename}\`\n\n---\n\n${analysisContent}`;
-            
-            const { filename } = await api.generateDocument({
-                markdownContent: fullMarkdownContent,
-                docType: docType,
-                sourceDocumentName: selectedDocumentFilename
-            });
-            
-            const url = window.URL.createObjectURL(fileBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            link.parentNode.removeChild(link);
-            window.URL.revokeObjectURL(url);
-
-            toast.success(`${docType.toUpperCase()} document downloaded.`, { id: toastId });
-
+            await promise;
         } catch (err) {
-            toast.error(`Failed to generate document: ${err.message}`, { id: toastId });
+            // The toast.promise handles showing the error, but we still catch it 
+            // to prevent unhandled promise rejection warnings in the console.
+            console.error(`Error during document generation: ${err.message}`);
         } finally {
             setGeneratingDocType(null);
         }
     };
+
 
     const handleDownloadMindmap = async (format) => {
         if (mindmapViewerRef.current && mindmapViewerRef.current.getSvgElement) {
