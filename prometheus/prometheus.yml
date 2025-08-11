@@ -8,12 +8,12 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
+  # --- FIX: Target the host machine where your Node.js app is running ---
   - job_name: 'nodejs_backend'
-    # Use the container name and port defined in docker-compose.yml
     static_configs:
-      - targets: ['nodejs_backend:5001']
+      - targets: ['host.docker.internal:5001']
 
+  # --- FIX: Target the host machine where your Python app is running ---
   - job_name: 'python_rag_service'
-    # Use the container name and port for the python service
     static_configs:
-      - targets: ['python_rag_service:5000']
+      - targets: ['host.docker.internal:5000']

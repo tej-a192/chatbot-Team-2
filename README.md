@@ -275,3 +275,41 @@ This project is a collaborative effort. The contributors are listed below and th
 6. Knowledge Graph Visualization
 
 ---
+
+
+
+
+
+Server env
+
+PORT=5001
+MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
+JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+GEMINI_API_KEY="AIzaSyCHuH6_DJuxGawHM2QqU5YNM8Zpp0xVl_I"
+PROMPT_COACH_GEMINI_MODEL=gemini-2.5-pro
+PROMPT_COACH_OLLAMA_MODEL=qwen2.5:14b-instruct
+PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
+OLLAMA_API_BASE_URL="https://angels-himself-fixtures-unknown.trycloudflare.com"
+OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
+ENCRYPTION_SECRET=583c0c57ffbb993163e28273671daebf880eb972d6d1402613be9da09a5297e2
+SENTRY_DSN="https://458178e6527d82e9373ea1b1b34d3954@o4509804762497024.ingest.us.sentry.io/4509804765577216"
+REDIS_URL="redis://localhost:6379"
+FIXED_ADMIN_USERNAME=admin@admin.com
+FIXED_ADMIN_PASSWORD=admin123
+ELASTICSEARCH_URL=http://localhost:9200
+# --- AWS S3 Credentials for Dataset Management ---
+# Replace placeholders below with your actual values
+S3_BUCKET_NAME="ai-tutor-datasets-rohith"
+AWS_ACCESS_KEY_ID="AKIASU566RVJD2W3QBUT"
+AWS_SECRET_ACCESS_KEY="obm7xysxFT0Bqz4Izmz3xb/DbJTCfM+srSiJVpoK"
+AWS_REGION="us-east-1"
+
+
+
+client env
+
+#REACT_APP_API_BASE_URL=http://localhost:5001/api
+# OR for Vite:
+VITE_API_BASE_URL=http://localhost:5001/api
+VITE_ADMIN_USERNAME=admin@admin.com
+VITE_ADMIN_PASSWORD=admin123
