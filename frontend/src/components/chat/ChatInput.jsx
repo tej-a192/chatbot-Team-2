@@ -30,13 +30,11 @@ function ChatInput({
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
 
-    // --- SIMPLIFIED COACH LOGIC ---
     const [isCoaching, setIsCoaching] = useState(false);
 
     const handleRequestPromptCoaching = async () => {
         const trimmedInput = inputValue.trim();
 
-        // --- NEW: Frontend Validation ---
         if (!trimmedInput) return; // General check to prevent action on empty input
         
         if (trimmedInput.length < 3) {
@@ -47,9 +45,8 @@ function ChatInput({
                     color: '#ffffff',
                 },
             });
-            return; // Stop the function here
+            return;
         }
-        // --- END: Frontend Validation ---
         
         if (isCoaching) return;
 
@@ -57,7 +54,6 @@ function ChatInput({
         const toastId = toast.loading('Asking the coach for advice...');
         try {
             const response = await api.analyzePrompt(trimmedInput);
-            // Tell the parent to open the modal with the new data
             openCoachModalWithData({
                 original: trimmedInput,
                 improved: response.improvedPrompt,
@@ -70,6 +66,27 @@ function ChatInput({
         } finally {
             setIsCoaching(false);
         }
+    };
+
+    const handlePaste = (e) => {
+        e.preventDefault();
+
+        const pastedText = e.clipboardData.getData('text/plain');
+
+        const trimmedText = pastedText.trim();
+
+        const textarea = textareaRef.current;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+
+        const newValue = inputValue.substring(0, start) + trimmedText + inputValue.substring(end);
+        setInputValue(newValue);
+
+        setTimeout(() => {
+            const newCursorPosition = start + trimmedText.length;
+            textarea.selectionStart = newCursorPosition;
+            textarea.selectionEnd = newCursorPosition;
+        }, 0);
     };
 
     useEffect(() => {
@@ -194,6 +211,7 @@ function ChatInput({
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
                     placeholder={isLoading ? "Waiting for response..." : "Type your message or ask a question..."}
                     className="input-field flex-1 p-2.5 resize-none min-h-[44px] max-h-32 custom-scrollbar text-sm" 
                     rows="1"
