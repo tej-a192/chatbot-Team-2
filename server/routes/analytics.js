@@ -6,52 +6,18 @@ const esClient = require('../config/elasticsearchClient');
 const User = require('../models/User');
 const KnowledgeSource = require('../models/KnowledgeSource');
 
-
+// --- KPI & User Growth Routes (Unchanged) ---
 router.get('/total-queries', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
     try {
         const response = await esClient.count({
             index: 'filebeat-*',
-            body: {
-                // --- THIS IS THE VALIDATED QUERY FROM KIBANA ---
-                query: {
-                    "match_phrase": {
-                      "message": "User Event: CHAT_MESSAGE_SENT"
-                    }
-                }
-            }
+            body: { query: { "match_phrase": { "message": "User Event: CHAT_MESSAGE_SENT" } } }
         });
-
-        res.json({
-            title: "Total User Queries",
-            count: response.count
-        });
-
+        res.json({ count: response.count });
     } catch (error) {
-        logger.error('Elasticsearch query for total queries failed', { 
-            errorMessage: error.message, 
-            meta: error.meta?.body 
-        });
+        logger.error('ES query for total queries failed', { errorMessage: error.message });
         res.status(500).json({ message: "Failed to retrieve total query analytics." });
-    }
-});
-
-router.get('/total-users', async (req, res) => {
-    try {
-        const count = await User.countDocuments();
-
-        res.json({
-            title: "Total Registered Users",
-            count: count
-        });
-
-    } catch (error) {
-        logger.error('MongoDB query for total users failed', { 
-            errorMessage: error.message
-        });
-        res.status(500).json({ message: "Failed to retrieve total users analytics." });
     }
 });
 
@@ -114,71 +80,83 @@ router.get('/active-users-today', async (req, res) => {
     }
 });
 
-
 router.get('/total-sources', async (req, res) => {
     try {
-        // This query efficiently counts all documents in the KnowledgeSource collection.
         const count = await KnowledgeSource.countDocuments();
-
-        res.json({
-            title: "Total Sources Ingested",
-            count: count
-        });
-
+        res.json({ count: count });
     } catch (error) {
-        logger.error('MongoDB query for total sources failed', { 
-            errorMessage: error.message
-        });
-        res.status(500).json({ message: "Failed to retrieve total sources analytics." });
+        logger.error('MongoDB query for total sources failed', { errorMessage: error.message });
+        res.status(500).json({ message: "Failed to retrieve total sources." });
     }
 });
 
 router.get('/user-engagement', async (req, res) => {
     try {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-        const [totalUsers, newSignupsResponse, dailySignupsResponse] = await Promise.all([
+        const [totalUsers, newSignupsLast7Days, dailySignupsResponse] = await Promise.all([
             User.countDocuments(),
-            esClient.count({
-                index: 'filebeat-*',
-                body: {
-                    query: {
-                        bool: {
-                            must: [
-                                // --- THIS IS THE FIX ---
-                                { "match_phrase": { "message": "User Event: USER_SIGNUP_SUCCESS" } },
-                                { "range": { "@timestamp": { "gte": sevenDaysAgo.toISOString() } } }
-                            ]
-                        }
-                    }
-                }
-            }),
+            User.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
+            User.aggregate([
+                { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+                { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+                { $sort: { _id: 1 } },
+                { $project: { date: "$_id", count: 1, _id: 0 } }
+            ])
+        ]);
+        res.json({ totalUsers, newSignupsLast7Days, dailySignupsLast30Days: dailySignupsResponse });
+    } catch (error) {
+        logger.error('Error fetching user engagement', { errorMessage: error.message });
+        res.status(500).json({ message: 'Failed to retrieve user engagement.' });
+    }
+});
+
+// --- Chart Data Routes (REVISED AND CONSOLIDATED) ---
+
+// --- START OF FIX ---
+router.get('/feature-usage', async (req, res) => {
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
+    try {
+        // Run all queries concurrently
+        const [
+            toolUsageResponse,
+            criticalThinkingResponse,
+            searchUsageResponse // Correctly named response
+        ] = await Promise.all([
+            // 1. Query for Tool Usage (Quiz, Code Executor, etc.)
             esClient.search({
                 index: 'filebeat-*',
                 body: {
                     size: 0,
-                    query: {
-                        bool: {
-                            must: [
-                                // --- THIS IS THE FIX ---
-                                { "match_phrase": { "message": "User Event: USER_SIGNUP_SUCCESS" } },
-                                { "range": { "@timestamp": { "gte": thirtyDaysAgo.toISOString() } } }
-                            ]
-                        }
-                    },
+                    query: { "wildcard": { "payload": "*TOOL_USAGE_*" } },
                     aggs: {
-                        signups_over_time: {
-                            date_histogram: {
-                                field: "@timestamp",
-                                calendar_interval: "1d",
-                                min_doc_count: 0,
-                                extended_bounds: {
-                                    min: thirtyDaysAgo.toISOString(),
-                                    max: new Date().toISOString()
-                                }
+                        feature_counts: {
+                            "terms": {
+                                "script": {
+                                    "source": `if (doc.containsKey('payload') && !doc['payload'].empty) { def payload = doc['payload'].value; def m = /"eventType":"([^"]+)"/.matcher(payload); if (m.find()) { return m.group(1); } } return 'N/A';`,
+                                    "lang": "painless"
+                                }, "size": 20
+                            }
+                        }
+                    }
+                }
+            }),
+            // 2. Query for Critical Thinking Usage (using the validated query)
+            esClient.count({
+                index: 'filebeat-*',
+                body: { query: { "query_string": { "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*\"criticalThinkingEnabled\"\\:true*" } } }
+            }),
+            // 3. Query for Web/Academic Search usage
+            esClient.search({
+                index: 'filebeat-*',
+                body: {
+                    size: 0,
+                    query: { "match_phrase": { "message": "AI Response Sent" } },
+                    aggs: {
+                        search_tool_counts: {
+                            "terms": {
+                                "field": "source_pipeline.keyword", "size": 10
                             }
                         }
                     }
@@ -186,261 +164,98 @@ router.get('/user-engagement', async (req, res) => {
             })
         ]);
 
-        const dailySignups = dailySignupsResponse.aggregations.signups_over_time.buckets.map(bucket => ({
-            date: bucket.key_as_string.split('T')[0],
-            count: bucket.doc_count
-        }));
+        // Process Tool Usage
+        const toolUsageData = toolUsageResponse.aggregations.feature_counts.buckets
+            .filter(bucket => bucket.key.startsWith('TOOL_USAGE_'))
+            .map(bucket => ({
+                feature: bucket.key.replace('TOOL_USAGE_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                count: bucket.doc_count
+            }));
 
-        res.json({
-            totalUsers,
-            newSignupsLast7Days: newSignupsResponse.count,
-            dailySignupsLast30Days: dailySignups
-        });
+        // Process Search Usage from the correct response variable
+        const searchUsageData = searchUsageResponse.aggregations.search_tool_counts.buckets
+            .filter(bucket => bucket.key.includes('web_search') || bucket.key.includes('academic_search'))
+            .map(bucket => ({
+                feature: bucket.key.includes('web_search') ? 'Web Search' : 'Academic Search',
+                count: bucket.doc_count
+            }));
+        
+        // Combine all data into the final array
+        const finalData = [
+            ...toolUsageData,
+            ...searchUsageData,
+            { feature: 'Critical Thinking Mode', count: criticalThinkingResponse.count }
+        ];
+
+        res.json(finalData);
+
     } catch (error) {
-        logger.error('Error fetching user engagement analytics', { errorMessage: error.message, meta: error.meta?.body });
-        res.status(500).json({ message: 'Failed to retrieve user engagement analytics.' });
-    }
-});
-
-
-router.get('/feature-usage', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
-    try {
-        const response = await esClient.search({
-            index: 'filebeat-*',
-            body: {
-                size: 0,
-                query: {
-                    "wildcard": {
-                        // We search inside the payload string for our event type prefix
-                        "payload": "*TOOL_USAGE_*"
-                    }
-                },
-                aggs: {
-                    feature_counts: {
-                        "terms": {
-                            "script": {
-                                // This script extracts the eventType from the payload string
-                                "source": `
-                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
-                                        def payload = doc['payload'].value;
-                                        def m = /"eventType":"([^"]+)"/.matcher(payload);
-                                        if (m.find()) {
-                                            return m.group(1);
-                                        }
-                                    }
-                                    return 'N/A';
-                                `,
-                                "lang": "painless"
-                            },
-                            "size": 20
-                        }
-                    }
-                }
-            }
-        });
-
-        if (response && response.aggregations && response.aggregations.feature_counts) {
-            const formattedData = response.aggregations.feature_counts.buckets
-                // Filter out any logs that matched the wildcard but couldn't be parsed
-                .filter(bucket => bucket.key.startsWith('TOOL_USAGE_'))
-                .map(bucket => ({
-                    // Clean up the name for display on the chart
-                    feature: bucket.key.replace('TOOL_USAGE_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                    count: bucket.doc_count
-                }));
-            res.json(formattedData);
-        } else {
-            res.json([]);
-        }
-    } catch (error) {
-        logger.error('Elasticsearch query for feature usage failed', { errorMessage: error.message, meta: error.meta?.body });
+        logger.error('ES query for feature usage failed', { errorMessage: error.message, meta: error.meta?.body });
         res.status(500).json({ message: "Failed to retrieve feature usage analytics." });
     }
 });
+// --- END OF FIX ---
 
 
+// ... (Other routes like content-insights, llm-usage, etc. remain the same) ...
 router.get('/content-insights', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
     try {
         const response = await esClient.search({
             index: 'filebeat-*',
             body: {
                 size: 0,
-                query: {
-                    "query_string": {
-                        "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*documentContext* AND NOT payload:*documentContext*null*"
-                    }
-                },
-                aggs: {
-                    document_counts: {
-                        "terms": {
-                            "script": {
-                                "source": `
-                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
-                                        String payloadStr = doc['payload'].value;
-                                        if (payloadStr == null) return 'N/A';
-                                        
-                                        def m = /"payload":\\{.*?"documentContext":"([^"]+)"/.matcher(payloadStr);
-                                        if (m.find()) {
-                                            return m.group(1);
-                                        }
-                                    }
-                                    return 'N/A';
-                                `,
-                                "lang": "painless"
-                            },
-                            "size": 10
-                        }
-                    }
-                }
+                query: { "query_string": { "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*documentContext* AND NOT payload:*documentContext*null*" } },
+                aggs: { document_counts: { "terms": { "script": { "source": `if (doc.containsKey('payload') && !doc['payload'].empty) { String payloadStr = doc['payload'].value; if (payloadStr == null) return 'N/A'; def m = /"documentContext":"([^"]+)"/.matcher(payloadStr); if (m.find()) { return m.group(1); } } return 'N/A';`, "lang": "painless" }, "size": 10 } } }
             }
         });
-
-        if (response && response.aggregations && response.aggregations.document_counts) {
-            const formattedData = response.aggregations.document_counts.buckets
-                .filter(bucket => bucket.key !== 'N/A')
-                .map(bucket => ({
-                    documentName: bucket.key,
-                    count: bucket.doc_count
-                }));
-            res.json(formattedData);
-        } else {
-            res.json([]);
-        }
+        const formattedData = response.aggregations.document_counts.buckets.filter(b => b.key !== 'N/A').map(b => ({ documentName: b.key, count: b.doc_count }));
+        res.json(formattedData);
     } catch (error) {
-        logger.error('Elasticsearch query for content insights failed', { errorMessage: error.message, meta: error.meta?.body });
-        res.status(500).json({ message: "Failed to retrieve content insights analytics." });
+        logger.error('ES query for content insights failed', { errorMessage: error.message, meta: error.meta?.body });
+        res.status(500).json({ message: "Failed to retrieve content insights." });
     }
 });
 
-
 router.get('/llm-usage', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
     try {
         const response = await esClient.search({
             index: 'filebeat-*',
             body: {
                 size: 0,
-                query: {
-                    "query_string": {
-                        "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*llmProvider*"
-                    }
-                },
-                aggs: {
-                    llm_provider_counts: {
-                        "terms": {
-                            "script": {
-                                "source": `
-                                    if (doc.containsKey('payload') && !doc['payload'].empty) {
-                                        String payloadStr = doc['payload'].value;
-                                        if (payloadStr == null) return 'N/A';
-                                        
-                                        def m = /"llmProvider":"([^"]+)"/.matcher(payloadStr);
-                                        if (m.find()) {
-                                            return m.group(1);
-                                        }
-                                    }
-                                    return 'N/A';
-                                `,
-                                "lang": "painless"
-                            },
-                            "size": 10
-                        }
-                    }
-                }
+                query: { "query_string": { "query": "message:\"User Event: CHAT_MESSAGE_SENT\" AND payload:*llmProvider*" } },
+                aggs: { llm_provider_counts: { "terms": { "script": { "source": `if (doc.containsKey('payload') && !doc['payload'].empty) { String payloadStr = doc['payload'].value; if (payloadStr == null) return 'N/A'; def m = /"llmProvider":"([^"]+)"/.matcher(payloadStr); if (m.find()) { return m.group(1); } } return 'N/A';`, "lang": "painless" }, "size": 10 } } }
             }
         });
-
-        if (response && response.aggregations && response.aggregations.llm_provider_counts) {
-            const formattedData = response.aggregations.llm_provider_counts.buckets
-                .filter(bucket => bucket.key !== 'N/A')
-                .map(bucket => ({
-                    provider: bucket.key,
-                    count: bucket.doc_count
-                }));
-            res.json(formattedData);
-        } else {
-            res.json([]);
-        }
+        const formattedData = response.aggregations.llm_provider_counts.buckets.filter(b => b.key !== 'N/A').map(b => ({ provider: b.key, count: b.doc_count }));
+        res.json(formattedData);
     } catch (error) {
-        logger.error('Elasticsearch query for LLM usage failed', { errorMessage: error.message, meta: error.meta?.body });
+        logger.error('ES query for LLM usage failed', { errorMessage: error.message, meta: error.meta?.body });
         res.status(500).json({ message: "Failed to retrieve LLM usage analytics." });
     }
 });
 
-
 router.get('/pptx-generated-count', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
     try {
-        const response = await esClient.count({
-            index: 'filebeat-*',
-            body: {
-                query: {
-                    "query_string": {
-                        "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*pptx*"
-                    }
-                }
-            }
-        });
-        res.json({ title: "PPTX Generated", count: response.count });
+        const response = await esClient.count({ index: 'filebeat-*', body: { query: { "query_string": { "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*pptx*" } } } });
+        res.json({ count: response.count });
     } catch (error) {
-        logger.error('Elasticsearch query for PPTX count failed', { errorMessage: error.message });
+        logger.error('ES query for PPTX count failed', { errorMessage: error.message });
         res.status(500).json({ message: "Failed to retrieve PPTX generation analytics." });
     }
 });
 
 router.get('/docx-generated-count', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
+    if (!esClient) { return res.status(503).json({ message: "Analytics service unavailable." }); }
     try {
-        const response = await esClient.count({
-            index: 'filebeat-*',
-            body: {
-                query: {
-                    "query_string": {
-                        "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*docx*"
-                    }
-                }
-            }
-        });
-        res.json({ title: "DOCX Generated", count: response.count });
+        const response = await esClient.count({ index: 'filebeat-*', body: { query: { "query_string": { "query": "message:*CONTENT_GENERATION* AND payload:*docType* AND payload:*docx*" } } } });
+        res.json({ count: response.count });
     } catch (error) {
-        logger.error('Elasticsearch query for DOCX count failed', { errorMessage: error.message });
+        logger.error('ES query for DOCX count failed', { errorMessage: error.message });
         res.status(500).json({ message: "Failed to retrieve DOCX generation analytics." });
     }
 });
-
-router.get('/total-queries', async (req, res) => {
-    if (!esClient) {
-        return res.status(503).json({ message: "Analytics service (Elasticsearch) is currently unavailable." });
-    }
-    try {
-        const response = await esClient.count({
-            index: 'filebeat-*',
-            body: {
-                query: {
-                    "match_phrase": {
-                      "message": "User Event: CHAT_MESSAGE_SENT"
-                    }
-                }
-            }
-        });
-        res.json({ title: "Total User Queries", count: response.count });
-    } catch (error) {
-        logger.error('Elasticsearch query for total queries failed', { errorMessage: error.message });
-        res.status(500).json({ message: "Failed to retrieve total query analytics." });
-    }
-});
-
 
 module.exports = router;

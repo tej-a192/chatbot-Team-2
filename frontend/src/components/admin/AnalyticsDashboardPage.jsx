@@ -9,7 +9,7 @@ import UserSignupsChart from './UserSignupsChart.jsx';
 import FeatureUsageChart from './FeatureUsageChart.jsx';
 import ContentInsightsChart from './ContentInsightsChart.jsx';
 import LlmUsageChart from './LlmUsageChart.jsx';
-import ExternalServicesNav from './ExternalServicesNav.jsx'; // <<< NEW: Import the component
+import ExternalServicesNav from './ExternalServicesNav.jsx';
 
 const AnalyticsDashboardPage = () => {
     const [kpiData, setKpiData] = useState(null);
@@ -18,7 +18,6 @@ const AnalyticsDashboardPage = () => {
     const [contentInsightsData, setContentInsightsData] = useState(null);
     const [llmUsageData, setLlmUsageData] = useState(null);
     const [generatedContentData, setGeneratedContentData] = useState(null);
-
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -27,6 +26,7 @@ const AnalyticsDashboardPage = () => {
             setIsLoading(true);
             setError('');
             try {
+                // Simplified Promise.all - featureUsageData is now fetched in one go.
                 const [
                     kpiStats,
                     engagementStats, 
@@ -46,7 +46,7 @@ const AnalyticsDashboardPage = () => {
                         totalSources: sources.count
                     })),
                     adminApi.getUserEngagementStats(),
-                    adminApi.getFeatureUsageStats(),
+                    adminApi.getFeatureUsageStats(), // This now returns the combined data
                     adminApi.getContentInsightStats(),
                     adminApi.getLlmUsageStats(),
                     adminApi.getPptxGeneratedCount(),
@@ -55,7 +55,7 @@ const AnalyticsDashboardPage = () => {
                 
                 setKpiData(kpiStats);
                 setUserEngagementData(engagementStats);
-                setFeatureUsageData(featureStats);
+                setFeatureUsageData(featureStats); // Set the combined data directly
                 setContentInsightsData(contentStats);
                 setLlmUsageData(llmStats);
                 setGeneratedContentData({ pptx: pptxStats.count, docx: docxStats.count });
@@ -182,7 +182,6 @@ const AnalyticsDashboardPage = () => {
                     )}
                     {!isLoading && !error && (
                         <>
-                            {/* <<< NEW: Added the external services navigation bar here >>> */}
                             <ExternalServicesNav />
                             {renderTopLevelKpis()}
                             {renderUserGrowthSection()}
