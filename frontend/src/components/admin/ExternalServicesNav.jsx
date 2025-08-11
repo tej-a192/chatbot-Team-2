@@ -7,19 +7,19 @@ import Button from '../core/Button';
 const services = [
     {
         name: 'Prometheus',
-        url: 'http://localhost:9090/targets',
+        url: 'http://localhost:7004/targets',
         icon: BarChart3,
         description: 'View application performance metrics and alerts.'
     },
     {
         name: 'Grafana',
-        url: 'http://localhost:3000',
+        url: 'http://localhost:7005',
         icon: LayoutDashboard,
         description: 'Visualize metrics in custom dashboards.'
     },
     {
         name: 'Kibana',
-        url: 'http://localhost:5601/app/discover/',
+        url: 'http://localhost:7003/app/discover/',
         icon: Search,
         description: 'Explore, search, and visualize application logs.'
     },
@@ -33,13 +33,13 @@ const services = [
     },
     {
         name: 'Qdrant',
-        url: 'http://localhost:6333/dashboard',
+        url: 'http://localhost:7000/dashboard',
         icon: DatabaseZap,
         description: 'Inspect the vector database and collections.'
     },
     {
         name: 'Neo4j Browser',
-        url: 'http://localhost:7474',
+        url: 'http://localhost:7001',
         icon: Share2,
         description: 'Query and visualize the knowledge graph database.'
     }
