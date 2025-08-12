@@ -10,7 +10,6 @@ const kgService = require('../services/kgService');
 async function runKgGeneration() {
     // --- REFACTORED DESTRUCTURING ---
     const { chunksForKg, userId, originalName, llmProvider, ollamaModel, sourceId } = workerData;
-    
     let dbConnected = false;
     let overallSuccess = false;
     let finalMessage = "KG processing encountered an issue.";

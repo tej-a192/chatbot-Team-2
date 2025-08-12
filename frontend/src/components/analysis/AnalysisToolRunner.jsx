@@ -208,30 +208,24 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         }
 
         setGeneratingDocType(docType);
-        
-        const fullMarkdownContent = `## ${title}\n\n**Source Document:** \`${selectedDocumentFilename}\`\n\n---\n\n${analysisContent}`;
-        
-        const promise = api.generateDocument({
-            markdownContent: fullMarkdownContent,
-            docType: docType,
-            sourceDocumentName: selectedDocumentFilename
-        });
-
-        toast.promise(
-            promise,
-            {
-                loading: `Generating your ${docType.toUpperCase()} document... This may take a moment.`,
-                success: (data) => `Successfully downloaded '${data.filename}'!`,
-                error: (err) => `Download failed: ${err.message}`,
-            }
-        );
+        const toastId = toast.loading(`Generating ${docType.toUpperCase()} document...`);
 
         try {
-            await promise;
+            const fullMarkdownContent = `## ${title}\\n\\n**Source Document:** \`${selectedDocumentFilename}\`\\n\\n---\\n\\n${analysisContent}`;
+            
+            // The api.generateDocument function now handles the download.
+            // We just need to call it and await its success or failure.
+            const { filename } = await api.generateDocument({
+                markdownContent: fullMarkdownContent,
+                docType: docType,
+                sourceDocumentName: selectedDocumentFilename
+            });
+            
+            // The download is triggered inside the API service, so we just show a success toast.
+            toast.success(`Download started for '${filename}'!`, { id: toastId });
+
         } catch (err) {
-            // The toast.promise handles showing the error, but we still catch it 
-            // to prevent unhandled promise rejection warnings in the console.
-            console.error(`Error during document generation: ${err.message}`);
+            toast.error(`Failed to generate document: ${err.message}`, { id: toastId });
         } finally {
             setGeneratingDocType(null);
         }

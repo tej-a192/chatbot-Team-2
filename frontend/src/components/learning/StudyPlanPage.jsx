@@ -328,7 +328,14 @@ const StudyPlanPage = ({ handleNewChat }) => {
                                         let statusText = 'Not Yet Started', statusColor = 'text-gray-500 dark:text-gray-400';
                                         if (isCompleted) { statusText = 'Completed'; statusColor = 'text-green-600 dark:text-green-400'; }
                                         else if (hasStarted) { statusText = 'Ongoing'; statusColor = 'text-blue-600 dark:text-blue-400'; }
-                                        return ( <motion.div key={path._id} className="card-base overflow-hidden p-0 relative" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3, ease: "easeOut" }}> <div onClick={() => setSelectedStudyPlan(path)} className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-b border-border-light dark:border-border-dark cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"> <h2 className="flex-grow text-lg font-semibold text-text-light dark:text-text-dark truncate" title={path.title}>{path.title}</h2> <div className="flex-shrink-0 ml-4 flex items-center gap-2"> <span className={`text-xs font-medium ${statusColor}`}>{statusText}</span> <IconButton icon={Trash2} onClick={(e) => { e.stopPropagation(); setPlanToDelete(path); setShowDeleteConfirmModal(true); }} title="Delete Study Plan" size="sm" variant="ghost" className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"/> </div> </div> </motion.div> );
+                                        return ( 
+                                        <motion.div key={path._id} className="card-base overflow-hidden p-0 relative" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+                                             <div onClick={() => setSelectedStudyPlan(path)}
+                                                 className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-b border-border-light dark:border-border-dark cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
+                                                     <h2 className="flex-grow text-lg font-semibold text-text-light dark:text-text-dark truncate" title={path.title}>{path.title}</h2> 
+                                                     <div className="flex-shrink-0 ml-4 flex items-center gap-2"> 
+                                                        <span className={`text-xs font-medium ${statusColor}`}>{statusText}</span> 
+                                                        <IconButton icon={Trash2} onClick={(e) => { e.stopPropagation(); setPlanToDelete(path); setShowDeleteConfirmModal(true); }} title="Delete Study Plan" size="sm" variant="ghost" className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"/> </div> </div> </motion.div> );
                                     })}
                                 </div>
                             )}
@@ -340,8 +347,22 @@ const StudyPlanPage = ({ handleNewChat }) => {
             <Modal isOpen={showCreatePlanModal} onClose={() => setShowCreatePlanModal(false)} title="Generate New Study Plan" size="lg">
                 <CreatePlan onPlanCreated={() => { fetchPaths(); setShowCreatePlanModal(false); }} />
             </Modal>
-            <Modal isOpen={showDeleteConfirmModal} onClose={() => setShowDeleteConfirmModal(false)} title="Confirm Deletion" size="sm" footerContent={<><Button variant="secondary" onClick={() => setShowDeleteConfirmModal(false)}>Cancel</Button><Button variant="danger" onClick={handleDeletePlan}>Delete</Button></>}>
-                <p className="text-center text-text-light dark:text-text-dark text-lg py-4">Are you sure you want to delete the study plan "{planToDelete?.title}"?</p>
+             <Modal
+                isOpen={showDeleteConfirmModal}
+                onClose={() => setShowDeleteConfirmModal(false)}
+                title="Confirm Deletion"
+                size="sm"
+                footerContent={
+                    <>
+                        <Button variant="secondary" onClick={() => setShowDeleteConfirmModal(false)}>Cancel</Button>
+                        <Button variant="danger" onClick={handleDeletePlan}>Delete</Button>
+                    </>
+                }a
+            >
+                <p className="text-center text-text-light dark:text-text-dark text-lg py-4">
+                    Are you sure you want to delete the study plan "{planToDelete?.title}"?
+                    This action cannot be undone.
+                </p>
             </Modal>
         </div>
     );

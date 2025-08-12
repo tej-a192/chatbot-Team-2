@@ -204,7 +204,7 @@ router.post("/generate-quiz", quizUpload.single("file"), async (req, res) => {
   const generationUrl = `${pythonServiceUrl}/generate_quiz`;
   const form = new FormData();
   form.append("file", fs.createReadStream(file.path));
-  form.append("quiz_option", quizOption);
+  form.append("quizOption", quizOption);
 
   try {
 

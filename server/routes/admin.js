@@ -410,7 +410,7 @@ router.post(
           path.resolve(__dirname, "..", "workers", "kgWorker.js"),
           {
             workerData: {
-              adminDocumentId: adminDocRecord._id.toString(),
+              sourceId: adminDocRecord._id.toString(), // <-- This is the new, correct property
               userId: "admin",
               originalName: originalName,
               chunksForKg: ragResult.chunksForKg,
@@ -623,6 +623,23 @@ router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (r
     } catch (error) {
         console.error('Error fetching users with chat summaries:', error);
         res.status(500).json({ message: 'Server error while fetching user chat data.' });
+    }
+});
+
+
+// @route   GET /api/admin/negative-feedback
+// @desc    Get all log entries with negative feedback
+router.get('/negative-feedback', async (req, res) => {
+    try {
+        const negativeFeedback = await LLMPerformanceLog.find({ userFeedback: 'negative' })
+            .populate('userId', 'email') // Optionally get user email
+            .sort({ createdAt: -1 })
+            .limit(100); // Limit to the last 100 to prevent performance issues
+
+        res.json(negativeFeedback);
+    } catch (error) {
+        console.error('Error fetching negative feedback logs:', error);
+        res.status(500).json({ message: 'Server error while fetching negative feedback.' });
     }
 });
 
