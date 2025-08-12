@@ -147,6 +147,7 @@ function ChatInput({
     const handleWebSearchToggle = () => {
         const newWebSearchState = !useWebSearch;
         setUseWebSearch(newWebSearchState);
+        if (newWebSearchState) setUseAcademicSearch(false);
         toast(newWebSearchState ? "Web Search enabled." : "Web Search disabled.", { icon: newWebSearchState ? "🌐" : "📄" });
         setIsMenuOpen(false);
     };
@@ -154,6 +155,7 @@ function ChatInput({
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
+        if (newState) setUseWebSearch(false);
         toast(newState ? "Academic Search enabled." : "Academic Search disabled.", { icon: newState ? "🎓" : "📄" });
         setIsMenuOpen(false);
     };
