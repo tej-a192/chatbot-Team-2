@@ -17,7 +17,7 @@ filebeat.inputs:
     - /usr/share/filebeat/logs/python-rag.log
   tags: ["python-rag"]
 
-# --- Universal JSON Processor (No changes here, it's correct) ---
+# --- Universal JSON Processor ---
 processors:
   - decode_json_fields:
       fields: ["message"]
@@ -26,19 +26,11 @@ processors:
       process_array: false
       overwrite_keys: true
 
-# --- THIS IS THE FIX ---
-# We are simplifying the output configuration. By default, Filebeat 8.x
-# is optimized to work with data streams. We will let it use its
-# default behavior, which is more robust.
-
+# --- Simplified Elasticsearch Output ---
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]
-  # We remove the manual 'index:' line. Filebeat will now use its default
-  # data stream logic, which is logs-generic-default.
-  # This avoids the template conflict you were seeing.
 
-# We remove the manual setup.template.* lines as they are causing the conflict
-# with the data stream setup. Filebeat will manage this automatically.
+# --- Automatic Template and ILM Setup ---
 setup.ilm.enabled: true
 setup.ilm.overwrite: true
 
