@@ -60,7 +60,7 @@ router.post('/message', async (req, res) => {
         useAcademicSearch: !!useAcademicSearch,
         criticalThinkingEnabled: !!criticalThinkingEnabled,
         documentContext: documentContextName || null,
-        llmProvider: userId?.preferredLlmProvider || 'gemini'
+        llmProvider: req.user?.preferredLlmProvider || 'gemini'
     });
 
 
@@ -82,9 +82,8 @@ router.post('/message', async (req, res) => {
         ]);
 
         const historyFromDb = chatSession ? chatSession.messages : [];
-        const chatContext = { userId, subject: documentContextName, chatHistory: historyFromDb };
-        const { chosenModel, logic: routerLogic } = await selectLLM(query.trim(), chatContext);
-
+        const chatContext = { userId, subject: documentContextName, chatHistory: historyFromDb, user: user };
+        const { chosenModel, logic: routerLogic } = await selectLLM(query.trim(), chatContext); 
         const llmConfig = {
             llmProvider: chosenModel.provider,
             geminiModel: chosenModel.provider === 'gemini' ? chosenModel.modelId : null,

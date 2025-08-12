@@ -33,8 +33,9 @@ router.put("/config", async (req, res) => {
 
     // If a new Ollama URL is provided, add it to updates.
     if (typeof ollamaUrl === "string") {
-      updates.ollamaUrl = ollamaUrl.trim();
+      updates.ollamaUrl = ollamaUrl.trim().replace(/\/+$/, "");
     }
+
 
     // If a new Ollama model is provided, add it to updates.
     if (ollamaModel) {
