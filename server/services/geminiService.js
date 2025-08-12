@@ -2,7 +2,7 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
 const FALLBACK_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const DEFAULT_MAX_OUTPUT_TOKENS_CHAT = 940000;
 const DEFAULT_MAX_OUTPUT_TOKENS_KG = 940000;
@@ -38,7 +38,7 @@ async function generateContentWithHistory(
             temperature: 0.7,
             maxOutputTokens: options.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS_CHAT,
         };
-        
+
         const model = genAI.getGenerativeModel({
             model: MODEL_NAME,
             systemInstruction: (systemPromptText && typeof systemPromptText === 'string' && systemPromptText.trim() !== '') ? 
@@ -52,7 +52,7 @@ async function generateContentWithHistory(
                  parts: Array.isArray(msg.parts) ? msg.parts.map(part => ({ text: part.text || '' })) : [{text: msg.text || ''}] 
             }))
             .filter(msg => msg.role && msg.parts && msg.parts.length > 0 && typeof msg.parts[0].text === 'string');
-        
+
         const chat = model.startChat({
             history: historyForStartChat,
             generationConfig: generationConfig,
@@ -61,6 +61,14 @@ async function generateContentWithHistory(
         console.log(`Sending message to Gemini. History sent: ${historyForStartChat.length}. System Prompt: ${!!systemPromptText}. Max Tokens: ${generationConfig.maxOutputTokens}`);
         // console.log(`Current User Query to sendMessage (first 100): "${currentUserQuery.substring(0,100)}..."`); // Can be very long
 
+        // console.log("\n==================== START GEMINI FINAL INPUT ====================");
+        // console.log("--- System Prompt Sent to Model ---");
+        // console.log(systemPromptText || "N/A");
+        // console.log("\n--- History Sent to Model ---");
+        // console.log(JSON.stringify(historyForStartChat, null, 2));
+        // console.log("\n--- Current User Query Sent to Model ---");
+        // console.log(currentUserQuery);
+        // console.log("==================== END GEMINI FINAL INPUT ====================\n");
         // console.log("\n==================== START GEMINI FINAL INPUT ====================");
         // console.log("--- System Prompt Sent to Model ---");
         // console.log(systemPromptText || "N/A");
@@ -132,4 +140,4 @@ async function generateContentWithHistory(
 module.exports = {
     generateContentWithHistory,
     DEFAULT_MAX_OUTPUT_TOKENS_KG 
-};
+}

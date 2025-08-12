@@ -1,13 +1,17 @@
 // server/routes/chat.js
 const express = require('express');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const ChatHistory = require('../models/ChatHistory');
 const User = require('../models/User');
 const { processQueryWithToT_Streaming } = require('../services/totOrchestrator');
-const { createOrUpdateSummary } = require('../services/summarizationService');
+const { analyzeAndRecommend } = require('../services/sessionAnalysisService');
 const { processAgenticRequest } = require('../services/agentService');
+const { generateCues } = require('../services/criticalThinkingService');
 const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
+const { analyzePrompt } = require('../services/promptCoachService');
+const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
 const router = express.Router();
 
 
@@ -34,7 +38,6 @@ function doesQuerySuggestRecall(query) {
     ];
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
-
 
 router.post('/message', async (req, res) => {
     const {
@@ -64,9 +67,15 @@ router.post('/message', async (req, res) => {
         const llmProvider = user?.preferredLlmProvider || 'gemini';
         const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
 
+        const llmConfig = {
+            llmProvider,
+            ollamaModel,
+            apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+            ollamaUrl: user?.ollamaUrl
+        };
+
         const historyFromDb = chatSession ? chatSession.messages : [];
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
-        
         const historyForLlm = [];
 
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
@@ -79,7 +88,7 @@ router.post('/message', async (req, res) => {
                 parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
             });
         }
-
+        
         const formattedDbMessages = historyFromDb.map(msg => ({
             role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
         }));
@@ -87,15 +96,12 @@ router.post('/message', async (req, res) => {
         
         const requestContext = {
             documentContextName, criticalThinkingEnabled, filter,
-            llmProvider, ollamaModel,
-            isWebSearchEnabled: !!useWebSearch, isAcademicSearchEnabled: !!useAcademicSearch,
-            userId: userId.toString(), ollamaUrl: user.ollamaUrl,
-            systemPrompt: clientProvidedSystemInstruction
+            userId: userId.toString(), 
+            systemPrompt: clientProvidedSystemInstruction,
+            isWebSearchEnabled: !!useWebSearch, 
+            isAcademicSearchEnabled: !!useAcademicSearch,
+            ...llmConfig
         };
-
-        if (llmProvider === 'gemini') {
-            requestContext.apiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
 
         if (criticalThinkingEnabled) {
             console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
@@ -120,7 +126,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, requestContext, interceptingStreamCallback
             );
 
-            const aiMessageForDbAndClient = {
+            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: totResult.finalAnswer }],
                 text: totResult.finalAnswer,
@@ -128,18 +136,25 @@ router.post('/message', async (req, res) => {
                 thinking: accumulatedThoughts.join(''),
                 references: totResult.references || [],
                 source_pipeline: totResult.sourcePipeline,
+                criticalThinkingCues: criticalThinkingCues
             };
 
-            streamEvent(res, { type: 'final_answer', content: aiMessageForDbAndClient });
+            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues;
+
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
+
+            if (totResult.finalAnswer) {
+                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
+            }
             console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
             res.end();
-
         } else {
             console.log(`[Chat Route] Diverting to standard Agentic Service.`);
 
@@ -147,7 +162,9 @@ router.post('/message', async (req, res) => {
                 query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
             );
 
-            const aiMessageForDbAndClient = {
+            // --- THIS IS THE FIX ---
+            // Prepare the full response object, including any potential action
+            const aiMessageForClient = {
                 sender: 'bot', role: 'model',
                 parts: [{ text: agentResponse.finalAnswer }],
                 text: agentResponse.finalAnswer,
@@ -155,16 +172,44 @@ router.post('/message', async (req, res) => {
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
+                action: agentResponse.action || null // Include the action
             };
+
+            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
+            if (aiMessageForClient.action) {
+                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
+                
+                // Save both user message and the AI's action message to the database
+                await ChatHistory.findOneAndUpdate(
+                    { sessionId: sessionId, userId: userId },
+                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
+                    { upsert: true, new: true }
+                );
+                
+                // Return the response with the action, stopping execution here.
+                return res.status(200).json({ reply: aiMessageForClient });
+            }
+            // --- END OF FIX ---
+
+            // If there was NO action, proceed with the normal flow
+            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
+            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
+
+            const aiMessageForDb = { ...aiMessageForClient };
+            delete aiMessageForDb.criticalThinkingCues;
 
             await ChatHistory.findOneAndUpdate(
                 { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDbAndClient] } } },
+                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
                 { upsert: true, new: true }
             );
 
             console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForDbAndClient });
+            res.status(200).json({ reply: aiMessageForClient });
+            
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
+            }
         }
 
     } catch (error) {
@@ -180,64 +225,103 @@ router.post('/message', async (req, res) => {
     }
 });
 
+
 router.post('/history', async (req, res) => {
-    const { previousSessionId } = req.body;
+    const { previousSessionId, skipAnalysis } = req.body;
     const userId = req.user._id;
     const newSessionId = uuidv4();
-    let contextSummaryForNewSession = "";
-
-    try {
-        const user = await User.findById(userId).select('preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey').lean();
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-        const userOllamaUrl = user?.ollamaUrl || null;
-        let userApiKey = null;
-        if (llmProvider === 'gemini') {
-            userApiKey = user.encryptedApiKey ? decrypt(user.encryptedApiKey) : null;
-        }
-
-        // --- THIS IS THE FIX ---
-        // 1. If there was a previous session, summarize IT and save that summary.
-        if (previousSessionId) {
-            const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
-            if (previousSession && previousSession.messages?.length > 0) {
-                console.log(`[New Chat] Summarizing previous session ${previousSessionId} before creating new one.`);
-                const summaryForOldSession = await createOrUpdateSummary(
-                    previousSession.messages,
-                    previousSession.summary, // Pass its own summary in case it's a continuation
-                    llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
-                
-                // Save the generated summary to the *old* session document.
-                previousSession.summary = summaryForOldSession;
-                await previousSession.save();
-                console.log(`[New Chat] Saved summary to previous session ${previousSessionId}.`);
-            }
-        }
-        
-        // 2. Now, create a new, broader summary for the NEW session's context.
-        // This gives the new session memory of the last 5 conversations.
-        const lastSessions = await ChatHistory.find({ userId: userId }).sort({ updatedAt: -1 }).limit(5).select('messages').lean();
-        if (lastSessions && lastSessions.length > 0) {
-            const messagesForNewSummary = lastSessions.flatMap(session => session.messages);
-            if (messagesForNewSummary.length > 0) {
-                 console.log(`[New Chat] Creating context summary for new session from the last ${lastSessions.length} sessions.`);
-                contextSummaryForNewSession = await createOrUpdateSummary(
-                    messagesForNewSummary, null, llmProvider, ollamaModel, userApiKey, userOllamaUrl
-                );
-            }
-        }
-        // --- END OF FIX ---
-
-    } catch (summaryError) {
-        console.error(`Could not create summary from last sessions:`, summaryError);
-    }
     
+    // This will hold our final response payload
+    const responsePayload = {
+        message: 'New session started.',
+        newSessionId: newSessionId,
+        studyPlanSuggestion: null // Default to null
+    };
+
     try {
-        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [], summary: contextSummaryForNewSession });
-        res.status(200).json({ message: 'New session started.', newSessionId });
-    } catch (dbError) {
-        res.status(500).json({ message: 'Failed to create new session.' });
+        if (previousSessionId && !skipAnalysis) {
+            const previousSession = await ChatHistory.findOne({ sessionId: previousSessionId, userId: userId });
+            
+            if (previousSession && previousSession.messages?.length > 1) {
+                console.log(`[Chat Route] Finalizing previous session '${previousSessionId}'...`);
+                
+                const user = await User.findById(userId).select('profile preferredLlmProvider ollamaModel ollamaUrl +encryptedApiKey');
+                const llmConfig = {
+                    llmProvider: user?.preferredLlmProvider || 'gemini',
+                    ollamaModel: user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL,
+                    apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
+                    ollamaUrl: user?.ollamaUrl || null
+                };
+
+                const { summary, knowledgeGaps, recommendations, keyTopics } = await analyzeAndRecommend(
+                    previousSession.messages, previousSession.summary,
+                    llmConfig.llmProvider, llmConfig.ollamaModel, llmConfig.apiKey, llmConfig.ollamaUrl
+                );
+
+                await ChatHistory.updateOne(
+                    { sessionId: previousSessionId, userId: userId },
+                    { $set: { summary: summary } }
+                );
+
+                if (knowledgeGaps && knowledgeGaps.size > 0) {
+                    user.profile.performanceMetrics.clear();     
+                    knowledgeGaps.forEach((score, topic) => {
+                        user.profile.performanceMetrics.set(topic.replace(/\./g, '-'), score);
+                    });
+                    await user.save(); 
+                    console.log(`[Chat Route] Updated user performance metrics with ${knowledgeGaps.size} new gaps.`);
+
+                    let mostSignificantGap = null;
+                    let lowestScore = 1.1;
+
+                    knowledgeGaps.forEach((score, topic) => {
+                        if (score < lowestScore) {
+                            lowestScore = score;
+                            mostSignificantGap = topic;
+                        }
+                    });
+
+                    if (mostSignificantGap && lowestScore < 0.6) {
+                        console.log(`[Chat Route] SIGNIFICANT KNOWLEDGE GAP DETECTED: "${mostSignificantGap}" (Score: ${lowestScore}). Generating study plan suggestion.`);
+                        responsePayload.studyPlanSuggestion = {
+                            topic: mostSignificantGap,
+                            reason: `Analysis of your last session shows this is a key area for improvement.`
+                        };
+                    }
+                }
+                
+                if (keyTopics && keyTopics.length > 0 && !responsePayload.studyPlanSuggestion) {
+                    const primaryTopic = keyTopics[0];
+                    console.log(`[Chat Route] Focused topic detected: "${primaryTopic}". Generating study plan suggestion.`);
+                    responsePayload.studyPlanSuggestion = {
+                        topic: primaryTopic,
+                        reason: `Your last session focused on ${primaryTopic}. Would you like to create a structured study plan to master it?`
+                    };
+                }
+
+                if (redisClient && redisClient.isOpen && recommendations && recommendations.length > 0) {
+                    const cacheKey = `recommendations:${newSessionId}`;
+                    await redisClient.set(cacheKey, JSON.stringify(recommendations), { EX: 3600 });
+                    console.log(`[Chat Route] Caching ${recommendations.length} quick recommendations for new session ${newSessionId}.`);
+                }
+            }
+        }
+
+        await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+        console.log(`[Chat Route] New session ${newSessionId} created. Sending response to user ${userId}.`);
+        res.status(200).json(responsePayload);
+
+    } catch (error) {
+        console.error(`Error during finalize-and-create-new process:`, error);
+        if (!res.headersSent) {
+            try {
+                await ChatHistory.create({ userId, sessionId: newSessionId, messages: [] });
+                responsePayload.message = 'New session started, but analysis of previous session failed.';
+                res.status(200).json(responsePayload);
+            } catch (fallbackError) {
+                 res.status(500).json({ message: 'A critical error occurred while creating a new session.' });
+            }
+        }
     }
 });
 
@@ -257,49 +341,14 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
-    const userId = req.user._id;
-    const cacheKey = `session:${sessionId}`;
-    const CACHE_TTL_SECONDS = 3600;
     try {
-        // 1. Check Redis Cache First
-        if (redisClient && redisClient.isOpen) {
-            const cachedSession = await redisClient.get(cacheKey);
-            if (cachedSession) {
-                console.log(`[Chat History] Cache HIT for session ${sessionId}`);
-                return res.status(200).json(JSON.parse(cachedSession));
-            }
-            console.log(`[Chat History] Cache MISS for session ${sessionId}`);
-        }
-
-        // 2. If miss, fetch from MongoDB
-        const session = await ChatHistory.findOne({ sessionId, userId }).lean();
-        if (!session) {
-            return res.status(404).json({ message: 'Chat session not found.' });
-        }
-        
-        const messagesForFrontend = (session.messages || []).map(msg => ({ 
-            id: msg._id || uuidv4(), 
-            sender: msg.role === 'model' ? 'bot' : 'user', 
-            text: msg.parts?.[0]?.text || '', 
-            thinking: msg.thinking, 
-            references: msg.references, 
-            timestamp: msg.timestamp, 
-            source_pipeline: msg.source_pipeline 
-        }));
-        
-        const responsePayload = { ...session, messages: messagesForFrontend };
-
-        // 3. Store the result in Redis for next time
-        if (redisClient && redisClient.isOpen) {
-            redisClient.setEx(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(responsePayload)).catch(err => {
-                console.error(`Redis SETEX error for session ${sessionId}:`, err);
-            });
-        }
-
-        res.status(200).json(responsePayload);
+        const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
+        if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
+        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+        res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to retrieve chat session.' });
+        console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
+        res.status(500).json({ message: 'Failed to retrieve chat session details.' });
     }
 });
 
@@ -318,6 +367,36 @@ router.delete('/session/:sessionId', async (req, res) => {
         res.status(200).json({ message: 'Chat session deleted successfully.' });
     } catch (error) {
         res.status(500).json({ message: 'Server error while deleting chat session.' });
+    }
+});
+
+
+// @route   POST /api/chat/analyze-prompt
+// @desc    Analyze a user's prompt and suggest improvements.
+// @access  Private
+router.post('/analyze-prompt', async (req, res) => {
+    const { prompt } = req.body;
+    const userId = req.user._id;
+
+    // --- REVISED VALIDATION ---
+    if (!prompt || typeof prompt !== 'string') {
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: 'prompt' field is missing or not a string. Received body:`, req.body);
+        return res.status(400).json({ message: "'prompt' field is missing or invalid." });
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length < 3) { // <-- The changed value
+        console.warn(`[API /analyze-prompt] Bad Request from user ${userId}: Prompt is too short. Received: "${trimmedPrompt}"`);
+        return res.status(400).json({ message: `Prompt must be at least 3 characters long.` }); // <-- The changed message
+    }
+    // --- END REVISED VALIDATION ---
+
+    try {
+        const analysis = await analyzePrompt(userId, trimmedPrompt);
+        res.status(200).json(analysis);
+    } catch (error) {
+        console.error(`[API /analyze-prompt] Error for user ${userId} with prompt "${trimmedPrompt.substring(0, 50)}...":`, error);
+        res.status(500).json({ message: error.message || 'Server error during prompt analysis.' });
     }
 });
 

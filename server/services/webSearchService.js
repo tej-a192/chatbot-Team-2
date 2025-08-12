@@ -13,7 +13,7 @@ async function performWebSearch(query) {
 
     try {
         console.log(`[WebSearch Service] Calling Python endpoint for search: ${searchUrl}`);
-        const response = await axios.post(searchUrl, { query: query }, { timeout: 15000 });
+        const response = await axios.post(searchUrl, { query: query }, { timeout: 45000 });
 
         if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             const topResults = response.data;

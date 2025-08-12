@@ -1,7 +1,5 @@
-# server/rag_service/requirements.txt
 flask
 requests
-# faiss-cpu # or faiss-gpu
 langchain
 langchain-huggingface
 pypdf
@@ -28,10 +26,17 @@ sentence_transformers
 spacy
 opencv-python
 ddgs
-python-pptx
 python-docx
 reportlab
 google-generativeai
 gTTS
-
-
+yt-dlp
+openai-whisper
+beautifulsoup4
+playwright
+moviepy
+Werkzeug
+aiohttp
+textstat
+TTS
+pydub

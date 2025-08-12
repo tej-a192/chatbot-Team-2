@@ -8,6 +8,10 @@ from pptx.enum.text import PP_ALIGN
 from docx import Document
 from docx.shared import Inches as DocxInches
 import logging
+from prompts import (
+    PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE,
+    DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,32 +93,56 @@ def expand_content_with_llm(outline_content, source_document_text, doc_type, llm
     logger.info(f"LLM generated expanded content for {doc_type}. Length: {len(expanded_content)}")
     return expanded_content
 
-def parse_pptx_json(json_string):
-    """Parses the LLM's JSON output for PPTX generation."""
+def parse_pptx_json(json_string: str) -> list:
+    """
+    Parses the LLM's JSON output for PPTX generation with enhanced error handling.
+    """
     try:
-        cleaned_str = re.sub(r'^```json\s*|\s*```$', '', json_string.strip())
+        # First, find the JSON block. This is more robust against preamble/apology text from the LLM.
+        json_match = re.search(r'\[\s*\{[\s\S]*?\}\s*\]', json_string, re.DOTALL)
+        if not json_match:
+            raise ValueError("No valid JSON array of slides was found in the AI's response.")
+        
+        cleaned_str = json_match.group(0)
         slides_data = json.loads(cleaned_str)
-        if not isinstance(slides_data, list):
-            raise ValueError("Parsed JSON is not a list of slides.")
+        
+        # Now, validate the structure. It must be a list, and not an empty one.
+        if not isinstance(slides_data, list) or not slides_data:
+            raise ValueError("Parsed JSON is not a non-empty list of slides.")
+            
+        # Optional: Deeper validation of individual slide objects
+        for i, slide in enumerate(slides_data):
+            if not isinstance(slide, dict) or "slide_title" not in slide or "slide_content" not in slide:
+                raise ValueError(f"Slide object at index {i} is missing required 'slide_title' or 'slide_content' keys.")
+
         return slides_data
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse JSON from LLM response: {e}")
-        raise ValueError("LLM returned invalid JSON format for the presentation.") from e
-
-def refined_parse_docx_markdown(markdown_content):
-    """Parses the expanded markdown for DOCX generation into a single 'slide' object for consistency."""
-    if not markdown_content or not markdown_content.strip():
+        logger.error(f"Failed to parse or validate JSON from LLM response: {e}\nRaw Response Preview: {json_string[:500]}")
+        # Return an empty list to signal failure to the calling function in app.py
         return []
+
+def refined_parse_docx_markdown(markdown_content: str) -> list:
+    """
+    Parses the expanded markdown for DOCX generation. Returns an empty list on failure.
+    """
+    if not markdown_content or not markdown_content.strip():
+        return [] # Return empty list if there's no content
     
     title_match = re.search(r"^\s*#\s+(.*)", markdown_content, re.MULTILINE)
     if title_match:
         title = title_match.group(1).strip()
         content = markdown_content[title_match.end():].strip()
     else:
+        # If there's no H1, it might just be paragraphs. Use a default title.
         title = "Generated Document"
         content = markdown_content
 
+    # If after parsing, there's no content left, it's a failure.
+    if not content.strip():
+        return []
+
     return [{"title": title, "text_content": content}]
+
 
 def add_text_to_shape_with_markdown(text_frame, markdown_text, is_title=False, is_notes=False):
     text_frame.clear()
@@ -222,3 +250,21 @@ def create_doc(slides_data, output_path, content_key="text_content"):
         doc.add_paragraph("[No content to generate]")
     doc.save(output_path)
     return True
+
+
+def generate_content_from_topic(topic, doc_type, llm_function):
+    """Uses an LLM to generate document content from scratch based on a topic."""
+    logger.info(f"Generating content for a new '{doc_type}' on topic: '{topic}'")
+
+    if doc_type == 'pptx':
+        prompt = PPTX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+    else: # for 'docx'
+        prompt = DOCX_GENERATION_FROM_TOPIC_PROMPT_TEMPLATE.format(topic=topic)
+
+    generated_content = llm_function(prompt)
+    
+    if not generated_content or not generated_content.strip():
+        raise ValueError("LLM failed to generate content from the topic.")
+    
+    logger.info(f"LLM generated content from topic. Length: {len(generated_content)}")
+    return generated_content

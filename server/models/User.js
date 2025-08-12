@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const { encrypt } = require("../utils/crypto");
 
+// server/models/User.js
+
 const ProfileSchema = new mongoose.Schema(
   {
     name: { type: String, default: "", trim: true },
@@ -11,6 +13,23 @@ const ProfileSchema = new mongoose.Schema(
     degreeType: { type: String, default: "", trim: true },
     branch: { type: String, default: "", trim: true },
     year: { type: String, default: "", trim: true },
+    learningStyle: {
+      type: String,
+      enum: ['Not Specified', 'Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic'],
+      default: 'Not Specified'
+    },
+    currentGoals: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 500 // Prevent excessively long inputs
+    },
+    performanceMetrics: {
+      type: Map,
+      of: Number, // Stores topic proficiency, e.g., { "Calculus": 0.8 }
+      default: () => new Map()
+    }
+    // --- NEW FIELDS END HERE ---
   },
   { _id: false }
 );
@@ -66,25 +85,29 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: process.env.OLLAMA_DEFAULT_MODEL || "llama3",
   },
-  uploadedDocuments: [
-    {
-      filename: { type: String },
-      text: { type: String, default: "" },
-      analysis: {
-        faq: { type: String, default: "" },
-        topics: { type: String, default: "" },
-        mindmap: { type: String, default: "" },
-      },
-      ragStatus: { type: String, default: "pending" },
-      analysisStatus: { type: String, default: "pending" },
-      analysisTimestamp: { type: Date },
-      kgStatus: { type: String, default: "pending" },
-      kgNodesCount: { type: Number, default: 0 },
-      kgEdgesCount: { type: Number, default: 0 },
-      kgTimestamp: { type: Date },
-      uploadedAt: { type: Date, default: Date.now },
-    },
-  ],
+  // uploadedDocuments: [
+  //   {
+  //     filename: { type: String },
+  //     text: { type: String, default: "" },
+  //     analysis: {
+  //       faq: { type: String, default: "" },
+  //       topics: { type: String, default: "" },
+  //       mindmap: { type: String, default: "" },
+  //     },
+  //     ragStatus: { type: String, default: "pending" },
+  //     analysisStatus: { type: String, default: "pending" },
+  //     analysisTimestamp: { type: Date },
+  //     kgStatus: { type: String, default: "pending" },
+  //     kgNodesCount: { type: Number, default: 0 },
+  //     kgEdgesCount: { type: Number, default: 0 },
+  //     kgTimestamp: { type: Date },
+  //     uploadedAt: { type: Date, default: Date.now },
+  //   },
+  // ],
+  learningPaths: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'LearningPath' 
+  }],
   createdAt: {
     type: Date,
     default: Date.now,

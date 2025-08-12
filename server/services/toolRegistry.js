@@ -50,7 +50,13 @@ const availableTools = {
   rag_search: {
     description: "Searches the content of a specific, user-provided document to answer questions based on its text.",
     execute: async (params, context) => {
-        return await queryPythonRagService(params.query, context.documentContextName, context.filter);
+        return await queryPythonRagService(
+            params.query, 
+            context.documentContextName, 
+            context.userId, // <-- Pass the userId
+            context.criticalThinkingEnabled, // <-- Pass the flag
+            context.filter
+        );
     },
     requiredParams: ['query'],
   },
@@ -68,6 +74,17 @@ const availableTools = {
         return await queryAcademicService(params.query);
     },
     requiredParams: ['query'],
+  },
+  generate_document: {
+    description: "Generates a document file (like a PPTX or DOCX) on a given topic using internal knowledge. Use this when the user explicitly asks to 'create', 'make', 'build', or 'generate' a file. You must infer the 'topic' and 'doc_type' from the user's query.",
+    execute: async (params) => {
+        // This tool's job is just to confirm the action. The agentService will handle the special response.
+        return { 
+            toolOutput: `Successfully initiated document generation for topic '${params.topic}' as a .${params.doc_type} file.`,
+            references: [] 
+        };
+    },
+    requiredParams: ['topic', 'doc_type'],
   }
 };
 

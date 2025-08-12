@@ -52,9 +52,6 @@ function UserChatManager({ usersWithChats }) {
             ) : (
                 <div className="space-y-3">
                     {filteredUsers.map(({ user, sessions }) => {
-                        // Don't filter here anymore, we want to show all sessions
-                        // const sessionsWithSummary = sessions.filter(s => s.summary && s.summary.trim() !== '' && s.summary !== 'No summary available.');
-                        
                         return (
                             <details key={user._id} className="group bg-surface-light dark:bg-gray-800/50 border border-border-light dark:border-border-dark rounded-lg overflow-hidden transition-all duration-200 open:shadow-lg open:ring-1 open:ring-primary/50">
                                 <summary className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
@@ -72,8 +69,6 @@ function UserChatManager({ usersWithChats }) {
                                 </summary>
                                 <div className="border-t border-border-light dark:border-border-dark p-3 space-y-2 bg-white dark:bg-gray-800">
                                     {sessions.length > 0 ? sessions.map(session => {
-                                        // --- THIS IS THE FIX ---
-                                        // Check if the summary is an error message or empty
                                         const hasValidSummary = session.summary && !session.summary.startsWith('Summary generation failed:');
                                         const isErrorSummary = session.summary && session.summary.startsWith('Summary generation failed:');
 

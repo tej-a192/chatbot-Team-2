@@ -26,6 +26,7 @@ const CodeExecutorPage = () => {
     const [results, setResults] = useState([]);
     const [compilationError, setCompilationError] = useState(null);
     const [isExecuting, setIsExecuting] = useState(false);
+    const [executionId, setExecutionId] = useState(0); // State to force re-render of output
 
     const handleLanguageChange = (newLanguage) => {
         setLanguage(newLanguage);
@@ -33,6 +34,7 @@ const CodeExecutorPage = () => {
     };
 
     const handleExecute = async () => {
+        setExecutionId(prevId => prevId + 1); // Increment to reset child state
         setIsExecuting(true);
         setResults([]);
         setCompilationError(null);
@@ -89,6 +91,7 @@ const CodeExecutorPage = () => {
                             <PanelResizeHandle className="h-2 panel-resize-handle" />
                             <Panel defaultSize={40} minSize={20}>
                                 <OutputDisplay
+                                    key={executionId} // Using key to force re-mount and state reset
                                     results={results}
                                     compilationError={compilationError}
                                     code={code}

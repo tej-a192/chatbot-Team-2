@@ -1,8 +1,8 @@
-
-
 // frontend/src/components/chat/ChatInput.jsx
+import { useAppState } from '../../contexts/AppStateContext.jsx';
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked } from 'lucide-react'; // Ensure BookMarked is imported
+import api from '../../services/api.js';
+import { Send, Mic, Plus, Brain, Zap, Globe, BookMarked, Sparkles } from 'lucide-react';
 import { useWebSpeech } from '../../hooks/useWebSpeech';
 import Button from '../core/Button.jsx'; 
 import IconButton from '../core/IconButton.jsx';
@@ -15,16 +15,70 @@ function ChatInput({
     isLoading,
     useWebSearch,
     setUseWebSearch,
-    useAcademicSearch, // This prop is now used
-    setUseAcademicSearch, // This prop is now used
+    useAcademicSearch,
+    setUseAcademicSearch,
     criticalThinkingEnabled,
-    setCriticalThinkingEnabled
+    setCriticalThinkingEnabled,
+    initialPrompt,
+    setInitialPromptForNewSession,
+    openCoachModalWithData,
+    setCoachModalOpen
 }) {
     const [inputValue, setInputValue] = useState('');
     const { transcript, listening, isSpeechSupported, startListening, stopListening, resetTranscript } = useWebSpeech();
     const textareaRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef(null);
+
+    // --- SIMPLIFIED COACH LOGIC ---
+    const [isCoaching, setIsCoaching] = useState(false);
+
+    const handleRequestPromptCoaching = async () => {
+        const trimmedInput = inputValue.trim();
+
+        // --- NEW: Frontend Validation ---
+        if (!trimmedInput) return; // General check to prevent action on empty input
+        
+        if (trimmedInput.length < 3) {
+            toast("Prompt is too short for coaching. Please provide a bit more detail.", {
+                icon: '❤️',
+                style: {
+                    background: '#FBBF24',
+                    color: '#ffffff',
+                },
+            });
+            return; // Stop the function here
+        }
+        // --- END: Frontend Validation ---
+        
+        if (isCoaching) return;
+
+        setIsCoaching(true);
+        const toastId = toast.loading('Asking the coach for advice...');
+        try {
+            const response = await api.analyzePrompt(trimmedInput);
+            // Tell the parent to open the modal with the new data
+            openCoachModalWithData({
+                original: trimmedInput,
+                improved: response.improvedPrompt,
+                explanation: response.explanation
+            });
+            setCoachModalOpen(true);
+            toast.success('Suggestion received!', { id: toastId });
+        } catch (error) {
+            toast.error(error.message || "The Prompt Coach is unavailable.", { id: toastId });
+        } finally {
+            setIsCoaching(false);
+        }
+    };
+
+    useEffect(() => {
+    if (initialPrompt) {
+        console.log("[ChatInput] Received initial prompt via props:", initialPrompt);
+        setInputValue(initialPrompt); // Set the text in the input box
+        setInitialPromptForNewSession(null); // Clear the global state immediately
+    }
+    }, [initialPrompt, setInitialPromptForNewSession]);
 
     useEffect(() => {
         if (transcript) {
@@ -72,7 +126,6 @@ function ChatInput({
         setIsMenuOpen(false);
     };
 
-    // --- THIS IS THE NEW HANDLER ---
     const handleAcademicSearchToggle = () => {
         const newState = !useAcademicSearch;
         setUseAcademicSearch(newState);
@@ -103,7 +156,6 @@ function ChatInput({
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             className="absolute bottom-full left-0 mb-2 w-56 bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl border border-border-light dark:border-border-dark p-1 z-10"
                         >
-                            {/* Web Search Button */}
                             <button
                                 onClick={handleWebSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -115,8 +167,6 @@ function ChatInput({
                                 <Globe size={16} />
                                 {useWebSearch ? 'Disable Web Search' : 'Enable Web Search'}
                             </button>
-
-                            {/* --- THIS IS THE NEW ACADEMIC SEARCH BUTTON --- */}
                             <button
                                 onClick={handleAcademicSearchToggle}
                                 className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
@@ -128,7 +178,6 @@ function ChatInput({
                                 <BookMarked size={16} />
                                 {useAcademicSearch ? 'Disable Academic Search' : 'Enable Academic Search'}
                             </button>
-                             
                              <button
                                 onClick={() => {toast("File attachment coming soon!", { icon: "📎" }); setIsMenuOpen(false);}}
                                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-md text-text-muted-light dark:text-text-muted-dark hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -140,7 +189,6 @@ function ChatInput({
                     )}
                     </AnimatePresence>
                 </div>
-
                 <textarea
                     ref={textareaRef}
                     value={inputValue}
@@ -163,11 +211,23 @@ function ChatInput({
                         disabled={isLoading}
                     />
                 )}
+                
+                {/* --- NEW BUTTON --- */}
+                <IconButton
+                    icon={Sparkles}
+                    onClick={handleRequestPromptCoaching}
+                    title="Ask Prompt Coach for Improvement"
+                    variant="ghost"
+                    size="md"
+                    className="p-2 text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+                    isLoading={isCoaching}
+                    disabled={isLoading || isCoaching || !inputValue.trim()}
+                />
 
                <IconButton
                     icon={icon}
                     onClick={() => setCriticalThinkingEnabled(!criticalThinkingEnabled)}
-                    title={criticalThinkingEnabled ? "Disable Critical Thinking (KG)" : "Enable Critical Thinking (KG)"}
+                    title={criticalThinkingEnabled ? "Disable Critical Thinking" : "Enable Critical Thinking"}
                     variant="ghost"
                     size="md"
                     className={`p-2 ${criticalThinkingEnabled ? 'text-purple-500' : 'text-text-muted-light dark:text-text-muted-dark hover:text-primary'}`}

@@ -213,7 +213,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         try {
             const fullMarkdownContent = `## ${title}\n\n**Source Document:** \`${selectedDocumentFilename}\`\n\n---\n\n${analysisContent}`;
             
-            const { fileBlob, filename } = await api.generateDocument({
+            const { filename } = await api.generateDocument({
                 markdownContent: fullMarkdownContent,
                 docType: docType,
                 sourceDocumentName: selectedDocumentFilename

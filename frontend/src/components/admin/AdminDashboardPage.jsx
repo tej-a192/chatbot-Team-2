@@ -8,14 +8,14 @@ import IconButton from '../core/IconButton.jsx';
 import Modal from '../core/Modal.jsx';
 import ApiKeyRequestManager from './ApiKeyRequestManager.jsx';
 import UserChatManager from './UserChatManager.jsx';
-import AdminInsights from './AdminInsights.jsx'; // <<< NEW IMPORT
+import AdminInsights from './AdminInsights.jsx';
 import { UploadCloud, Trash2, Eye, LogOut, Loader2, AlertTriangle, CheckCircle, RefreshCw, Shield, Users, Lightbulb, HelpCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-// Helper functions (same as before)
+// Helper functions
 const localParseAnalysisOutput = (rawOutput) => { 
     if (!rawOutput || typeof rawOutput !== 'string') return { content: '' };
     const thinkingMatch = rawOutput.match(/<thinking>([\s\S]*?)<\/thinking>/i);
@@ -32,7 +32,7 @@ const createMarkup = (markdownText) => {
     return { __html: cleanHtml };
 };
 
-// AdminDocumentUpload Component (no changes)
+// AdminDocumentUpload Component
 function AdminDocumentUpload({ onUploadSuccess }) {
     const [selectedFile, setSelectedFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
@@ -74,17 +74,12 @@ function AdminDashboardPage() {
     const { setIsAdminSessionActive } = useAppState();
     const navigate = useNavigate();
 
-    // Data states
     const [documents, setDocuments] = useState([]);
     const [keyRequests, setKeyRequests] = useState([]);
     const [usersWithChats, setUsersWithChats] = useState([]);
     const [dashboardStats, setDashboardStats] = useState({});
-
-    // Loading states
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [loadingError, setLoadingError] = useState('');
-
-    // Modal states
     const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
     const [currentDocForModal, setCurrentDocForModal] = useState(null);
     const [analysisContent, setAnalysisContent] = useState(null);
@@ -113,13 +108,13 @@ function AdminDashboardPage() {
                 adminApi.getAdminDocuments(authHeaders),
                 adminApi.getApiKeyRequests(authHeaders),
                 adminApi.getUsersAndChats(authHeaders),
-                adminApi.getDashboardStats(authHeaders) // <<< NEW API CALL
+                adminApi.getDashboardStats(authHeaders)
             ]);
 
             setDocuments(Array.isArray(docsResponse.documents) ? docsResponse.documents : []);
             setKeyRequests(Array.isArray(requestsResponse) ? requestsResponse : []);
             setUsersWithChats(Array.isArray(usersResponse) ? usersResponse : []);
-            setDashboardStats(statsResponse || {}); // <<< SET STATS
+            setDashboardStats(statsResponse || {});
 
             if (isRefresh) toast.success("Admin data refreshed.", { id: toastId });
         } catch (err) {
@@ -141,7 +136,7 @@ function AdminDashboardPage() {
             const authHeaders = adminApi.getFixedAdminAuthHeaders();
             await adminApi.deleteAdminDocument(serverFilename, authHeaders);
             toast.success(`Document "${originalName}" deleted.`, { id: toastId });
-            fetchAdminData(true); // Refresh all data after delete
+            fetchAdminData(true);
             if (isAnalysisModalOpen && currentDocForModal?.serverFilename === serverFilename) {
                 setIsAnalysisModalOpen(false);
             }
@@ -150,7 +145,7 @@ function AdminDashboardPage() {
         }
     };
     
-    const handleViewAnalysis = async (doc) => { /* ...no changes... */ 
+    const handleViewAnalysis = async (doc) => {
         setCurrentDocForModal(doc);
         setAnalysisContent(null);
         setIsAnalysisModalOpen(true);
@@ -167,7 +162,7 @@ function AdminDashboardPage() {
         }
     };
     
-    const renderAnalysisModalContent = () => { /* ...no changes... */ 
+    const renderAnalysisModalContent = () => {
         if (isLoadingAnalysis) {
             return (
                 <div className="flex justify-center items-center h-48">
@@ -207,7 +202,6 @@ function AdminDashboardPage() {
             <AdminInsights stats={dashboardStats} isLoading={isInitialLoading} error={loadingError} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* --- Column 1: Content Management --- */}
                 <div className="space-y-6">
                     <AdminDocumentUpload onUploadSuccess={() => fetchAdminData(true)} />
 
@@ -246,7 +240,6 @@ function AdminDashboardPage() {
                     </div>
                 </div>
 
-                {/* --- Column 2: Insights & Enhancement Tools --- */}
                 <div className="space-y-6">
                     <div className="card-base p-4">
                         <h2 className="text-lg font-semibold mb-3 text-text-light dark:text-text-dark flex items-center gap-2">
