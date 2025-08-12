@@ -41,7 +41,7 @@ function AuthModal({ isOpen, onClose, initialViewIsLogin }) {
         degreeType: 'Bachelors',
         branch: 'Computer Science',
         year: '1st Year',
-        learningStyle: 'Visual',
+        learningStyle: 'Reading/Writing',
         currentGoals: ''
     });
 
@@ -68,7 +68,7 @@ function AuthModal({ isOpen, onClose, initialViewIsLogin }) {
                 degreeType: 'Bachelors',
                 branch: 'Computer Science',
                 year: '1st Year',
-                learningStyle: 'Visual',
+                learningStyle: 'Reading/Writing',
                 currentGoals: ''
             });
         }
@@ -186,9 +186,9 @@ const handleBack = () => {
                 <div className={inputWrapperClass}>
                     <Lightbulb className={inputIconClass} />
                     <select name="learningStyle" value={formData.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Reading/Writing (detailed text)</option>
                         <option>Visual (diagrams, mind maps)</option>
                         <option>Auditory (podcasts, explanations)</option>
-                        <option>Reading/Writing (detailed text)</option>
                         <option>Kinesthetic (hands-on examples, code)</option>
                     </select>
                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
