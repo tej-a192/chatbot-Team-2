@@ -87,32 +87,44 @@ function configure_environment() {
 
     # Create server/.env with placeholders for secrets
     cat > server/.env << EOL
-PORT=5001
+#server env
+
+PORT=2000
 MONGO_URI="mongodb://localhost:27017/chatbot_gemini"
-JWT_SECRET="GENERATE_A_STRONG_RANDOM_SECRET_KEY_HERE"
-GEMINI_API_KEY="ADD_YOUR_GOOGLE_GEMINI_API_KEY_HERE"
-PROMPT_COACH_GEMINI_MODEL=gemini-1.5-flash-latest
-PROMPT_COACH_OLLAMA_MODEL=phi3:mini-instruct
-PYTHON_RAG_SERVICE_URL="http://127.0.0.1:5000"
-OLLAMA_API_BASE_URL="http://localhost:11434"
-OLLAMA_DEFAULT_MODEL="llama3"
-ENCRYPTION_SECRET="GENERATE_A_64_CHAR_HEX_SECRET_HERE_ (e.g., using 'openssl rand -hex 32')"
-SENTRY_DSN="ADD_YOUR_SENTRY_DSN_HERE_OR_LEAVE_BLANK"
-REDIS_URL="redis://localhost:6379"
+JWT_SECRET="your_super_strong_and_secret_jwt_key_12345"
+ENCRYPTION_SECRET="YOUR_ENCRYPTION_SECRET"
+
+# --- Language Model (LLM) APIs ---
+GEMINI_API_KEY="YOUR_ADMIN_API_KEY"
+OLLAMA_API_BASE_URL=""
+OLLAMA_DEFAULT_MODEL="qwen2.5:14b-instruct"
+
+# --- Services ---
+PYTHON_RAG_SERVICE_URL="http://127.0.0.1:2001"
+REDIS_URL="redis://localhost:2005"
+
+# --- Admin credentials for Basic Auth on admin routes ---
 FIXED_ADMIN_USERNAME=admin@admin.com
 FIXED_ADMIN_PASSWORD=admin123
-ELASTICSEARCH_URL=http://localhost:9200
+
+# --- Turnitin Core API Credentials (Optional) ---
+TURNITIN_API_URL="https://your-institution.turnitin.com/api/v1"
+TURNITIN_API_KEY="your_api_key"
+TURNITIN_API_SECRET="your_api_secret"
+
 # --- AWS S3 Credentials for Dataset Management ---
-S3_BUCKET_NAME="ai-tutor-datasets-rohith"
-AWS_ACCESS_KEY_ID="ADD_YOUR_AWS_ACCESS_KEY_ID_HERE"
-AWS_SECRET_ACCESS_KEY="ADD_YOUR_AWS_SECRET_ACCESS_KEY_HERE"
+S3_BUCKET_NAME=""
+AWS_ACCESS_KEY_ID=""
+AWS_SECRET_ACCESS_KEY=""
 AWS_REGION="us-east-1"
+
+SENTRY_DSN="ADD_YOUR_SENTRY_DSN"
 EOL
     echo -e "${GREEN}[SUCCESS] Created server/.env with placeholders.${NC}"
 
     # Create frontend/.env
     cat > frontend/.env << EOL
-VITE_API_BASE_URL=http://localhost:5001/api
+VITE_API_BASE_URL=http://localhost:2000/api
 VITE_ADMIN_USERNAME=admin@admin.com
 VITE_ADMIN_PASSWORD=admin123
 EOL

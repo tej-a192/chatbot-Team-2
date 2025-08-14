@@ -9,6 +9,7 @@ export default defineConfig({
     basicSsl() // <-- Add the plugin here
   ],
   server: {
+    port: 2002,
     https: true, // <-- Enable HTTPS
     host: true,  // <-- Make it accessible on the LAN
   },
