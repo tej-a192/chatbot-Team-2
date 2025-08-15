@@ -6,6 +6,7 @@ const axios = require('axios');
 const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 router.get('/visualize/:documentName', async (req, res) => {
     const { documentName } = req.params;
@@ -93,6 +94,9 @@ router.get('/session/:sessionId', async (req, res) => {
     const getKgUrl = `${pythonServiceUrl}/kg/${userId}/${encodeURIComponent(sessionId)}`;
 
     try {
+        auditLog(req, 'TOOL_USAGE_LIVE_CONCEPT_MAP', {
+            sessionId: sessionId
+        });
         console.log(`[KG Route] Proxying request to Python service to get KG for session: ${sessionId}`);
         const pythonResponse = await axios.get(getKgUrl, { timeout: 30000 });
         

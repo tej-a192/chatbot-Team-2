@@ -17,7 +17,12 @@ import media_processor
 import aiohttp
 from ddgs import DDGS
 from qdrant_client import models as qdrant_models
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from prometheus_flask_exporter import PrometheusMetrics
 
+# import threading
+# import fine_tuner
 # --- Add server directory to sys.path ---
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 if SERVER_DIR not in sys.path:
@@ -40,7 +45,7 @@ try:
     import quiz_utils
     from academic_search import search_all_apis as academic_search
     from integrity_services import submit_to_turnitin, get_turnitin_report, check_bias_hybrid, calculate_readability
-    import asyncio
+    import asyncio # <<< THIS IS THE FIX (Step 1)
 
     if config.GEMINI_API_KEY:
         genai.configure(api_key=config.GEMINI_API_KEY)
@@ -90,7 +95,31 @@ except ImportError as e:
     sys.exit(1)
 
 logger = logging.getLogger(__name__)
+
+if config.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=config.SENTRY_DSN,
+        integrations=[
+            FlaskIntegration(),
+        ],
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        traces_sample_rate=1.0,
+        # Set profiles_sample_rate to 1.0 to profile 100%
+        # of sampled transactions.
+        # We recommend adjusting this value in production.
+        profiles_sample_rate=1.0,
+    )
+    logger.info("Sentry initialized successfully for Python RAG service.")
+else:
+    logger.warn("SENTRY_DSN not found in config. Sentry is disabled for Python RAG service.")
+
+
 app = Flask(__name__)
+
+
+metrics = PrometheusMetrics(app)
+logger.info("Prometheus metrics endpoint initialized at /metrics.")
 
 GENERATED_DOCS_DIR = os.path.join(SERVER_DIR, 'generated_docs')
 os.makedirs(GENERATED_DOCS_DIR, exist_ok=True)
@@ -511,7 +540,9 @@ def academic_search_route():
     data = request.get_json()
     if not data or 'query' not in data: return create_error_response("Missing 'query'", 400)
     try:
-        results = academic_search(data['query'], max_results_per_api=data.get('max_results', 3))
+        # <<< STEP 2: THIS IS THE FIX >>>
+        # Use asyncio.run() to execute the async function and get its actual result.
+        results = asyncio.run(academic_search(data['query'], max_results_per_api=data.get('max_results', 3)))
         return jsonify({"success": True, "results": results}), 200
     except Exception as e:
         return create_error_response(f"Academic search failed: {str(e)}", 500)
@@ -808,7 +839,49 @@ def generate_document_from_topic_route():
         logger.error(f"Failed to generate document from topic '{topic}': {e}", exc_info=True)
         return create_error_response(f"Failed to generate document from topic: {str(e)}", 500)
 
+# Test for sentry debug
+# url : http://localhost:5000/debug-sentry-python
+# @app.route('/debug-sentry-python', methods=['GET'])
+# def trigger_python_sentry_error():
+#     # This will cause a deliberate ZeroDivisionError
+#     result = 1 / 0
+#     return "This won't be reached."
+# # @app.route('/finetune', methods=['POST'])
+# # def finetune_route():
+# #     data = request.get_json()
+# #     if not data:
+# #         return create_error_response("Request must be JSON", 400)
+    
+# #     dataset_path = data.get('dataset_path')
+# #     model_name_to_update = data.get('model_name_to_update')
+# #     job_id = data.get('jobId') # <-- GET THE JOB ID FROM NODE.JS
 
+# #     if not all([dataset_path, model_name_to_update, job_id]):
+# #         return create_error_response("Missing 'dataset_path', 'model_name_to_update', or 'jobId'", 400)
+
+# #     logger.info(f"Received fine-tuning request. Job ID: {job_id}. Model to update: {model_name_to_update}.")
+
+# #     # Define the target function for the background thread
+# #     def fine_tuning_task():
+# #         try:
+# #             # Pass all three required arguments to the runner
+# #             fine_tuner.run_fine_tuning(dataset_path, model_name_to_update, job_id)
+# #         except Exception as e:
+# #             logger.error(f"Background fine-tuning job {job_id} failed catastrophically: {e}", exc_info=True)
+# #             # The error is already reported back to Node.js inside the runner
+    
+# #     # Run the fine_tuner.run_fine_tuning function in a separate, non-blocking thread
+# #     thread = threading.Thread(target=fine_tuning_task)
+# #     thread.daemon = True # Allows the main app to exit even if threads are running
+# #     thread.start()
+
+# #     # Immediately respond to the Node.js service
+# #     return jsonify({
+# #         "message": "Fine-tuning job has been successfully queued and is running in the background.",
+# #         "jobId": job_id,
+# #         "model_tag": model_name_to_update
+# #     }), 202 # 202 Accepted indicates the request is accepted but processing is not complete
+# # # --- END MODIFICATION ---
 
 if __name__ == '__main__':
     @app.route('/process_media_file', methods=['POST'])

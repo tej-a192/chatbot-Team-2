@@ -74,3 +74,52 @@ export const approveApiKeyRequest = (userId) => makeAdminApiRequest('post', '/ke
 export const rejectApiKeyRequest = (userId) => makeAdminApiRequest('post', '/key-requests/reject', { userId });
 
 export const getUsersAndChats = () => makeAdminApiRequest('get', '/users-with-chats');
+
+export const getLlmConfigs = () => makeAdminApiRequest('get', '/llms');
+export const createLlmConfig = (data) => makeAdminApiRequest('post', '/llms', data);
+export const updateLlmConfig = (id, data) => makeAdminApiRequest('put', `/llms/${id}`, data);
+export const deleteLlmConfig = (id) => makeAdminApiRequest('delete', `/llms/${id}`);
+
+export const getFeedbackStats = () => makeAdminApiRequest('get', '/feedback-stats');
+
+
+// --- NEW DATASET MANAGEMENT API FUNCTIONS ---
+export const getDatasets = () => makeAdminApiRequest('get', '/datasets');
+
+export const getPresignedUploadUrl = (fileName, fileType) => makeAdminApiRequest('post', '/datasets/presigned-url', { fileName, fileType });
+
+export const finalizeUpload = (datasetMetadata) => makeAdminApiRequest('post', '/datasets/finalize-upload', datasetMetadata);
+
+export const getPresignedDownloadUrl = (datasetId) => makeAdminApiRequest('get', `/datasets/${datasetId}/download-url`);
+
+export const deleteDataset = (datasetId) => makeAdminApiRequest('delete', `/datasets/${datasetId}`);
+
+export const getUserEngagementStats = () => makeAdminApiRequest('get', '/analytics/user-engagement');
+
+export const getContentInsightStats = () => makeAdminApiRequest('get', '/analytics/content-insights');
+
+export const getFeatureUsageStats = () => makeAdminApiRequest('get', '/analytics/feature-usage');
+
+export const getCodeExecutorUsage = () => makeAdminApiRequest('get', '/analytics/code-executor-usage');
+
+export const getLlmUsageStats = () => makeAdminApiRequest('get', '/analytics/llm-usage');
+
+export const getPptxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/pptx-generated-count');
+
+export const getDocxGeneratedCount = () => makeAdminApiRequest('get', '/analytics/docx-generated-count');
+
+export const getActiveUsersToday = () => makeAdminApiRequest('get', '/analytics/active-users-today');
+
+export const getTotalQueries = () => makeAdminApiRequest('get', '/analytics/total-queries');
+
+export const getTotalSources = () => makeAdminApiRequest('get', '/analytics/total-sources');
+
+export const getNegativeFeedback = () => makeAdminApiRequest('get', '/negative-feedback');
+
+
+export const startFineTuningJob = (payload) => {
+    // This function is now using the robust makeAdminApiRequest helper.
+    // The endpoint is relative to /api/admin, so we just need /finetuning/start
+    return makeAdminApiRequest('post', '/finetuning/start', payload);
+};
+    

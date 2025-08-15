@@ -10,9 +10,99 @@ const User = require('../models/User');
 const ChatHistory = require('../models/ChatHistory');
 const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 const { redisClient } = require('../config/redisClient');
+const LLMConfiguration = require('../models/LLMConfiguration'); 
 const { encrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog'); 
 
 const router = express.Router();
+
+
+/* ====== Model feedback routes ======= */
+
+// @route   GET /api/admin/feedback-stats
+// @desc    Get aggregated feedback stats for each model
+router.get('/feedback-stats', async (req, res) => {
+    try {
+        const stats = await LLMPerformanceLog.aggregate([
+            {
+                $group: {
+                    _id: '$chosenModelId', // Group by the model's ID
+                    positive: { $sum: { $cond: [{ $eq: ['$userFeedback', 'positive'] }, 1, 0] } },
+                    negative: { $sum: { $cond: [{ $eq: ['$userFeedback', 'negative'] }, 1, 0] } },
+                    none: { $sum: { $cond: [{ $eq: ['$userFeedback', 'none'] }, 1, 0] } },
+                    total: { $sum: 1 }
+                }
+            },
+            {
+                $project: { // Reshape the output
+                    modelId: '$_id',
+                    feedback: {
+                        positive: '$positive',
+                        negative: '$negative',
+                        none: '$none'
+                    },
+                    totalResponses: '$total',
+                    _id: 0
+                }
+            }
+        ]);
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching feedback stats:', error);
+        res.status(500).json({ message: 'Server error while fetching feedback stats.' });
+    }
+});
+/* ====== END Model feedback routes ===== */
+
+/* ====== LLM Management Routes ====== */
+
+// GET /api/admin/llms - List all LLM configurations
+router.get('/llms', async (req, res) => {
+    try {
+        const configs = await LLMConfiguration.find();
+        res.json(configs);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to fetch LLM configurations.' });
+    }
+});
+
+// POST /api/admin/llms - Create a new LLM configuration
+router.post('/llms', async (req, res) => {
+    try {
+        const newConfig = new LLMConfiguration(req.body);
+        await newConfig.save();
+        res.status(201).json(newConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to create LLM configuration.', error: error.message });
+    }
+});
+
+// PUT /api/admin/llms/:id - Update an LLM configuration
+router.put('/llms/:id', async (req, res) => {
+    try {
+        const updatedConfig = await LLMConfiguration.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!updatedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json(updatedConfig);
+    } catch (error) {
+        res.status(400).json({ message: 'Failed to update LLM configuration.', error: error.message });
+    }
+});
+
+// DELETE /api/admin/llms/:id - Delete an LLM configuration
+router.delete('/llms/:id', async (req, res) => {
+    try {
+        const deletedConfig = await LLMConfiguration.findByIdAndDelete(req.params.id);
+        if (!deletedConfig) return res.status(404).json({ message: 'LLM configuration not found.' });
+        res.json({ message: 'LLM configuration deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to delete LLM configuration.' });
+    }
+});
+
+
+/* ====== END LLM Managemet Routes =====  */
+
 const CACHE_DURATION_SECONDS = 30; 
 // --- NEW Dashboard Stats Route ---
 // @route   GET /api/admin/dashboard-stats
@@ -81,6 +171,10 @@ router.post("/key-requests/approve", async (req, res) => {
 
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_APPROVE', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -114,6 +208,10 @@ router.post("/key-requests/reject", async (req, res) => {
     user.apiKeyRequestStatus = "rejected";
     await user.save();
 
+    auditLog(req, 'ADMIN_API_KEY_REJECT', {
+        targetUserId: userId,
+        targetUserEmail: user.email
+    });
     // --- NEW: Invalidate Redis Cache for pending requests and dashboard stats ---
     if (redisClient && redisClient.isOpen) {
         await redisClient.del('__express__/api/admin/key-requests').catch(err => console.error("Redis DEL error:", err));
@@ -271,16 +369,23 @@ router.post(
       }
 
       adminDocRecord = new AdminDocument({
-        filename: serverFilename,
-        originalName: originalName,
-        text: ragResult.text,
-      });
-      await adminDocRecord.save();
-      await fsPromises.unlink(tempServerPath);
+      filename: serverFilename,
+      originalName: originalName,
+      text: ragResult.text,
+    });
+    await adminDocRecord.save();
+    await fsPromises.unlink(tempServerPath);
 
-      res.status(202).json({
-        message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
-      });
+    // --- ADDED AUDIT LOG ---
+    auditLog(req, 'ADMIN_DOCUMENT_UPLOAD_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
+    // --- END ---
+
+    res.status(202).json({
+      message: `Admin document '${originalName}' uploaded. Background processing initiated.`,
+    });
 
       const { Worker } = require("worker_threads");
       const analysisWorker = new Worker(
@@ -305,7 +410,7 @@ router.post(
           path.resolve(__dirname, "..", "workers", "kgWorker.js"),
           {
             workerData: {
-              adminDocumentId: adminDocRecord._id.toString(),
+              sourceId: adminDocRecord._id.toString(), // <-- This is the new, correct property
               userId: "admin",
               originalName: originalName,
               chunksForKg: ragResult.chunksForKg,
@@ -393,6 +498,11 @@ router.delete("/documents/:serverFilename", async (req, res) => {
       originalName
     );
     await AdminDocument.deleteOne({ _id: docToDelete._id });
+
+    auditLog(req, 'ADMIN_DOCUMENT_DELETE_SUCCESS', {
+        originalName: originalName,
+        serverFilename: serverFilename
+    });
 
     res
       .status(200)
@@ -513,6 +623,23 @@ router.get('/users-with-chats',cacheMiddleware(CACHE_DURATION_SECONDS), async (r
     } catch (error) {
         console.error('Error fetching users with chat summaries:', error);
         res.status(500).json({ message: 'Server error while fetching user chat data.' });
+    }
+});
+
+
+// @route   GET /api/admin/negative-feedback
+// @desc    Get all log entries with negative feedback
+router.get('/negative-feedback', async (req, res) => {
+    try {
+        const negativeFeedback = await LLMPerformanceLog.find({ userFeedback: 'negative' })
+            .populate('userId', 'email') // Optionally get user email
+            .sort({ createdAt: -1 })
+            .limit(100); // Limit to the last 100 to prevent performance issues
+
+        res.json(negativeFeedback);
+    } catch (error) {
+        console.error('Error fetching negative feedback logs:', error);
+        res.status(500).json({ message: 'Server error while fetching negative feedback.' });
     }
 });
 

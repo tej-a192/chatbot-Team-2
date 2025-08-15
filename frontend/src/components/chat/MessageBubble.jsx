@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import Prism from 'prismjs';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb } from 'lucide-react';
+import { ChevronDown, Link as LinkIcon, Zap, Server, Volume2, StopCircle, ServerCrash, Copy, Check, Lightbulb, ThumbsUp, ThumbsDown, ShieldCheck, GitFork, FlaskConical } from 'lucide-react';
 import ThinkingDropdown from './ThinkingDropdown.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech.js';
@@ -12,12 +12,25 @@ import { renderMathInHtml } from '../../utils/markdownUtils';
 import { getPlainTextFromMarkdown } from '../../utils/helpers.js';
 import DOMPurify from 'dompurify';
 import { useTypingEffect } from '../../hooks/useTypingEffect.js';
+import api from '../../services/api.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
 const createMarkup = (markdownText) => {
     if (!markdownText) return { __html: '' };
-    let rawHtml = marked.parse(markdownText);
+    
+    let processedText = markdownText.trim();
+
+    if (processedText.startsWith('```markdown') && processedText.endsWith('```')) {
+        processedText = processedText.substring('```markdown'.length, processedText.length - 3).trim();
+    } else if (processedText.startsWith('```') && processedText.endsWith('```')) {
+        const firstNewLine = processedText.indexOf('\n');
+        if (firstNewLine !== -1) {
+            processedText = processedText.substring(firstNewLine + 1, processedText.length - 3).trim();
+        }
+    }
+    
+    let rawHtml = marked.parse(processedText);
     rawHtml = renderMathInHtml(rawHtml);
     const cleanHtml = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true, mathMl: true, svg: true } });
     return { __html: cleanHtml };
@@ -68,7 +81,7 @@ const CodeBlockWithCopyButton = ({ children, codeText, key }) => {
         if (codeRef.current) {
             Prism.highlightAllUnder(codeRef.current);
         }
-    }, [children]);
+    }, [children, copied]);
 
     const handleCopyCode = () => {
         navigator.clipboard.writeText(codeText).then(() => {
@@ -165,10 +178,54 @@ const parseAndRenderMarkdown = (markdownText, messageId) => {
     return resultNodes;
 };
 
+const CriticalThinkingCue = ({ icon: Icon, label, text, color, onClick }) => {
+    const colorClasses = {
+        sky: {
+            bg: "bg-primary/5 dark:bg-primary/10",
+            text: "text-text-light dark:text-text-dark",
+            hoverBg: "hover:bg-primary/10 dark:hover:bg-primary/20",
+            iconText: "text-primary dark:text-primary-light",
+        },
+        amber: {
+            bg: "bg-primary/5 dark:bg-primary/10",
+            text: "text-text-light dark:text-text-dark",
+            hoverBg: "hover:bg-primary/10 dark:hover:bg-primary/20",
+            iconText: "text-primary dark:text-primary-light",
+        },
+        emerald: {
+            bg: "bg-primary/5 dark:bg-primary/10",
+            text: "text-text-light dark:text-text-dark",
+            hoverBg: "hover:bg-primary/10 dark:hover:bg-primary/20",
+            iconText: "text-primary dark:text-primary-light",
+        }
+    };
+    const styles = colorClasses[color] || colorClasses.sky;
 
-function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId }) {
+    return (
+        <motion.button
+            variants={{
+                hidden: { opacity: 0, y: 10 },
+                visible: { opacity: 1, y: 0 }
+            }}
+            onClick={onClick}
+            className={`w-full text-left p-2.5 rounded-lg transition-colors duration-200 ${styles.bg} ${styles.hoverBg}`}
+        >
+            <div className="flex items-center gap-2 mb-1">
+                <Icon size={16} className={styles.iconText} />
+                <span className={`text-xs font-bold ${styles.text}`}>{label}</span>
+            </div>
+            <p className={`text-xs ${styles.text}`}>{text}</p>
+        </motion.button>
+    );
+};
+
+
+
+
+function MessageBubble({ sender, text, thinking, references, timestamp, sourcePipeline, isStreaming, criticalThinkingCues, onCueClick, messageId, logId }) {
     const isUser = sender === 'user';
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [feedbackSent, setFeedbackSent] = useState(null);
     const contentRef = useRef(null);
     const { speak, cancel, isSpeaking } = useTextToSpeech();
     
@@ -186,6 +243,18 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
         }
     }, [isStreaming, mainContent]);
 
+    const handleFeedback = async (feedbackType) => {
+        if (feedbackSent) return; // Prevent multiple submissions
+        setFeedbackSent(feedbackType);
+        try {
+            await api.submitFeedback(logId, feedbackType);
+            toast.success('Thanks for your feedback!');
+        } catch (error) {
+            toast.error('Could not submit feedback.');
+            setFeedbackSent(null); // Allow user to try again
+        }
+    };
+
     const handleCopy = () => {
         if (isCopied) return;
         const plainTextToCopy = getPlainTextFromMarkdown(mainContent);
@@ -199,7 +268,11 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
         });
     };
 
-    const formatTimestamp = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const formatTimestamp = (ts) => {
+        if (!ts) return ''; 
+        return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
     const getPipelineIcon = () => {
         if (!sourcePipeline) return null;
         const lower = sourcePipeline.toLowerCase();
@@ -248,6 +321,27 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
                                     </motion.div>
                                 </AnimatePresence>
                             </button>
+
+                            {!isUser && logId && (
+                                <div className="flex items-center gap-0.5 ml-2 border-l border-border-light dark:border-border-dark pl-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    <IconButton
+                                        icon={ThumbsUp}
+                                        onClick={() => handleFeedback('positive')}
+                                        disabled={!!feedbackSent}
+                                        title="Good response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'positive' ? 'text-green-500 bg-green-500/10' : 'hover:text-green-500'}`}
+                                    />
+                                    <IconButton
+                                        icon={ThumbsDown}
+                                        onClick={() => handleFeedback('negative')}
+                                        disabled={!!feedbackSent}
+                                        title="Bad response"
+                                        size="sm"
+                                        className={`p-1 ${feedbackSent === 'negative' ? 'text-red-500 bg-red-500/10' : 'hover:text-red-500'}`}
+                                    />
+                                </div>
+                            )}
                             <div className="flex items-center gap-2 pl-1 opacity-70">
                                 {!isUser && getPipelineIcon() && <span className="mr-1">{getPipelineIcon()}</span>}
                                 <span>{formatTimestamp(timestamp)}</span>
@@ -285,41 +379,55 @@ function MessageBubble({ sender, text, thinking, references, timestamp, sourcePi
             )}
             
             {!isStreaming && !isUser && criticalThinkingCues && (
-                <div className="max-w-[85%] md:max-w-[75%] w-full mt-2 pl-2 animate-fadeIn">
+                <motion.div 
+                    initial="hidden"
+                    animate="visible"
+                    variants={{
+                        visible: {
+                            transition: {
+                                staggerChildren: 0.1
+                            }
+                        }
+                    }}
+                    className="max-w-[85%] md:max-w-[75%] w-full mt-2 pl-2"
+                >
                     <div className="border-t border-dashed border-border-light dark:border-border-dark pt-2">
                         <h4 className="text-xs font-semibold text-text-muted-light dark:text-text-muted-dark flex items-center gap-1.5 mb-2">
                             <Lightbulb size={14} />
                             Critical Thinking Prompts
                         </h4>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="space-y-2">
                             {criticalThinkingCues.verificationPrompt && (
-                                <button
+                                <CriticalThinkingCue
                                     onClick={() => onCueClick(criticalThinkingCues.verificationPrompt)}
-                                    className="text-xs bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 px-2.5 py-1 rounded-full hover:bg-sky-500/20 dark:hover:bg-sky-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.verificationPrompt}
-                                </button>
+                                    icon={ShieldCheck}
+                                    label="Verify & Validate"
+                                    text={criticalThinkingCues.verificationPrompt}
+                                    color="sky"
+                                />
                             )}
                             {criticalThinkingCues.alternativePrompt && (
-                                <button
+                                <CriticalThinkingCue
                                     onClick={() => onCueClick(criticalThinkingCues.alternativePrompt)}
-                                    className="text-xs bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-1 rounded-full hover:bg-amber-500/20 dark:hover:bg-amber-500/30 transition-colors"
-                                >
-                                    {criticalThinkingCues.alternativePrompt}
-                                    </button>
-                                )}
-                                {criticalThinkingCues.applicationPrompt && (
-                                    <button
-                                        onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
-                                        className="text-xs bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1 rounded-full hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-colors"
-                                    >
-                                        {criticalThinkingCues.applicationPrompt}
-                                    </button>
-                                )}
-                            </div>
+                                    icon={GitFork}
+                                    label="Consider Alternatives"
+                                    text={criticalThinkingCues.alternativePrompt}
+                                    color="amber"
+                                />
+                            )}
+                            {criticalThinkingCues.applicationPrompt && (
+                                <CriticalThinkingCue
+                                    onClick={() => onCueClick(criticalThinkingCues.applicationPrompt)}
+                                    icon={FlaskConical}
+                                    label="Apply Your Knowledge"
+                                    text={criticalThinkingCues.applicationPrompt}
+                                    color="emerald"
+                                />
+                            )}
                         </div>
                     </div>
-                )}
+                </motion.div>
+            )}
             </div>
         );
     }

@@ -2,12 +2,79 @@
 import os
 import logging
 from dotenv import load_dotenv
+from pythonjsonlogger import jsonlogger
+from datetime import datetime, timezone
 
 # --- Load .env from the parent 'server' directory ---
-# This ensures that both Node.js and Python use the same .env file
-# The path is calculated relative to this config.py file
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+
+class JsonFormatterWithMilliseconds(jsonlogger.JsonFormatter):
+    """
+    A custom JSON formatter that correctly formats timestamps with milliseconds and a 'Z' for UTC.
+    This overrides the default formatTime method which uses a function that doesn't support %f.
+    """
+    def formatTime(self, record, datefmt=None):
+        # Use the record's creation time and make it timezone-aware (UTC)
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        
+        # Format it to ISO 8601 with milliseconds, then replace the timezone info with 'Z'
+        # Example: 2024-01-01T12:34:56.123456+00:00 -> 2024-01-01T12:34:56.123Z
+        return dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+def setup_logging():
+    """Configure logging to output structured, standardized JSON to a dedicated log file."""
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            root_logger.removeHandler(handler)
+
+    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    # --- CHANGE 1: Dedicated log file ---
+    log_file_path = os.path.join(log_dir, 'python-rag.log')
+    
+    formatter = JsonFormatterWithMilliseconds(
+        '%(asctime)s %(levelname)s %(name)s %(lineno)d %(message)s %(service)s',
+        rename_fields={
+            'asctime': '@timestamp',
+            'levelname': 'log.level',
+            'name': 'log.logger',
+            'lineno': 'log.origin.file.line',
+            'service': 'service.name'
+        }
+    )
+    
+    class ServiceContextFilter(logging.Filter):
+        def filter(self, record):
+            # Standardize log level to lowercase
+            record.levelname = record.levelname.lower()
+            record.service = "ai-tutor-python-rag"
+            return True
+
+    service_filter = ServiceContextFilter()
+    
+    file_handler = logging.FileHandler(log_file_path, mode='a')
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(service_filter)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.addFilter(service_filter)
+    root_logger.addHandler(console_handler)
+    
+    LOGGING_LEVEL = os.getenv('LOGGING_LEVEL', 'INFO').upper()
+    root_logger.setLevel(LOGGING_LEVEL)
+    
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    init_logger = logging.getLogger(__name__)
+    init_logger.info(f"Python logging initialized and standardized. Appending to: {log_file_path}")
+
+setup_logging()
 
 
 # ─── Logging Configuration ───────────────────────────
@@ -16,36 +83,22 @@ LOGGING_LEVEL_NAME = os.getenv('LOGGING_LEVEL', 'INFO').upper()
 LOGGING_LEVEL      = getattr(logging, LOGGING_LEVEL_NAME, logging.INFO)
 LOGGING_FORMAT     = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
 
-def setup_logging():
-    """Configure logging across the app."""
-    root_logger = logging.getLogger()
-    if not root_logger.handlers:  # prevent duplicate handlers
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(LOGGING_FORMAT)
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
-        root_logger.setLevel(LOGGING_LEVEL)
-
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("faiss.loader").setLevel(logging.WARNING)
-    logging.getLogger(__name__).info(f"Logging initialized at {LOGGING_LEVEL_NAME}")
 
 # --- API Keys and Service URLs ---
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or your preferred Gemini model
-
+SENTRY_DSN = os.getenv('SENTRY_DSN')
 TURNITIN_API_URL = os.getenv('TURNITIN_API_URL')
 TURNITIN_API_KEY = os.getenv('TURNITIN_API_KEY')
 TURNITIN_API_SECRET = os.getenv('TURNITIN_API_SECRET')
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:8768")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 7000))
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "my_qdrant_rag_collection")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 QDRANT_URL = os.getenv("QDRANT_URL", None)
@@ -81,7 +134,7 @@ QDRANT_SEARCH_MIN_RELEVANCE_SCORE = float(os.getenv("QDRANT_SEARCH_MIN_RELEVANCE
 SPACY_MODEL_NAME = os.getenv('SPACY_MODEL_NAME', 'en_core_web_sm')
 
 # --- API Port Configuration ---
-API_PORT = int(os.getenv('API_PORT', 5000))
+API_PORT = int(os.getenv('API_PORT', 2001))
 
 # --- Tesseract OCR Path ---
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')

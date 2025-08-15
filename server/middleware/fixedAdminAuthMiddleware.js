@@ -1,8 +1,9 @@
 // server/middleware/fixedAdminAuthMiddleware.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') }); // Ensure .env from server directory is loaded
+const { auditLog } = require('../utils/logger');
 
-const ADMIN_USERNAME = process.env.FIXED_ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD || 'admin123';
+const ADMIN_USERNAME = process.env.FIXED_ADMIN_USERNAME
+const ADMIN_PASSWORD = process.env.FIXED_ADMIN_PASSWORD
 
 const fixedAdminAuthMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -32,13 +33,11 @@ const fixedAdminAuthMiddleware = (req, res, next) => {
     const [username, password] = decodedCreds.split(':', 2); // Split into max 2 parts
 
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-        // Attach a simple admin context to the request object
-        // This isn't a full user object from DB, just an indicator
         req.adminUser = { 
             username: ADMIN_USERNAME, 
-            id: "fixed_admin_id_marker" // A placeholder ID
+            id: "fixed_admin_id_marker"
         }; 
-        return next(); // Authentication successful, proceed to the route handler
+        return next(); // Authentication successful, proceed.
     }
 
     // Authentication failed

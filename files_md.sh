@@ -1,13 +1,45 @@
 #!/bin/bash
 
 # --- Configuration ---
-START_DIR="."                 # Directory to start searching from (default: current directory)
-MAX_DEPTH=6                   # Max depth for find (0=start_dir, 1=immediate children, ..., 6 includes files 5 levels deep)
-OUTPUT_FILE="code.txt" # Name of the final Markdown file
-declare -a IGNORE_DIRS=("node_modules" "assets" "backup_assets" ".git" ".vscode" "dist" "build" "venv")
-declare -a INCLUDE_EXTENSIONS=("py" "js" "jsx" "py" "ts" "tsx" "css" "scss" "html" "txt" "env"  ) # Add file extensions to include
+START_DIR="."                   # Directory to start searching from (default: current directory)
+MAX_DEPTH=6                     # Max depth for find (0=start_dir, 1=immediate children, ..., 6 includes files 5 levels deep)
+OUTPUT_FILE="code.txt"          # Name of the final output file
 
-# --- Script Logic ---
+# Directories to completely ignore. The `-prune` option will prevent `find` from even entering them.
+declare -a IGNORE_DIRS=(
+  "node_modules"
+  "assets"
+  "backup_assets"
+  "generated_docs"
+  ".git"
+  ".vscode"
+  ".vite"
+  "dist"
+  "build"
+  "venv"
+)
+
+# File extensions to include in the output.
+# MODIFIED: Added md, yml, json, sh to capture documentation, config, and script files.
+declare -a INCLUDE_EXTENSIONS=(
+  "css"
+  "env"
+  "html"
+  "js"
+  "jsx"
+  "json"
+  "md"
+  "py"
+  "scss"
+  "sh"
+  "ts"
+  "tsx"
+  "txt"
+  "yml"
+)
+
+
+# --- Script Logic (Flow is identical to original) ---
 
 # Check if start directory exists
 if [ ! -d "$START_DIR" ]; then
@@ -54,9 +86,10 @@ fi
 echo "Created/Cleared output file: $OUTPUT_FILE"
 
 echo "Starting file search in '$START_DIR' up to depth ${MAX_DEPTH}..."
+echo "Ignoring directories: ${IGNORE_DIRS[*]}"
+echo "Including extensions: ${INCLUDE_EXTENSIONS[*]}"
 
 # Use process substitution and a while loop for robust filename handling
-# find . -maxdepth 6 \( -name node_modules -o -name assets \) -prune -o \( -type f \( -name '*.py' -o -name '*.js' \) \) -print0
 find "$START_DIR" -maxdepth "$MAX_DEPTH" \
   "${ignore_opts[@]}" \
   -o \
@@ -89,22 +122,20 @@ find "$START_DIR" -maxdepth "$MAX_DEPTH" \
       *) lang="" ;;   # Default: no specific language hint
     esac
 
-    # Append to the Markdown file
+    # Append to the output file
     {
-      # Print the file path - using backticks for emphasis
+      # Print the file path
       printf '`%s`\n\n' "$clean_file"
       # Print the opening code fence with language hint
       printf '```%s\n' "$lang"
       # Print the file content
-      cat "$file" # Use original $file here which is guaranteed to exist
+      cat "$file"
       # Print the closing code fence and add extra newlines for separation
       printf '\n```\n\n'
     } >> "$OUTPUT_FILE"
 
 done
 
-echo "Markdown generation complete: $OUTPUT_FILE"
+echo "Script complete. Output generated: $OUTPUT_FILE"
 
-# tree -a -I 'node_modules|.git|backup_assets|assets' $START_DIR --> o.txt
-
-# exit 0
+exit 0

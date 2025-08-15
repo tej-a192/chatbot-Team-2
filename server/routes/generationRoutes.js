@@ -6,10 +6,16 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { decrypt } = require('../utils/crypto');
+const { auditLog } = require('../utils/logger');
 
 router.post('/document', async (req, res) => {
     const { markdownContent, docType, sourceDocumentName } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'CONTENT_GENERATION_FROM_SOURCE_SUCCESS', {
+        docType: docType,
+        sourceDocumentName: sourceDocumentName
+    });
 
     if (!markdownContent || !docType || !sourceDocumentName) {
         return res.status(400).json({ message: 'markdownContent, docType, and sourceDocumentName are required.' });
@@ -70,6 +76,12 @@ router.post('/document', async (req, res) => {
         pythonResponse.data.pipe(res);
 
     } catch (error) {
+        auditLog(req, 'CONTENT_GENERATION_FROM_SOURCE_FAILURE', {
+            docType: docType,
+            sourceDocumentName: sourceDocumentName,
+            error: error.message
+        });
+
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document.";
         console.error(`[Generation Route] Error: ${errorMsg}`);
         if (!res.headersSent) {
@@ -81,6 +93,12 @@ router.post('/document', async (req, res) => {
 router.post('/document/from-topic', async (req, res) => {
     const { topic, docType } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'CONTENT_GENERATION_FROM_TOPIC_SUCCESS', {
+        docType: docType,
+        topic: topic
+    });
+
 
     if (!topic || !docType) {
         return res.status(400).json({ message: 'Topic and docType are required.' });
@@ -130,6 +148,12 @@ router.post('/document/from-topic', async (req, res) => {
         // --- END OF FIX ---
 
     } catch (error) {
+        auditLog(req, 'CONTENT_GENERATION_FROM_TOPIC_FAILURE', {
+            docType: docType,
+            topic: topic,
+            error: error.message
+        });
+
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate document from topic.";
         console.error(`[Node Generation] Error for topic '${topic}':`, errorMsg);
         if (!res.headersSent) {

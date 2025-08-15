@@ -19,11 +19,10 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
     const analysisResults = { faq: "", topics: "", mindmap: "" };
     let allIndividualAnalysesSuccessful = true;
 
-    // --- THIS IS THE FIX ---
     // The worker is a system process, so it must use the server's global API key.
     const serverApiKey = process.env.GEMINI_API_KEY;
     if (!serverApiKey) {
-        console.error(`${logPrefix} FATAL: Server's GEMINI_API_KEY is not defined in the worker's environment.`);
+        console.error(`${logPrefix} FATAL: Server's GEMINI_API_KEY is not defined...`);
         // Return a clear error message for all fields
         const errorMessage = "Error generating analysis: Server API key is not configured.";
         return { 
@@ -31,7 +30,6 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
             results: { faq: errorMessage, topics: errorMessage, mindmap: errorMessage }
         };
     }
-    // --- END OF FIX ---
 
     async function generateSingleAnalysis(type, promptContentForLLM) {
         try {
@@ -41,8 +39,8 @@ async function performAdminDocAnalysis(adminDocumentId, originalName, textForAna
             const generatedText = await geminiService.generateContentWithHistory(
                 historyForGemini,
                 promptContentForLLM,
-                null, // No system prompt needed, it's in the user prompt template
-                { apiKey: serverApiKey } // Explicitly pass the server's API key
+                null, 
+                { apiKey: serverApiKey }
             );
 
             if (!generatedText || typeof generatedText !== 'string' || generatedText.trim() === "") {

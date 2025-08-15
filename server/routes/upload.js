@@ -9,6 +9,7 @@ const User = require('../models/User');
 const KnowledgeSource = require('../models/KnowledgeSource');
 const { Worker } = require('worker_threads');
 const { decrypt } = require('../utils/crypto');
+const { logger, auditLog } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -79,6 +80,12 @@ router.post('/', upload.single('file'), async (req, res) => {
         });
         await newSource.save();
 
+        auditLog(req, 'KNOWLEDGE_SOURCE_UPLOAD_SUCCESS', {
+            sourceType: type,
+            originalName: originalName,
+            sizeBytes: req.file.size
+        });
+
         res.status(202).json({ 
             message: "File accepted. Processing has started in the background.",
             source: newSource
@@ -136,6 +143,8 @@ router.post('/', upload.single('file'), async (req, res) => {
 
 
     } catch (error) {
+        
+
         console.error(`Error processing uploaded file '${originalName}':`, error);
         if (newSource) {
             await KnowledgeSource.updateOne({ _id: newSource._id }, {

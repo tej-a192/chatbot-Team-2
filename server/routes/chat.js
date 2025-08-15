@@ -12,6 +12,10 @@ const { decrypt } = require('../utils/crypto');
 const { redisClient } = require('../config/redisClient');
 const { analyzePrompt } = require('../services/promptCoachService');
 const { extractAndStoreKgFromText } = require('../services/kgExtractionService');
+const { logger } = require('../utils/logger');
+const { auditLog } = require('../utils/logger');
+const { selectLLM } = require('../services/llmRouterService');
+const LLMPerformanceLog = require('../models/LLMPerformanceLog');
 const router = express.Router();
 
 
@@ -39,6 +43,8 @@ function doesQuerySuggestRecall(query) {
     return recallKeywords.some(keyword => lowerCaseQuery.includes(keyword));
 }
 
+
+
 router.post('/message', async (req, res) => {
     const {
         query, sessionId, useWebSearch, useAcademicSearch,
@@ -47,6 +53,16 @@ router.post('/message', async (req, res) => {
     } = req.body;
     
     const userId = req.user._id;
+
+    auditLog(req, 'CHAT_MESSAGE_SENT', {
+        queryLength: query.length,
+        useWebSearch: !!useWebSearch,
+        useAcademicSearch: !!useAcademicSearch,
+        criticalThinkingEnabled: !!criticalThinkingEnabled,
+        documentContext: documentContextName || null,
+        llmProvider: req.user?.preferredLlmProvider || 'gemini'
+    });
+
 
     if (!query || typeof query !== 'string' || query.trim() === '') {
         return res.status(400).json({ message: 'Query message text required.' });
@@ -57,6 +73,7 @@ router.post('/message', async (req, res) => {
 
     const userMessageForDb = { role: 'user', parts: [{ text: query }], timestamp: new Date() };
     console.log(`>>> POST /api/chat/message: User=${userId}, Session=${sessionId}, CriticalThinking=${criticalThinkingEnabled}, Query: "${query.substring(0, 50)}..."`);
+    const startTime = Date.now();
 
     try {
         const [chatSession, user] = await Promise.all([
@@ -64,34 +81,26 @@ router.post('/message', async (req, res) => {
             User.findById(userId).select('+encryptedApiKey preferredLlmProvider ollamaModel ollamaUrl').lean()
         ]);
 
-        const llmProvider = user?.preferredLlmProvider || 'gemini';
-        const ollamaModel = user?.ollamaModel || process.env.OLLAMA_DEFAULT_MODEL;
-
+        const historyFromDb = chatSession ? chatSession.messages : [];
+        const chatContext = { userId, subject: documentContextName, chatHistory: historyFromDb, user: user };
+        const { chosenModel, logic: routerLogic } = await selectLLM(query.trim(), chatContext); 
         const llmConfig = {
-            llmProvider,
-            ollamaModel,
+            llmProvider: chosenModel.provider,
+            geminiModel: chosenModel.provider === 'gemini' ? chosenModel.modelId : null,
+            ollamaModel: chosenModel.provider === 'ollama' ? (chosenModel.modelId.includes('/') ? chosenModel.modelId.split('/')[1] : chosenModel.modelId) : null,
             apiKey: user?.encryptedApiKey ? decrypt(user.encryptedApiKey) : null,
             ollamaUrl: user?.ollamaUrl
         };
-
-        const historyFromDb = chatSession ? chatSession.messages : [];
+        
         const summaryFromDb = chatSession ? chatSession.summary || "" : "";
         const historyForLlm = [];
 
         if (summaryFromDb && doesQuerySuggestRecall(query.trim())) {
-            historyForLlm.push({ 
-                role: 'user', 
-                parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] 
-            });
-            historyForLlm.push({ 
-                role: 'model', 
-                parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] 
-            });
+            historyForLlm.push({ role: 'user', parts: [{ text: `CONTEXT (Summary of Past Conversations): """${summaryFromDb}"""` }] });
+            historyForLlm.push({ role: 'model', parts: [{ text: "Understood. I will use this context if the user's query is about our past conversations." }] });
         }
         
-        const formattedDbMessages = historyFromDb.map(msg => ({
-            role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' }))
-        }));
+        const formattedDbMessages = historyFromDb.map(msg => ({ role: msg.role, parts: msg.parts.map(part => ({ text: part.text || '' })) }));
         historyForLlm.push(...formattedDbMessages);
         
         const requestContext = {
@@ -103,114 +112,130 @@ router.post('/message', async (req, res) => {
             ...llmConfig
         };
 
+        let agentResponse;
         if (criticalThinkingEnabled) {
-            console.log(`[Chat Route] Diverting to ToT Orchestrator.`);
-            
+            // --- Logic for STREAMING response ---
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.flushHeaders();
-
-            const accumulatedThoughts = [];
-
-            const interceptingStreamCallback = (eventData) => {
-                if (eventData.type === 'thought' || eventData.type === 'error') {
-                    if (eventData.type === 'thought') {
-                        accumulatedThoughts.push(eventData.content);
-                    }
-                    streamEvent(res, eventData);
-                }
-            };
-
-            const totResult = await processQueryWithToT_Streaming(
-                query.trim(), historyForLlm, requestContext, interceptingStreamCallback
-            );
-
-            const criticalThinkingCues = await generateCues(totResult.finalAnswer, llmConfig);
-
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: totResult.finalAnswer }],
-                text: totResult.finalAnswer,
-                timestamp: new Date(),
-                thinking: accumulatedThoughts.join(''),
-                references: totResult.references || [],
-                source_pipeline: totResult.sourcePipeline,
-                criticalThinkingCues: criticalThinkingCues
-            };
-
-            streamEvent(res, { type: 'final_answer', content: aiMessageForClient });
             
-            const aiMessageForDb = { ...aiMessageForClient };
+            const accumulatedThoughts = [];
+            const interceptingStreamCallback = (eventData) => {
+                if (eventData.type === 'thought') accumulatedThoughts.push(eventData.content);
+                streamEvent(res, eventData);
+            };
+            
+            const totResult = await processQueryWithToT_Streaming(query.trim(), historyForLlm, requestContext, interceptingStreamCallback);
+            const endTime = Date.now();
+            const cues = await generateCues(totResult.finalAnswer, llmConfig);
+
+            agentResponse = { ...totResult, thinking: accumulatedThoughts.join(''), criticalThinkingCues: cues };
+            
+            // 1. Create Log Entry AFTER getting the final answer
+            const logEntry = new LLMPerformanceLog({
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+            // --- END MODIFICATION (Streaming Path) ---
+
+            // 2. Inject logId into the response object
+            agentResponse.logId = logEntry._id;
+            
+            // ... (rest of the streaming logic remains the same)
+            // 3. Prepare message for DB and save it ONCE.
+            const aiMessageForDb = { 
+                ...agentResponse, 
+                sender: 'bot', 
+                role: 'model', 
+                text: agentResponse.finalAnswer, 
+                parts: [{ text: agentResponse.finalAnswer }], 
+                timestamp: new Date() 
+            };
             delete aiMessageForDb.criticalThinkingCues;
-
-            await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
-            );
-
-            if (totResult.finalAnswer) {
-                extractAndStoreKgFromText(totResult.finalAnswer, sessionId, userId, llmConfig);
+            delete aiMessageForDb.sender;
+            delete aiMessageForDb.text;
+            delete aiMessageForDb.action;
+    
+            await ChatHistory.findOneAndUpdate({ sessionId, userId }, { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } }, { upsert: true });
+            
+            // 4. Trigger KG extraction
+            if (agentResponse.finalAnswer) {
+                extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
             }
-            console.log(`<<< POST /api/chat/message (ToT) successful for Session ${sessionId}.`);
+
+            // 5. Send final event and close stream
+            streamEvent(res, { type: 'final_answer', content: agentResponse });
             res.end();
+
         } else {
-            console.log(`[Chat Route] Diverting to standard Agentic Service.`);
-
-            const agentResponse = await processAgenticRequest(
-                query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext
-            );
-
-            // --- THIS IS THE FIX ---
-            // Prepare the full response object, including any potential action
-            const aiMessageForClient = {
-                sender: 'bot', role: 'model',
-                parts: [{ text: agentResponse.finalAnswer }],
+            // --- Logic for STANDARD JSON response ---
+            const startTime = Date.now(); // Moved start time here
+            agentResponse = await processAgenticRequest(query.trim(), historyForLlm, clientProvidedSystemInstruction, requestContext);
+            const endTime = Date.now();
+            
+            // --- START MODIFICATION (Non-Streaming Path) ---
+            // 1. Create the Performance Log Entry with the response
+            const logEntry = new LLMPerformanceLog({
+                userId, 
+                sessionId, 
+                query: query.trim(), 
+                response: agentResponse.finalAnswer, // <-- THIS IS THE NEW LINE
+                chosenModelId: chosenModel.modelId,
+                routerLogic: routerLogic, 
+                responseTimeMs: endTime - startTime
+            });
+            await logEntry.save();
+            console.log(`[PerformanceLog] Logged decision for session ${sessionId} with logId: ${logEntry._id}.`);
+            // --- END MODIFICATION (Non-Streaming Path) ---
+            
+            // 2. Build the FINAL AI message object for both DB and Client
+            const finalAiMessage = {
+                sender: 'bot',
+                role: 'model',
                 text: agentResponse.finalAnswer,
+                parts: [{ text: agentResponse.finalAnswer }],
                 timestamp: new Date(),
                 thinking: agentResponse.thinking || null,
                 references: agentResponse.references || [],
                 source_pipeline: agentResponse.sourcePipeline,
-                action: agentResponse.action || null // Include the action
+                action: agentResponse.action || null,
+                logId: logEntry._id, // Attach the log ID
+                criticalThinkingCues: await generateCues(agentResponse.finalAnswer, llmConfig)
             };
-
-            // CRITICAL CHECK: If there is an action, save to DB and send the response immediately.
-            if (aiMessageForClient.action) {
-                console.log(`[Chat Route] Action detected: ${aiMessageForClient.action.type}. Sending action payload to client immediately.`);
-                
-                // Save both user message and the AI's action message to the database
-                await ChatHistory.findOneAndUpdate(
-                    { sessionId: sessionId, userId: userId },
-                    { $push: { messages: { $each: [userMessageForDb, aiMessageForClient] } } },
-                    { upsert: true, new: true }
-                );
-                
-                // Return the response with the action, stopping execution here.
-                return res.status(200).json({ reply: aiMessageForClient });
-            }
-            // --- END OF FIX ---
-
-            // If there was NO action, proceed with the normal flow
-            const criticalThinkingCues = await generateCues(agentResponse.finalAnswer, llmConfig);
-            aiMessageForClient.criticalThinkingCues = criticalThinkingCues;
-
-            const aiMessageForDb = { ...aiMessageForClient };
-            delete aiMessageForDb.criticalThinkingCues;
-
+            
+            // 3. Create a clean version for the database (without frontend-specific fields)
+            const messageForDb = { ...finalAiMessage };
+            delete messageForDb.sender;
+            delete messageForDb.text;
+            delete messageForDb.criticalThinkingCues;
+            delete messageForDb.action;
+            
+            // 4. Save to Database ONCE
             await ChatHistory.findOneAndUpdate(
-                { sessionId: sessionId, userId: userId },
-                { $push: { messages: { $each: [userMessageForDb, aiMessageForDb] } } },
-                { upsert: true, new: true }
+                { sessionId, userId },
+                { $push: { messages: { $each: [userMessageForDb, messageForDb] } } },
+                { upsert: true }
             );
 
-            console.log(`<<< POST /api/chat/message (Agentic) successful for Session ${sessionId}.`);
-            res.status(200).json({ reply: aiMessageForClient });
+            // 5. Send final response to client
+            res.status(200).json({ reply: finalAiMessage });
             
+            // 6. Trigger background KG extraction
             if (agentResponse.finalAnswer) {
                 extractAndStoreKgFromText(agentResponse.finalAnswer, sessionId, userId, llmConfig);
             }
         }
+        
+        // --- FIX ---
+        // The redundant, common DB save logic that was here has been removed.
+        // --- END FIX ---
 
     } catch (error) {
         console.error(`!!! Error processing chat message for Session ${sessionId}:`, error);
@@ -231,6 +256,11 @@ router.post('/history', async (req, res) => {
     const userId = req.user._id;
     const newSessionId = uuidv4();
     
+    auditLog(req, 'NEW_CHAT_SESSION_CREATED', {
+        previousSessionId: previousSessionId || null,
+        skipAnalysis: !!skipAnalysis
+    });
+
     // This will hold our final response payload
     const responsePayload = {
         message: 'New session started.',
@@ -341,10 +371,21 @@ router.get('/sessions', async (req, res) => {
 });
 
 router.get('/session/:sessionId', async (req, res) => {
-    try {
+     try {
         const session = await ChatHistory.findOne({ sessionId: req.params.sessionId, userId: req.user._id }).lean();
         if (!session) return res.status(404).json({ message: 'Chat session not found or access denied.' });
-        const messagesForFrontend = (session.messages || []).map(msg => ({ id: msg._id || uuidv4(), sender: msg.role === 'model' ? 'bot' : 'user', text: msg.parts?.[0]?.text || '', thinking: msg.thinking, references: msg.references, timestamp: msg.timestamp, source_pipeline: msg.source_pipeline }));
+
+        const messagesForFrontend = (session.messages || []).map(msg => ({
+            id: msg._id || uuidv4(),
+            sender: msg.role === 'model' ? 'bot' : 'user',
+            text: msg.parts?.[0]?.text || '',
+            thinking: msg.thinking,
+            references: msg.references,
+            timestamp: msg.timestamp,
+            source_pipeline: msg.source_pipeline,
+            logId: msg.logId || null
+        }));
+        
         res.status(200).json({ ...session, messages: messagesForFrontend });
     } catch (error) {
         console.error(`!!! Error fetching chat session ${req.params.sessionId} for user ${req.user._id}:`, error);
@@ -377,6 +418,11 @@ router.delete('/session/:sessionId', async (req, res) => {
 router.post('/analyze-prompt', async (req, res) => {
     const { prompt } = req.body;
     const userId = req.user._id;
+
+    auditLog(req, 'PROMPT_COACH_REQUESTED', {
+        promptLength: prompt ? prompt.length : 0
+    });
+
 
     // --- REVISED VALIDATION ---
     if (!prompt || typeof prompt !== 'string') {

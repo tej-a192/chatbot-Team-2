@@ -20,35 +20,11 @@ function RightPanel({ isChatProcessing }) {
     // --- THIS IS THE NEW STATE FOR THE LIVE KG MODAL ---
     const [isLiveKgModalOpen, setIsLiveKgModalOpen] = useState(false);
 
-    // State for the static document KG modal (no change)
-    const [isKgModalOpen, setIsKgModalOpen] = useState(false);
-    const [kgData, setKgData] = useState(null);
-    const [isLoadingKg, setIsLoadingKg] = useState(false);
 
     const currentSelectedDocFilename = selectedDocumentForAnalysis || selectedSubject || null;
     const isTargetAdminSubject = !!(selectedSubject && currentSelectedDocFilename && selectedSubject === currentSelectedDocFilename);
 
-    const handleVisualizeKg = async () => {
-        if (!currentSelectedDocFilename) return;
-        setIsKgModalOpen(true);
-        setIsLoadingKg(true);
-        setKgData(null);
-        try {
-            const data = await api.getKnowledgeGraph(currentSelectedDocFilename);
-            if(data.error) {
-                toast.error(`KG Error: ${data.error}`);
-                setKgData({ error: data.error });
-            } else {
-                setKgData(data);
-            }
-        } catch (error) {
-            const errorMessage = error.response?.data?.error || "Could not fetch knowledge graph.";
-            toast.error(errorMessage);
-            setKgData({ error: errorMessage });
-        } finally {
-            setIsLoadingKg(false);
-        }
-    };
+   
 
     return (
         <>
@@ -100,9 +76,7 @@ function RightPanel({ isChatProcessing }) {
                                 </div>
                                  <div className="mt-2 space-y-3">
                                     <PodcastGenerator selectedDocumentFilename={currentSelectedDocFilename} />
-                                    <Button onClick={handleVisualizeKg} variant="outline" size="sm" fullWidth isLoading={isLoadingKg} leftIcon={<BrainCircuit size={16} />}>
-                                        Visualize Full Document KG
-                                    </Button>
+                                    
                                 </div>
                             </div>
                         </>
@@ -119,11 +93,6 @@ function RightPanel({ isChatProcessing }) {
                 <div className="h-[70vh]">
                    <RealtimeKgPanel />
                 </div>
-            </Modal>
-
-            {/* --- MODAL FOR STATIC DOCUMENT KG (No change) --- */}
-            <Modal isOpen={isKgModalOpen} onClose={() => setIsKgModalOpen(false)} title={`Full KG: ${currentSelectedDocFilename}`} size="5xl">
-                <KnowledgeGraphViewer graphData={isLoadingKg ? null : kgData} />
             </Modal>
         </>
     );

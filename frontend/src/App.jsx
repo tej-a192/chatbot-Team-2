@@ -22,6 +22,10 @@ import { GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from './components/core/Button.jsx';
 import AcademicIntegrityPage from './components/tools/AcademicIntegrityPage.jsx';
+import LandingPage from './components/landing/LandingPage.jsx';
+import OnboardingFlow from './components/onboarding/OnboardingFlow.jsx';
+import AnalyticsDashboardPage from './components/admin/AnalyticsDashboardPage.jsx';
+
 
 function SessionLoadingModal() {
     return (
@@ -92,7 +96,7 @@ function MainAppLayout({
         <TopNav 
             user={regularUser} 
             onLogout={handleRegularUserLogout} 
-            onNewChat={() => handleNewChat(messages)} // Pass messages to check if current chat is empty
+            onNewChat={handleNewChat}
             onHistoryClick={() => setIsHistoryModalOpen(true)} 
             orchestratorStatus={orchestratorStatus}
             isChatProcessing={isChatProcessing}
@@ -137,6 +141,7 @@ function App() {
         setSessionId: setGlobalSessionId, 
         currentSessionId, 
         isAdminSessionActive,
+        setIsAdminSessionActive,
     } = useAppState();
     const navigate = useNavigate();
     const location = useLocation();
@@ -145,14 +150,18 @@ function App() {
     const [orchestratorStatus, setOrchestratorStatus] = useState({ status: "loading", message: "Connecting..." });
     const [isSessionLoading, setIsSessionLoading] = useState(false);
     const [appStateMessages, setAppStateMessages] = useState([]);
-    const [isCreatingSession, setIsCreatingSession] = useState(false); // The "lock" state
+    const [isCreatingSession, setIsCreatingSession] = useState(false);
+    const [isLoginViewInModal, setIsLoginViewInModal] = useState(true);
+    const [isAwaitingOnboarding, setIsAwaitingOnboarding] = useState(false);
 
-    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => { // <<< MODIFIED: Added skipSessionAnalysis parameter
+    const handleNewChat = useCallback(async (callback, forceNewChat = false, skipSessionAnalysis = false) => {
+
+        const actualCallback = typeof callback === 'function' ? callback : null;
         const messages = appStateMessages;
 
         if (!forceNewChat && messages.length === 0 && currentSessionId) {
             toast('This is already a new chat!', { icon: '✨' });
-            if (callback) callback(currentSessionId);
+            if (actualCallback) currentSessionId(currentSessionId);
             return;
         }
         
@@ -177,7 +186,7 @@ function App() {
                                     <p className="mt-1 text-sm text-text-muted-light dark:text-text-muted-dark">{reason}</p>
                                     <div className="mt-4 flex gap-2">
                                         <Button size="sm" onClick={() => { navigate('/study-plan', { state: { prefilledGoal: topic } }); toast.dismiss(t.id); }}>
-                                            Create Plan for "{topic}"
+                                                                                        Create Plan for "{topic}"
                                         </Button>
                                         <Button size="sm" variant="secondary" onClick={() => toast.dismiss(t.id)}>Dismiss</Button>
                                     </div>
@@ -186,20 +195,22 @@ function App() {
                         </motion.div>
                     ), { id: `study-plan-toast-${topic}`, duration: Infinity });
                 }
-                if (callback) {
-                    // Only show "New chat started!" toast if not explicitly skipping analysis
+                if (actualCallback) {
                     if (!skipSessionAnalysis) {
                          toast.success("New chat started!"); 
                     }
-                    callback(data.newSessionId);
+                    actualCallback(data.newSessionId);
+                } else if (!skipSessionAnalysis) {
+                    // If no callback, but it's a user-initiated new chat, still show the toast.
+                    toast.success("New chat started!");
                 }
             } else {
                 toast.error(data.message || "Could not start new chat session.");
-                if (callback) callback(null);
+                if (actualCallback) actualCallback(null);
             }
         } catch (error) {
             toast.error(`Failed to start new chat: ${error.message}`);
-            if (callback) callback(null);
+            if (actualCallback) actualCallback(null);
         } finally {
             setIsSessionLoading(false);
         }
@@ -215,7 +226,7 @@ function App() {
             setAppStateMessages(Array.isArray(sessionData.messages) ? sessionData.messages : []);
         } catch (error) {
             if (error.response && error.response.status === 404) {
-                console.warn("Stale session ID found in localStorage. It will be replaced.");
+                console.warn("Stale session ID found. It will be replaced.");
                 localStorage.removeItem('aiTutorSessionId');
                 setGlobalSessionId(null);
             } else {
@@ -248,37 +259,64 @@ function App() {
             setAppInitializing(false);
             
             if (regularUserToken && regularUser) {
+                if (regularUser.hasCompletedOnboarding === false) {
+                    setIsAwaitingOnboarding(true);
+                    return;
+                }
+                if (isAwaitingOnboarding) setIsAwaitingOnboarding(false);
+
                 setShowAuthModal(false);
+                document.body.classList.remove('landing-page-body');
+
                 if (location.pathname.startsWith('/admin')) navigate('/', { replace: true });
 
                 const shouldCreateSession = !currentSessionId && !location.pathname.startsWith('/tools') && !location.pathname.startsWith('/study-plan');
                 if (shouldCreateSession && !isCreatingSession) {
                     setIsCreatingSession(true);
-                    console.log("[App.jsx] Lock acquired. Creating initial session...");
-                    await handleNewChat();
+                    await handleNewChat(() => {}, true, true);
                     setIsCreatingSession(false);
-                    console.log("[App.jsx] Initial session created. Lock released.");
                 }
-            } else if (!location.pathname.startsWith('/admin')) {
-                setShowAuthModal(true);
+            } else {
+                 document.body.classList.add('landing-page-body');
             }
         };
         handleAuthAndSession();
     }, [
         regularUserAuthLoading, regularUserToken, regularUser, isAdminSessionActive, 
-        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession
+        currentSessionId, navigate, location.pathname, handleNewChat, isCreatingSession, isAwaitingOnboarding
     ]);
 
     const handleAuthSuccess = (authData) => {
         setShowAuthModal(false);
-        if (authData && !authData.isAdminLogin && authData.token) {
-            // After successful login, we ensure no session ID exists,
-            // which will trigger the useEffect above to create one cleanly.
-            setGlobalSessionId(null); 
+        // --- THIS IS THE FIX (Part 1): Centralize state logic here ---
+        if (authData?.isAdminLogin) {
+            setIsAdminSessionActive(true);
+            // The main useEffect will now handle the navigation
+        } else if (authData?.token) {
+            setGlobalSessionId(null);
             if (authData.email && authData._id) {
-                setRegularUserInAuthContext({ id: authData._id, email: authData.email });
+                const userForContext = {
+                    id: authData._id,
+                    email: authData.email,
+                    username: authData.username,
+                    hasCompletedOnboarding: authData.hasCompletedOnboarding
+                };
+                setRegularUserInAuthContext(userForContext);
+                // The main useEffect will handle onboarding check
             }
         }
+    };
+    
+    const handleOnboardingComplete = () => {
+        if (regularUser) {
+            setRegularUserInAuthContext({ ...regularUser, hasCompletedOnboarding: true });
+        }
+        setIsAwaitingOnboarding(false);
+    };
+
+    const openAuthModal = (isLogin = true) => {
+        setIsLoginViewInModal(isLogin);
+        setShowAuthModal(true);
     };
 
     if (appInitializing) {
@@ -288,34 +326,49 @@ function App() {
             </div>
         );
     }
-
+    
     return (
         <div className="flex flex-col h-screen overflow-hidden font-sans">
             <AnimatePresence>
-                {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={handleAuthSuccess} />}
+                {showAuthModal && (
+                    <AuthModal 
+                        isOpen={showAuthModal} 
+                        onClose={handleAuthSuccess}
+                        initialViewIsLogin={isLoginViewInModal}
+                    />
+                )}
+                {isAwaitingOnboarding && 
+                    <OnboardingFlow onComplete={handleOnboardingComplete} />
+                }
             </AnimatePresence>
+            {/* --- THIS IS THE FIX (Part 2): Restructured Routing --- */}
             <Routes>
-                 <Route path="/tools/code-executor" element={(regularUserToken && regularUser) ? 
-                    <CodeExecutorPage /> : <Navigate to="/" />} 
-                />
-                <Route
-                    path="/study-plan"
-                    element={(regularUserToken && regularUser) ? <StudyPlanPage handleNewChat={handleNewChat} /> : <Navigate to="/" />}
-                />
-                 <Route path="/tools/quiz-generator" element={(regularUserToken && regularUser) ? 
-                    <QuizGeneratorPage /> : <Navigate to="/" />} 
-                />
-                <Route path="/tools/integrity-checker" element={(regularUserToken && regularUser) ?
-                    <AcademicIntegrityPage /> : <Navigate to="/" />}
-                />
-                <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
-                <Route path="/*" element={isAdminSessionActive ? <Navigate to="/admin/dashboard" replace /> : (regularUserToken && regularUser) ? <MainAppLayout 
-                    orchestratorStatus={orchestratorStatus} 
-                    handleNewChat={handleNewChat} 
-                    isSessionLoading={isSessionLoading}
-                    messages={appStateMessages}
-                    setMessages={setAppStateMessages}
-                 /> : null} />
+                {isAdminSessionActive ? (
+                    <>
+                        <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+                        <Route path="/admin/analytics" element={<AdminProtectedRoute><AnalyticsDashboardPage /></AdminProtectedRoute>} />
+                        <Route path="/*" element={<Navigate to="/admin/dashboard" replace />} />
+                    </>
+                ) : regularUserToken && regularUser ? (
+                    <>
+                        <Route path="/tools/code-executor" element={<CodeExecutorPage />} />
+                        <Route path="/study-plan" element={<StudyPlanPage handleNewChat={handleNewChat} />} />
+                        <Route path="/tools/quiz-generator" element={<QuizGeneratorPage />} />
+                        <Route path="/tools/integrity-checker" element={<AcademicIntegrityPage />} />
+                        <Route path="/admin/dashboard" element={<Navigate to="/" replace />} />
+                        <Route path="/*" element={
+                            <MainAppLayout 
+                                orchestratorStatus={orchestratorStatus} 
+                                handleNewChat={handleNewChat} 
+                                isSessionLoading={isSessionLoading}
+                                messages={appStateMessages}
+                                setMessages={setAppStateMessages}
+                              />
+                        } />
+                    </>
+                ) : (
+                    <Route path="/*" element={<LandingPage onLoginClick={openAuthModal} />} />
+                )}
             </Routes>
         </div>
     );

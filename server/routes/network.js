@@ -28,4 +28,10 @@ router.get('/ip', (req, res) => {
     });
 });
 
+//Testing route for Sentry errors
+// url : http://localhost:5001/api/network/debug-sentry-nodejs
+// router.get('/debug-sentry-nodejs', (req, res) => {
+//     throw new Error('Sentry Test Error from Node.js Backend @ ' + new Date().toLocaleTimeString());
+// });
+
 module.exports = router;

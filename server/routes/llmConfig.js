@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
 const { encrypt } = require("../utils/crypto");
+const { auditLog } = require('../utils/logger');
 
 // @route   PUT /api/llm/config
 // @desc    Update user's LLM preferences (provider, key, or URL)
@@ -32,8 +33,9 @@ router.put("/config", async (req, res) => {
 
     // If a new Ollama URL is provided, add it to updates.
     if (typeof ollamaUrl === "string") {
-      updates.ollamaUrl = ollamaUrl.trim();
+      updates.ollamaUrl = ollamaUrl.trim().replace(/\/+$/, "");
     }
+
 
     // If a new Ollama model is provided, add it to updates.
     if (ollamaModel) {
@@ -51,6 +53,14 @@ router.put("/config", async (req, res) => {
     // This will NEVER delete a field that isn't included in the request.
     await User.updateOne({ _id: userId }, { $set: updates });
 
+    const logPayload = {
+        llmProvider: llmProvider || undefined,
+        apiKeyUpdated: !!apiKey,
+        ollamaUrlUpdated: typeof ollamaUrl === 'string',
+        ollamaModelUpdated: !!ollamaModel
+    };
+    auditLog(req, 'USER_CONFIG_UPDATE_SUCCESS', logPayload);
+    
     res.status(200).json({ message: "LLM preferences updated successfully." });
   } catch (error) {
     console.error(`Error updating LLM config for user ${userId}:`, error);

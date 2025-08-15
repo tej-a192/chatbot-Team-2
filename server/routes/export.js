@@ -6,6 +6,7 @@ const User = require('../models/User');
 const AdminDocument = require('../models/AdminDocument');
 const KnowledgeSource = require('../models/KnowledgeSource'); // Import the correct model
 const { decrypt } = require('../utils/crypto'); // For decrypting user's API key
+const { auditLog } = require('../utils/logger');
 
 // All routes here are protected by the authMiddleware applied in server.js
 
@@ -23,6 +24,11 @@ router.post('/podcast', async (req, res) => {
     }
 
     try {
+        auditLog(req, 'TOOL_USAGE_PODCAST_GENERATOR', {
+            sourceDocumentName: sourceDocumentName,
+            podcastOptions: podcastOptions
+        });
+
         let sourceDocumentText = null;
         let apiKeyForRequest = null;
         
@@ -102,6 +108,11 @@ router.post('/podcast', async (req, res) => {
         fileResponse.data.pipe(res);
 
     } catch (error) {
+        auditLog(req, 'TOOL_USAGE_PODCAST_GENERATOR_FAILURE', {
+            sourceDocumentName: sourceDocumentName,
+            podcastOptions: podcastOptions,
+            error: error.message
+        });
         const errorMsg = error.response?.data?.error || error.message || "Failed to generate podcast.";
         console.error(`[Node Export] Error proxying podcast generation: ${errorMsg}`);
         // Ensure we don't try to send headers if the stream has already started

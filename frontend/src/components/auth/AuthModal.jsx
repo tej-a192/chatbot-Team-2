@@ -22,11 +22,11 @@ const getYearOptions = (degree) => {
 };
 
 
-function AuthModal({ isOpen, onClose }) {
+function AuthModal({ isOpen, onClose, initialViewIsLogin }) {
     const { login, signup } = useAuth();
-const { setIsAdminSessionActive, switchLLM: setGlobalLLM, selectedLLM } = useAppState();
+    const { switchLLM: setGlobalLLM, selectedLLM } = useAppState();
 
-const [isLoginView, setIsLoginView] = useState(true);
+    const [isLoginView, setIsLoginView] = useState(initialViewIsLogin);
     const [step, setStep] = useState(1); // For signup pagination
     const [formData, setFormData] = useState({
         email: '',
@@ -41,7 +41,7 @@ const [isLoginView, setIsLoginView] = useState(true);
         degreeType: 'Bachelors',
         branch: 'Computer Science',
         year: '1st Year',
-        learningStyle: 'Visual',
+        learningStyle: 'Reading/Writing',
         currentGoals: ''
     });
 
@@ -54,6 +54,7 @@ const [isLoginView, setIsLoginView] = useState(true);
         if (isOpen) {
             setError('');
             setStep(1); // Reset to first step on open
+            setIsLoginView(initialViewIsLogin); // Respect the initial view prop
             setFormData({ // Reset all form data
                 email: '',
                 password: '',
@@ -67,13 +68,11 @@ const [isLoginView, setIsLoginView] = useState(true);
                 degreeType: 'Bachelors',
                 branch: 'Computer Science',
                 year: '1st Year',
-                learningStyle: 'Visual',
+                learningStyle: 'Reading/Writing',
                 currentGoals: ''
             });
-        } else {
-            setIsLoginView(true);
         }
-    }, [isOpen, selectedLLM]);
+    }, [isOpen, selectedLLM, initialViewIsLogin]);
 
 
 
@@ -187,9 +186,9 @@ const handleBack = () => {
                 <div className={inputWrapperClass}>
                     <Lightbulb className={inputIconClass} />
                     <select name="learningStyle" value={formData.learningStyle} onChange={handleChange} className="input-field !pl-10 !pr-8 py-2.5 text-sm appearance-none text-left" required>
+                        <option>Reading/Writing (detailed text)</option>
                         <option>Visual (diagrams, mind maps)</option>
                         <option>Auditory (podcasts, explanations)</option>
-                        <option>Reading/Writing (detailed text)</option>
                         <option>Kinesthetic (hands-on examples, code)</option>
                     </select>
                     <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted-light dark:text-text-muted-dark" />
@@ -222,9 +221,9 @@ const handleBack = () => {
                     throw new Error("Please enter a valid email address.");
                 }
                 const authDataResponse = await login({ email, password });
+                // --- THIS IS THE FIX: Removed direct state update ---
                 if (authDataResponse.isAdminLogin) {
                     toast.success("Admin login successful!", { id: toastId });
-                    setIsAdminSessionActive(true); 
                     onClose({ isAdminLogin: true });
                 } else {
                     toast.success(authDataResponse.message || 'Login Successful!', { id: toastId });

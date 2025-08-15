@@ -211,24 +211,18 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
         const toastId = toast.loading(`Generating ${docType.toUpperCase()} document...`);
 
         try {
-            const fullMarkdownContent = `## ${title}\n\n**Source Document:** \`${selectedDocumentFilename}\`\n\n---\n\n${analysisContent}`;
+            const fullMarkdownContent = `## ${title}\\n\\n**Source Document:** \`${selectedDocumentFilename}\`\\n\\n---\\n\\n${analysisContent}`;
             
+            // The api.generateDocument function now handles the download.
+            // We just need to call it and await its success or failure.
             const { filename } = await api.generateDocument({
                 markdownContent: fullMarkdownContent,
                 docType: docType,
                 sourceDocumentName: selectedDocumentFilename
             });
             
-            const url = window.URL.createObjectURL(fileBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            link.parentNode.removeChild(link);
-            window.URL.revokeObjectURL(url);
-
-            toast.success(`${docType.toUpperCase()} document downloaded.`, { id: toastId });
+            // The download is triggered inside the API service, so we just show a success toast.
+            toast.success(`Download started for '${filename}'!`, { id: toastId });
 
         } catch (err) {
             toast.error(`Failed to generate document: ${err.message}`, { id: toastId });
@@ -236,6 +230,7 @@ function AnalysisToolRunner({ toolType, title, iconName, selectedDocumentFilenam
             setGeneratingDocType(null);
         }
     };
+
 
     const handleDownloadMindmap = async (format) => {
         if (mindmapViewerRef.current && mindmapViewerRef.current.getSvgElement) {
